@@ -11,6 +11,7 @@ import { IHttpResponse } from '../../src/comm/http/IHttpResponse';
 import { AuthenticationHandlerFactory } from '../../src/auth/AuthenticationHandlerFactory';
 import { RequestHandlerFactory } from '../../src/comm/http/RequestHandlerFactory';
 import { MockAuthenticationHandler } from './__mocks__/servicenow-sdk-mocks';
+import { SessionManager } from '../../src/comm/http/SessionManager';
 
 // Mock getCredentials
 const mockGetCredentials = createGetCredentialsMock();
@@ -50,6 +51,7 @@ describe('BackgroundScriptExecutor - Unit Tests', () => {
 
     beforeEach(async () => {
         jest.clearAllMocks();
+        SessionManager.resetInstance();
 
         mockAuthHandler = new MockAuthenticationHandler();
         mockRequestHandler = new MockRequestHandler();

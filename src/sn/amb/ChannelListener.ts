@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/ban-types */
 
 import { Channel } from "./Channel";
-import { Logger } from"../../util/Logger";
+import { Logger } from "../../util/Logger";
 import { ServerConnection } from "./ServerConnection";
 
 export class ChannelListener{

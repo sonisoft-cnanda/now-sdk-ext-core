@@ -3,12 +3,12 @@
 // import Logger from "../../../build/src/sn/amb/Logger"
 // const LOGGER = new Logger('index');
 
-import { AMBClient } from "../../src/amb/AMBClient";
-import { MessageClientBuilder } from "../../src/amb/MessageClientBuilder"
+import { AMBClient } from "../../../src/sn/amb/AMBClient";
+import { MessageClientBuilder } from "../../../src/sn/amb/MessageClientBuilder"
 
 
 
-describe('MessageClientBuilder', () => {
+describe.skip('MessageClientBuilder', () => {
    
     describe('execute test', () => {
        

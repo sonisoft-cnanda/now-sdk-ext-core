@@ -9,6 +9,7 @@ import { IHttpResponse } from '../../../../src/comm/http/IHttpResponse';
 import { MockAuthenticationHandler, createGetCredentialsMock } from '../../__mocks__/servicenow-sdk-mocks';
 import { AuthenticationHandlerFactory } from '../../../../src/auth/AuthenticationHandlerFactory';
 import { RequestHandlerFactory } from '../../../../src/comm/http/RequestHandlerFactory';
+import { SessionManager } from '../../../../src/comm/http/SessionManager';
 import { ServiceNowInstance, ServiceNowSettingsInstance } from '../../../../src/sn/ServiceNowInstance';
 import { AggregateQuery } from '../../../../src/sn/aggregate/AggregateQuery';
 
@@ -49,6 +50,7 @@ describe('InstanceHealth - Unit Tests', () => {
 
     beforeEach(async () => {
         jest.clearAllMocks();
+        SessionManager.resetInstance();
 
         mockAuthHandler = new MockAuthenticationHandler();
         mockAuthHandler.isLoggedIn = jest.fn().mockReturnValue(true);

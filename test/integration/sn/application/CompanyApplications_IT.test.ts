@@ -1,6 +1,6 @@
 import { ServiceNowInstance, ServiceNowSettingsInstance } from '../../../../src/sn/ServiceNowInstance';
 import { getCredentials } from "@servicenow/sdk-cli/dist/auth/index.js";
-import { SN_SN_INSTANCE_ALIAS } from '../../../test_utils/test_config';
+import { SN_INSTANCE_ALIAS } from '../../../test_utils/test_config';
 
 import {
     CompanyApplications,

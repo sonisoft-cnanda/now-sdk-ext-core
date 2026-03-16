@@ -12,6 +12,7 @@ import { createGetCredentialsMock, MockAuthenticationHandler } from '../../__moc
 import { IHttpResponse } from '../../../../src/comm/http/IHttpResponse';
 import { AuthenticationHandlerFactory } from '../../../../src/auth/AuthenticationHandlerFactory';
 import { RequestHandlerFactory } from '../../../../src/comm/http/RequestHandlerFactory';
+import { SessionManager } from '../../../../src/comm/http/SessionManager';
 
 // Define mock fs functions
 const mockWriteFileSync = jest.fn();
@@ -83,6 +84,7 @@ describe('ScriptSync - Unit Tests', () => {
 
     beforeEach(async () => {
         jest.clearAllMocks();
+        SessionManager.resetInstance();
 
         // Reset fs mock defaults
         mockWriteFileSync.mockImplementation(() => undefined);

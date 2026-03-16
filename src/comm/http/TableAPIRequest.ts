@@ -4,7 +4,7 @@ import { IServiceNowInstance } from "../../sn/IServiceNowInstance";
 import { ServiceNowInstance } from "../../sn/ServiceNowInstance";
 import { HTTPRequest } from "./HTTPRequest";
 import { IHttpResponse } from "./IHttpResponse";
-import { ServiceNowRequest } from "./ServiceNowRequest";
+import { SessionManager } from "./SessionManager";
 
 export class TableAPIRequest{
 
@@ -56,7 +56,7 @@ export class TableAPIRequest{
     }
 
     private async _doRequest<T>(uri:string, httpMethod:string, query: object | null, bodyData:object | null) : Promise<IHttpResponse<T>>{
-        const req:ServiceNowRequest = new ServiceNowRequest(this.snInstance as ServiceNowInstance);
+        const req = SessionManager.getInstance().getRequest(this.snInstance as ServiceNowInstance);
         const request:HTTPRequest = { path: uri, method: httpMethod, headers: this._headers, query: query, body: null, json: bodyData};
         return await req.executeRequest<T>(request);
     }
