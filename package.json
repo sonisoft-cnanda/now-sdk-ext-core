@@ -58,7 +58,7 @@
   "dependencies": {
     "@servicenow/glide": "^26.0.1",
     "@servicenow/sdk": "4.3.0",
-    "@servicenow/sdk-build-core": "4.3.0",
+    "@servicenow/sdk-build-core": "4.4.0",
     "@servicenow/sdk-cli": "4.3.0",
     "@servicenow/sdk-cli-core": "3.0.3",
     "@servicenow/sdk-core": "4.3.0",
