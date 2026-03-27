@@ -111,6 +111,13 @@ describe('SessionManager', () => {
             const req2 = mgr.getRequest(instance2);
             expect(req).toBe(req2);
         });
+
+        it('throws when alias and host are both missing', () => {
+            const instance = new ServiceNowInstance({});
+            const mgr = SessionManager.getInstance();
+
+            expect(() => mgr.getRequest(instance)).toThrow(/alias or host/i);
+        });
     });
 
     describe('getAuthenticatedRequest', () => {

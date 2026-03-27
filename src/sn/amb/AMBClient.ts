@@ -6,7 +6,6 @@ import {Logger} from "../../util/Logger";
 import { ServerConnection } from "./ServerConnection";
 import { ChannelListener } from "./ChannelListener";
 import { ServiceNowInstance } from "../ServiceNowInstance";
-import { ServiceNowRequest } from "../../comm/http/ServiceNowRequest";
 import { SessionManager } from "../../comm/http/SessionManager";
 import { HTTPRequest } from "../../comm/http/HTTPRequest";
 
@@ -20,7 +19,6 @@ export class AMBClient{
     initiatedConnection = false;
     private _instance: ServiceNowInstance | null = null;
     private _authenticated: boolean = false;
-    private _snRequest: ServiceNowRequest | null = null;
 
     constructor(clientSubscriptions:any, instance?: ServiceNowInstance){
         this._logger = new Logger("AMBClient");
@@ -129,7 +127,6 @@ export class AMBClient{
             
             if (cookieString) {
                 this._serverConnection.setSessionCookies(cookieString);
-                this._snRequest = snRequest;
                 this._authenticated = true;
                 this._logger.info("Successfully authenticated and obtained session cookies");
                 this._logger.debug(`Cookies: ${cookieString.substring(0, 100)}...`);
@@ -264,14 +261,6 @@ export class AMBClient{
      */
     public isAuthenticated(): boolean {
         return this._authenticated;
-    }
-
-    /**
-     * Get the authenticated ServiceNowRequest for session-sharing with other components.
-     * Returns the same request instance cached by SessionManager.
-     */
-    public getServiceNowRequest(): ServiceNowRequest | null {
-        return this._snRequest;
     }
 
     getServerConnection() {

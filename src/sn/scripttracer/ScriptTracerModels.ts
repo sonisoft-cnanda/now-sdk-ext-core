@@ -4,7 +4,6 @@ export interface ScriptTracerOptions {
     onTrace?: (statements: TraceStatement[]) => void;
     onConsole?: (message: DebuggerConsoleMessage) => void;
     onDebugMessage?: (message: DebuggerWatcherMessage) => void;
-    timeout?: number;
 }
 
 export interface TraceStatement {

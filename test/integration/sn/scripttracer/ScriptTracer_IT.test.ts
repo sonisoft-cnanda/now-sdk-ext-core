@@ -103,6 +103,7 @@ describe('ScriptTracer Integration', () => {
         const snRequest = SessionManager.getInstance().getRequest(instance);
         const processorReq: HTTPRequest = {
             path: '/incident_list.do',
+            method: 'get',
             headers: { 'Accept': 'text/html' },
             query: { sysparm_limit: '1', sysparm_query: 'active=true' },
             body: null,

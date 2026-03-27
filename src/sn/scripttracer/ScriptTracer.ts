@@ -10,6 +10,7 @@ import {
     ScriptTracerResult,
     ScriptTracerAMBMessage,
     TraceStatement,
+    DebuggerStartResponse,
     DebuggerConsoleMessage,
     DebuggerWatcherMessage,
 } from "./ScriptTracerModels";
@@ -71,7 +72,7 @@ export class ScriptTracer {
                 body: null,
                 json: { token: "" },
             };
-            const debuggerResp = await snRequest.post<DebuggerStartResponseData>(debuggerReq);
+            const debuggerResp = await snRequest.post<DebuggerStartResponse>(debuggerReq);
             this._logger.debug("Debugger started", debuggerResp.bodyObject);
 
             // Step 2: Extract session ID from debugger/start response token
@@ -84,6 +85,12 @@ export class ScriptTracer {
                 const userToken = this._ambClient.getServerConnection().getUserToken();
                 this._sessionId = this.deriveSessionId(userToken);
                 this._logger.warn(`No token in debugger/start response, derived from user token: ${this._sessionId}`);
+            }
+
+            // Guard: session ID must be non-empty before subscribing
+            if (!this._sessionId) {
+                this._state = 'error';
+                throw new Error("Failed to obtain a session ID from debugger/start or user token — cannot subscribe to trace channels");
             }
 
             // Step 3: Start script tracer
@@ -108,7 +115,7 @@ export class ScriptTracer {
             this._state = 'error';
             const err = error as Error;
             this._logger.error(`Failed to start script tracer: ${err.message}`);
-            return { success: false, error: err.message };
+            throw err;
         }
     }
 
@@ -143,7 +150,7 @@ export class ScriptTracer {
             this._state = 'error';
             const err = error as Error;
             this._logger.error(`Failed to stop script tracer: ${err.message}`);
-            return { success: false, error: err.message };
+            throw err;
         }
     }
 
@@ -204,11 +211,4 @@ export class ScriptTracer {
         this._options.onDebugMessage?.(message);
         this._logger.debug("Received debug watcher message");
     }
-}
-
-interface DebuggerStartResponseData {
-    result: {
-        state?: string;
-        token?: string;
-    };
 }

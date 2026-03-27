@@ -33,7 +33,6 @@ function createMockAMBClient(): Partial<AMBClient> {
     return {
         getChannel: jest.fn().mockReturnValue(createMockChannel()),
         getServerConnection: jest.fn().mockReturnValue(serverConnection),
-        getServiceNowRequest: jest.fn().mockReturnValue(null),
     };
 }
 
@@ -245,15 +244,12 @@ describe('ScriptTracer', () => {
             expect(result.sessionId!.length).toBeGreaterThan(0);
         });
 
-        it('returns error on REST failure', async () => {
+        it('throws on REST failure', async () => {
             mockAuthHandler.isLoggedIn = jest.fn().mockReturnValue(true);
             mockRequestHandler.post.mockRejectedValue(new Error('Network error'));
 
             const tracer = new ScriptTracer(mockAMBClient as AMBClient, mockInstance);
-            const result = await tracer.start();
-
-            expect(result.success).toBe(false);
-            expect(result.error).toBeDefined();
+            await expect(tracer.start()).rejects.toThrow('Network error');
             expect(tracer.state).toBe('error');
         });
 

@@ -10,6 +10,7 @@ export class SessionManager {
 
     private static _instance: SessionManager | null = null;
     private _sessions: Map<string, ServiceNowRequest> = new Map();
+    private _authPromises: Map<string, Promise<ServiceNowRequest>> = new Map();
     private _logger: Logger = new Logger("SessionManager");
 
     private constructor() {}
@@ -21,9 +22,7 @@ export class SessionManager {
         return SessionManager._instance;
     }
 
-    /**
-     * Reset singleton (for testing only)
-     */
+    /** @internal Visible for testing only — not exported from index.ts */
     static resetInstance(): void {
         SessionManager._instance = null;
     }
@@ -45,14 +44,34 @@ export class SessionManager {
 
     /**
      * Get or create a ServiceNowRequest and ensure it is authenticated.
+     * Uses an in-flight promise guard to prevent duplicate concurrent auth calls.
      */
     async getAuthenticatedRequest(instance: ServiceNowInstance): Promise<ServiceNowRequest> {
+        const key = this.getKey(instance);
         const request = this.getRequest(instance);
-        if (!request.isLoggedIn()) {
-            this._logger.debug(`Authenticating session for alias: ${this.getKey(instance)}`);
-            await request.getUserSession();
+
+        if (request.isLoggedIn()) {
+            return request;
         }
-        return request;
+
+        // Guard against concurrent callers both triggering auth
+        const existing = this._authPromises.get(key);
+        if (existing) {
+            return existing;
+        }
+
+        const authPromise = (async () => {
+            try {
+                this._logger.debug(`Authenticating session for alias: ${key}`);
+                await request.getUserSession();
+                return request;
+            } finally {
+                this._authPromises.delete(key);
+            }
+        })();
+
+        this._authPromises.set(key, authPromise);
+        return authPromise;
     }
 
     /**
@@ -79,6 +98,10 @@ export class SessionManager {
     }
 
     private getKey(instance: ServiceNowInstance): string {
-        return instance.getAlias() ?? instance.getHost() ?? 'default';
+        const key = instance.getAlias() ?? instance.getHost();
+        if (!key) {
+            throw new Error("ServiceNowInstance must have an alias or host to identify the session");
+        }
+        return key;
     }
 }
