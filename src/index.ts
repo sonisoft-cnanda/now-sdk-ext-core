@@ -30,6 +30,7 @@ export * from './comm/http/RequestHandlerFactory.js';
 export * from './comm/http/ServiceNowProcessorRequest.js';
 export * from './comm/http/ServiceNowRequest.js';
 // SessionManager is internal — use via ServiceNowRequest or AMBClient
+export * from './comm/http/ActiveSessionRegistry.js';
 export * from './comm/http/TableAPIRequest.js';
 export * from './comm/ws/ATFMessageHandler.js';
 export * from './sn/aggregate/AggregateModels.js';

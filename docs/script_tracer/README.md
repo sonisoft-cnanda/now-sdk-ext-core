@@ -92,3 +92,31 @@ const req = SessionManager.getInstance().getRequest(instance);
 // Ensure authenticated before making calls
 const authReq = await SessionManager.getInstance().getAuthenticatedRequest(instance);
 ```
+
+## Using with ActiveSessionRegistry (MCP / CLI)
+
+Script tracing is a multi-step workflow: start tracing, execute operations, collect results, stop tracing. Since MCP tools and CLI commands are stateless between invocations, the `ActiveSessionRegistry` provides a unique session ID that callers pass back on subsequent operations.
+
+```typescript
+import { ActiveSessionRegistry } from '@sonisoft/now-sdk-ext-core';
+
+// Start: create tracer, register session, return ID to caller
+const registry = ActiveSessionRegistry.getInstance();
+const sessionId = registry.createSession({
+    type: 'script-tracer',
+    instanceAlias: 'dev01',
+    resources: { scriptTracer: tracer, ambClient: ambClient },
+    ttlMs: 30 * 60 * 1000,
+});
+
+// Later: caller passes sessionId back to retrieve the tracer
+const tracer = registry.getResource<ScriptTracer>(sessionId, 'scriptTracer');
+console.log(tracer.traceStatements);
+
+// Cleanup
+await tracer.stop();
+ambClient.disconnect();
+registry.destroySession(sessionId);
+```
+
+See [ActiveSessionRegistry documentation](../ActiveSessionRegistry.md) for the full MCP and CLI implementation guide.
