@@ -45,6 +45,7 @@
     "watch-test:integration": "npm run test:integration -- --watchAll",
     "watch-ts": "tsc -w",
     "watch": "concurrently -k -p \"[{name}]\" -n \"TypeScript,Node\" -c \"yellow.bold,cyan.bold,green.bold\" \"npm run watch-sass\" \"npm run watch-ts\" \"npm run watch-node\"",
+    "export-update-set": "node dist/cli/export-update-set.js",
     "prepare": "git config core.hooksPath .githooks && sh scripts/setup-gitleaks.sh"
   },
   "publishConfig": {
