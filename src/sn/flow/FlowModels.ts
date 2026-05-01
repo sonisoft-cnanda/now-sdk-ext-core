@@ -329,7 +329,7 @@ export interface ProcessFlowApiResponse {
     result: {
         data: unknown;
         /** Some processflow endpoints (e.g. action/action_types) return their payload under `outputs` instead of `data`. */
-        outputs?: unknown;
+        steps?: unknown;
         errorMessage: string;
         errorCode: number;
         integrationsPluginActive: boolean;

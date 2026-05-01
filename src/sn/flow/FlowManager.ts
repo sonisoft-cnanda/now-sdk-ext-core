@@ -510,7 +510,7 @@ export class FlowManager {
 
         try {
             const response = await pfr.get<ProcessFlowApiResponse>(
-                'action/action_types/{action_sys_id}',
+                'action/action_types/{action_sys_id}/step_instances',
                 { action_sys_id: actionSysId },
                 query
             );
@@ -525,7 +525,7 @@ export class FlowManager {
                 };
             }
 
-            const action = apiResult.outputs as Record<string, unknown> | unknown[];
+            const action = apiResult.steps as Record<string, unknown> | unknown[];
             if (action == null || (typeof action !== 'object')) {
                 return {
                     success: false,
