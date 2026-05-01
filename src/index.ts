@@ -19,22 +19,17 @@ export * from './util/AppUtil.js';
 export * from './util/CSRFTokenHelper.js';
 export * from './util/Logger.js';
 export * from './util/NowStringUtil.js';
-export * from './comm/http/ActiveSessionRegistry.js';
 export * from './comm/http/HTTPRequest.js';
 export * from './comm/http/HttpResponse.js';
 export * from './comm/http/ICookieStore.js';
 export * from './comm/http/IHttpResponse.js';
 export * from './comm/http/IRequestHandler.js';
+export * from './comm/http/ProcessFlowRequest.js';
 export * from './comm/http/RequestHandler.js';
 export * from './comm/http/RequestHandlerFactory.js';
 export * from './comm/http/ServiceNowProcessorRequest.js';
 export * from './comm/http/ServiceNowRequest.js';
-<<<<<<< Updated upstream
-=======
-export * from './comm/http/SessionManager.js';
->>>>>>> Stashed changes
 export * from './comm/http/TableAPIRequest.js';
-export * from './comm/http/ProcessFlowRequest.js';
 export * from './comm/ws/ATFMessageHandler.js';
 export * from './sn/aggregate/AggregateModels.js';
 export * from './sn/aggregate/AggregateQuery.js';
