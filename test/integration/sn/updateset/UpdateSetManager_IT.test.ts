@@ -381,4 +381,28 @@ describe('UpdateSetManager - Integration Tests', () => {
             }
         }, 120 * SECONDS);
     });
+
+    describe('exportUpdateSet', () => {
+        it('should throw when update set sys_id is missing', async () => {
+            await expect(updateSetManager.exportUpdateSet('')).rejects.toThrow('Update set sys_id is required');
+            await expect(updateSetManager.exportUpdateSet('   ')).rejects.toThrow('Update set sys_id is required');
+        });
+
+        it('should return XML for an update set export', async () => {
+            const timestamp = new Date().toISOString();
+            const testName = `[IT_TEST] Export ${timestamp}`;
+            const created: UpdateSetRecord = await updateSetManager.createUpdateSet({
+                name: testName,
+                description: 'Integration test for exportUpdateSet - safe to delete'
+            });
+            createdSysIds.push(created.sys_id);
+
+            const xml: string = await updateSetManager.exportUpdateSet(created.sys_id);
+
+            expect(typeof xml).toBe('string');
+            expect(xml.length).toBeGreaterThan(0);
+            // ServiceNow update set XML is typically a UTF-8 XML unload document
+            expect(xml).toMatch(/<\?xml|<unload/i);
+        }, 120 * SECONDS);
+    });
 });

@@ -1,9 +1,11 @@
 import { ServiceNowInstance } from "../ServiceNowInstance";
 import { Logger } from "../../util/Logger";
+import { CSRFTokenHelper } from "../../util/CSRFTokenHelper";
 import { ServiceNowRequest } from "../../comm/http/ServiceNowRequest";
 import { TableAPIRequest } from "../../comm/http/TableAPIRequest";
 import { HTTPRequest } from "../../comm/http/HTTPRequest";
 import { IHttpResponse } from "../../comm/http/IHttpResponse";
+import { BackgroundScriptExecutor } from "../BackgroundScriptExecutor";
 import {
     SetUpdateSetOptions,
     ListUpdateSetsOptions,
@@ -31,6 +33,8 @@ export class UpdateSetManager {
     private static readonly UI_CONCOURSEPICKER_CURRENT_PATH = '/api/now/ui/concoursepicker/current';
     private static readonly UPDATE_SET_TABLE = 'sys_update_set';
     private static readonly UPDATE_XML_TABLE = 'sys_update_xml';
+    private static readonly UPDATE_SET_EXPORT_PATH = '/export_base_update_set.do';
+    private static readonly UPLOAD_DO_PATH = '/upload.do';
 
     private _logger: Logger = new Logger("UpdateSetManager");
     private _req: ServiceNowRequest;
@@ -378,10 +382,10 @@ export class UpdateSetManager {
         };
 
         if (sourceSet.description) {
-            newSetBody.description = sourceSet.description as string;
+            newSetBody.description = sourceSet.description;
         }
         if (sourceSet.application) {
-            newSetBody.application = sourceSet.application as string;
+            newSetBody.application = sourceSet.application;
         }
 
         const createResp: IHttpResponse<UpdateSetSingleResponse> = await this._tableAPI.post<UpdateSetSingleResponse>(
@@ -506,7 +510,7 @@ export class UpdateSetManager {
             if (!typeGroups.has(type)) {
                 typeGroups.set(type, []);
             }
-            typeGroups.get(type)!.push(record.target_name || record.name || record.sys_id);
+            typeGroups.get(type).push(record.target_name || record.name || record.sys_id);
         }
 
         const components = Array.from(typeGroups.entries()).map(([type, items]) => ({
@@ -527,5 +531,98 @@ export class UpdateSetManager {
             totalRecords: records.length,
             components
         };
+    }
+
+    public async exportUpdateSet(updateSetSysId: string): Promise<string> {
+        if (!updateSetSysId || updateSetSysId.trim().length === 0) {
+            throw new Error('Update set sys_id is required');
+        }
+
+        this._logger.info(`Exporting update set: ${updateSetSysId}`);
+
+        // Step 1: Get CSRF token
+        const csrfToken = await this._getUploadCSRFToken();
+        if (!csrfToken) {
+            throw new Error(
+                'Failed to obtain CSRF token from /upload.do. ' +
+                'This may indicate an authentication failure or insufficient permissions.'
+            );
+        }
+
+        const backgroundScriptExecutor = new BackgroundScriptExecutor(this._instance, 'global');
+
+        const script = `
+            var updateSet = new GlideRecord('sys_update_set');
+            updateSet.get('${updateSetSysId}');
+            if (updateSet.isValidRecord()) {
+                var util = new UpdateSetExport();
+                var exportID = util.exportHierarchy(updateSet);
+                gs.print(exportID);
+            }
+        `;
+
+        const result = await backgroundScriptExecutor.executeScript(script, 'global', this._instance);
+
+        if (result.scriptResults.length === 0) {
+            throw new Error(
+                'Failed to export update set: background script produced no output lines. ' +
+                `rawResult length: ${result.rawResult.length}`
+            );
+        }
+
+        // gs.print output may include HTML (e.g. <BR/>) from the script runner UI
+        const rawLine = result.scriptResults[0].line.trim();
+        const idMatch = rawLine.match(/[0-9a-f]{32}/i);
+        if (!idMatch) {
+            throw new Error(`Invalid export ID: ${rawLine}`);
+        }
+        const exportID = idMatch[0];
+
+        const exportRequest: HTTPRequest = {
+            path: UpdateSetManager.UPDATE_SET_EXPORT_PATH,
+            headers: { Accept: 'application/xml, text/xml, */*' },
+            query: {
+                sysparm_sys_id: `${exportID}`,
+                sysparm_ck: csrfToken,
+                sysparm_delete_when_done: true,
+                sysparm_is_remote: false
+            },
+            body: null
+        };
+
+        const response: IHttpResponse<string> = await this._req.get<string>(exportRequest);
+
+        if (response.status !== 200 || response.data === null || response.data === undefined) {
+            throw new Error(`Failed to download exported update set XML. Status: ${response.status}`);
+        }
+
+        if (typeof response.data !== 'string') {
+            throw new Error('Export response was not XML text');
+        }
+
+        return response.data;
+    }
+
+    /**
+     * Fetch the CSRF token from /upload.do by parsing the sysparm_ck hidden input.
+     */
+    private async _getUploadCSRFToken(): Promise<string | null> {
+        const request: HTTPRequest = {
+            path: UpdateSetManager.UPLOAD_DO_PATH,
+            headers: null,
+            query: null,
+            body: null
+        };
+
+        const response: IHttpResponse<string> = await this._req.get<string>(request);
+
+        if (response.status === 200 && response.data) {
+            const token = CSRFTokenHelper.extractCSRFToken(response.data);
+            this._logger.debug('CSRF token received for update set export', { token });
+            return token;
+        }
+
+        this._logger.error('Failed to fetch CSRF token from /upload.do', { status: response.status });
+        return null;
     }
 }

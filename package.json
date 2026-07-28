@@ -41,6 +41,7 @@
     "watch-test": "npm run test:unit -- --watchAll",
     "watch-test:integration": "npm run test:integration -- --watchAll",
     "watch-ts": "tsc -w",
+    "export-update-set": "node dist/cli/export-update-set.js",
     "prepare": "git config core.hooksPath .githooks && sh scripts/setup-gitleaks.sh"
   },
   "publishConfig": {
@@ -65,6 +66,7 @@
     "cometd": "^9.0.0",
     "cometd-nodejs-client": "^2.0.0",
     "crypto-js": "4.2.0",
+    "dotenv": "^17.4.2",
     "fast-xml-parser": "^4.5.4",
     "get-installed-path": "^4.0.8",
     "json5": "^2.2.3",
@@ -108,7 +110,6 @@
     "create-ts-index": "^1.14.0",
     "ctix": "^2.6.4",
     "diff": "^8.0.3",
-    "dotenv": "^17.4.2",
     "eslint": "^8.57.0",
     "glob": "^11.0.0",
     "globals": "^15.9.0",

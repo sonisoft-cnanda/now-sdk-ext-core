@@ -21,6 +21,7 @@ import {
     TestFlowOptions,
     FlowTestResult,
     FlowDefinitionResult,
+    FlowActionResult,
     ProcessFlowApiResponse,
     ProcessFlowTestPayload,
     CopyFlowOptions,
@@ -488,6 +489,68 @@ export class FlowManager {
     }
 
     /**
+     * Fetch flow action (action type) data from the ProcessFlow REST API.
+     *
+     * Calls `GET /api/now/processflow/action/action_type/{action_sys_id}` to retrieve
+     * action type metadata used by Flow Designer.
+     *
+     * @param actionSysId The sys_id of the action (action type) to fetch
+     * @param scope Optional scope sys_id for the transaction scope query parameter
+     * @returns FlowActionResult containing the raw action data
+     */
+    public async getFlowActions(actionSysId: string, scope?: string): Promise<FlowActionResult> {
+        if (!actionSysId || actionSysId.trim().length === 0) {
+            throw new Error('Action sys_id is required');
+        }
+
+        this._logger.info(`Fetching flow action: ${actionSysId}`);
+
+        const pfr = new ProcessFlowRequest(this._instance);
+        const query = scope ? { sysparm_transaction_scope: scope } : undefined;
+
+        try {
+            const response = await pfr.get<ProcessFlowApiResponse>(
+                'action/action_types/{action_sys_id}/step_instances',
+                { action_sys_id: actionSysId },
+                query
+            );
+
+            const apiResult = this._extractProcessFlowResult(response);
+
+            if ((apiResult.errorCode != null && apiResult.errorCode !== 0) || (apiResult.errorCode == null && apiResult.errorMessage)) {
+                return {
+                    success: false,
+                    errorMessage: apiResult.errorMessage || 'Unknown error from processflow API',
+                    rawResponse: apiResult
+                };
+            }
+
+            const action = apiResult.steps as Record<string, unknown> | unknown[];
+            if (action == null || (typeof action !== 'object')) {
+                return {
+                    success: false,
+                    errorMessage: 'ProcessFlow API returned no action data',
+                    rawResponse: apiResult
+                };
+            }
+
+            this._logger.info(`Flow action fetched: ${actionSysId}`);
+            return {
+                success: true,
+                action,
+                rawResponse: apiResult
+            };
+        } catch (error) {
+            const err = error as Error;
+            this._logger.error(`Error fetching flow action "${actionSysId}": ${err.message}`);
+            return {
+                success: false,
+                errorMessage: `Failed to fetch flow action: ${err.message}`
+            };
+        }
+    }
+
+    /**
      * Test a flow as if running it from Flow Designer, without requiring it to be published.
      *
      * This uses the ProcessFlow REST API (`POST /api/now/processflow/flow/{id}/test`)
@@ -832,7 +895,7 @@ export class FlowManager {
         return {
             flowId: String(raw.flowId ?? ''),
             name: String(raw.name ?? ''),
-            state: String(raw.state ?? '') as FlowContextInfo['state'],
+            state: String(raw.state ?? ''),
             runTime: String(raw.runTime ?? ''),
             isTestRun: raw.isTestRun === true,
             executedAs: String(raw.executedAs ?? ''),

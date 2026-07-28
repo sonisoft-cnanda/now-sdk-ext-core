@@ -3,7 +3,7 @@ import { getCredentials } from "@servicenow/sdk-cli/dist/auth/index.js";
 import { SN_INSTANCE_ALIAS } from '../../../test_utils/test_config';
 
 import { FlowManager } from '../../../../src/sn/flow/FlowManager';
-import { FlowExecutionResult, FlowContextStatusResult, FlowPublishResult, FlowDefinitionResult, FlowTestResult, FlowCopyResult, FlowContextDetailsResult, FlowLogResult } from '../../../../src/sn/flow/FlowModels';
+import { FlowExecutionResult, FlowContextStatusResult, FlowPublishResult, FlowDefinitionResult, FlowActionResult, FlowTestResult, FlowCopyResult, FlowContextDetailsResult, FlowLogResult } from '../../../../src/sn/flow/FlowModels';
 
 const SECONDS = 1000;
 
@@ -454,6 +454,94 @@ describe('FlowManager - Integration Tests', () => {
 
             // The API may return an error or empty data
             expect(result.success).toBe(false);
+        }, 120 * SECONDS);
+    });
+
+    // ============================================================
+    // getFlowActions (ProcessFlow REST API)
+    // ============================================================
+
+    describe('getFlowActions', () => {
+        // Known flow on <dev_instance>: "Copy of Change - Standard"
+        // Used to discover an action_type sys_id from its actionInstances.
+        const KNOWN_FLOW_SYS_ID = process.env.TEST_FLOW_SYS_ID || '887dda5583237210fdb8f7b6feaad32c';
+        // Optional explicit action_type sys_id override
+        const KNOWN_ACTION_SYS_ID = process.env.TEST_ACTION_SYS_ID;
+        // Scope passed as sysparm_transaction_scope; override via TEST_SCOPE env var
+        const KNOWN_SCOPE = process.env.TEST_SCOPE || 'global';
+
+        it('should fetch a flow action by sys_id', async () => {
+            // Resolve an action_type sys_id either from env or by inspecting a known flow definition
+            let actionSysId = KNOWN_ACTION_SYS_ID;
+            if (!actionSysId) {
+                const defResult = await flowMgr.getFlowDefinition(KNOWN_FLOW_SYS_ID);
+                expect(defResult.success).toBe(true);
+
+                const actionInstances = (defResult.definition?.actionInstances as Array<Record<string, any>>) || [];
+                const firstActionType = actionInstances.find(ai => ai?.actionType?.id)?.actionType?.id;
+                expect(firstActionType).toBeDefined();
+                actionSysId = firstActionType as string;
+            }
+
+            console.log('\n=== getFlowActions (resolving action_type sys_id) ===');
+            console.log('Action SysId:', actionSysId);
+
+            const result: FlowActionResult = await flowMgr.getFlowActions(actionSysId!);
+
+            console.log('Success:', result.success);
+            if (Array.isArray(result.action)) {
+                console.log('Action (array length):', result.action.length);
+            } else {
+                console.log('Action name:', (result.action as Record<string, unknown>)?.name);
+                console.log('Action label:', (result.action as Record<string, unknown>)?.label);
+            }
+
+            expect(result.success).toBe(true);
+            expect(result.action).toBeDefined();
+            expect(typeof result.action).toBe('object');
+        }, 120 * SECONDS);
+
+        it('should reject empty action sys_id', async () => {
+            await expect(flowMgr.getFlowActions('')).rejects.toThrow('Action sys_id is required');
+            await expect(flowMgr.getFlowActions('   ')).rejects.toThrow('Action sys_id is required');
+        }, 60 * SECONDS);
+
+        it('should handle non-existent action sys_id', async () => {
+            const result: FlowActionResult = await flowMgr.getFlowActions(
+                '00000000000000000000000000000000'
+            );
+
+            console.log('\n=== getFlowActions (non-existent) ===');
+            console.log('Success:', result.success);
+            console.log('Error:', result.errorMessage);
+
+            // The API may return an error or empty data
+            expect(result.success).toBe(false);
+            expect(result.errorMessage).toBeDefined();
+        }, 120 * SECONDS);
+
+        it('should pass scope as transaction scope query param', async () => {
+            // Smoke test: passing a scope (defaults to 'global', overridable via TEST_SCOPE)
+            // should not break the call.
+            let actionSysId = KNOWN_ACTION_SYS_ID;
+            if (!actionSysId) {
+                const defResult = await flowMgr.getFlowDefinition(KNOWN_FLOW_SYS_ID);
+                const actionInstances = (defResult.definition?.actionInstances as Array<Record<string, any>>) || [];
+                actionSysId = actionInstances.find(ai => ai?.actionType?.id)?.actionType?.id as string | undefined;
+            }
+            if (!actionSysId) {
+                console.warn('Skipping scoped getFlowActions test: no action_type sys_id available');
+                return;
+            }
+
+            const result: FlowActionResult = await flowMgr.getFlowActions(actionSysId, KNOWN_SCOPE);
+
+            console.log('\n=== getFlowActions (with scope) ===');
+            console.log('Scope:', KNOWN_SCOPE);
+            console.log('Success:', result.success);
+
+            expect(result.success).toBe(true);
+            expect(result.action).toBeDefined();
         }, 120 * SECONDS);
     });
 

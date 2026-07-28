@@ -8,6 +8,7 @@
       "project": "./tsconfig.json",
       "exclude": [
         "assets",
+        "cli",
         "types"
       ],
       "exportFilename": "index.ts",

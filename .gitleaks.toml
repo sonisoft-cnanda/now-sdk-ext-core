@@ -15,4 +15,16 @@ paths = [
     '''coverage''',
     '''\.bin''',
     '''package-lock\.json''',
+    # Local Winston output. Gitignored and never committed, but `gitleaks dir`
+    # walks the filesystem rather than the git index, so without this entry a
+    # local run drowns in ~105 findings from logs/app-*.log and buries anything
+    # real. Does not affect `gitleaks git`, which only sees committed content.
+    '''^logs/''',
+]
+
+# Synthetic placeholder values used as jest fixtures. Scoped to the exact
+# literal rather than allowlisting test/ wholesale, so a genuine secret
+# committed to a test file is still caught.
+regexes = [
+    '''ABCDEF1234567890ABCDEF1234567890''',
 ]

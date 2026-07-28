@@ -303,6 +303,24 @@ export interface FlowDefinitionResult {
     rawResponse?: unknown;
 }
 
+/** Result from fetching a flow action (action type) via the ProcessFlow REST API. */
+export interface FlowActionResult {
+    /** Whether the fetch completed successfully */
+    success: boolean;
+
+    /**
+     * The raw action data as returned by the processflow API.
+     * May be a single action type object or an array, depending on the endpoint.
+     */
+    action?: Record<string, unknown> | unknown[];
+
+    /** Error message if the fetch failed */
+    errorMessage?: string;
+
+    /** The raw API response for advanced inspection */
+    rawResponse?: unknown;
+}
+
 /**
  * Shape of the processflow API response wrapper.
  * @internal
@@ -310,6 +328,8 @@ export interface FlowDefinitionResult {
 export interface ProcessFlowApiResponse {
     result: {
         data: unknown;
+        /** Some processflow endpoints (e.g. action/action_types) return their payload under `outputs` instead of `data`. */
+        steps?: unknown;
         errorMessage: string;
         errorCode: number;
         integrationsPluginActive: boolean;
