@@ -124,7 +124,7 @@ describe('TableAPIRequest Integration Tests', () => {
                 urgency: '3',
                 impact: '3'
             };
-            const resp: IHttpResponse<any> = await tableAPI.post('incident', {}, JSON.stringify(body));
+            const resp: IHttpResponse<any> = await tableAPI.post('incident', {}, body);
 
             console.log('\n=== TableAPI POST incident response ===');
             console.log('Status:', resp.status);
@@ -149,7 +149,7 @@ describe('TableAPIRequest Integration Tests', () => {
                 urgency: '3',
                 impact: '3'
             };
-            const createResp: IHttpResponse<any> = await tableAPI.post('incident', {}, JSON.stringify(createBody));
+            const createResp: IHttpResponse<any> = await tableAPI.post('incident', {}, createBody);
             createdSysId = createResp.bodyObject.result.sys_id;
 
             // Now update it
@@ -157,7 +157,7 @@ describe('TableAPIRequest Integration Tests', () => {
                 short_description: `[TEST] PUT test UPDATED - ${new Date().toISOString()}`,
                 urgency: '2'
             };
-            const resp: IHttpResponse<any> = await tableAPI.put('incident', createdSysId, JSON.stringify(updateBody));
+            const resp: IHttpResponse<any> = await tableAPI.put('incident', createdSysId, updateBody);
 
             console.log('\n=== TableAPI PUT incident response ===');
             console.log('Status:', resp.status);
@@ -180,12 +180,12 @@ describe('TableAPIRequest Integration Tests', () => {
                 urgency: '3',
                 impact: '3'
             };
-            const createResp: IHttpResponse<any> = await tableAPI.post('incident', {}, JSON.stringify(createBody));
+            const createResp: IHttpResponse<any> = await tableAPI.post('incident', {}, createBody);
             createdSysId = createResp.bodyObject.result.sys_id;
 
             // Now patch it
             const patchBody = { urgency: '1' };
-            const resp: IHttpResponse<any> = await tableAPI.patch('incident', createdSysId, JSON.stringify(patchBody));
+            const resp: IHttpResponse<any> = await tableAPI.patch('incident', createdSysId, patchBody);
 
             console.log('\n=== TableAPI PATCH incident response ===');
             console.log('Status:', resp.status);

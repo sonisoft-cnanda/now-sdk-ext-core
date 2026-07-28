@@ -10,6 +10,7 @@ import { BatchOperations } from '../../../../src/sn/batch/BatchOperations';
 import { IHttpResponse } from '../../../../src/comm/http/IHttpResponse';
 import { AuthenticationHandlerFactory } from '../../../../src/auth/AuthenticationHandlerFactory';
 import { RequestHandlerFactory } from '../../../../src/comm/http/RequestHandlerFactory';
+import { SessionManager } from '../../../../src/comm/http/SessionManager';
 
 // Mock getCredentials
 const mockGetCredentials = createGetCredentialsMock();
@@ -79,6 +80,7 @@ describe('BatchOperations - Unit Tests', () => {
 
     beforeEach(async () => {
         jest.clearAllMocks();
+        SessionManager.resetInstance();
 
         mockAuthHandler = new MockAuthenticationHandler();
         mockRequestHandler = new MockRequestHandler();

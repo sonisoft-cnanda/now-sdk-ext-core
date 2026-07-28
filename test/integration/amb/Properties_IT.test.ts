@@ -19,3 +19,7 @@
 // 		expect(properties.overlayStyle).toBe('');
 // 	});
 // });
+
+describe.skip('Properties - legacy test, broken imports', () => {
+	it.skip('placeholder', () => {});
+});

@@ -10,6 +10,7 @@ import { MockAuthenticationHandler } from '../../__mocks__/servicenow-sdk-mocks'
 import { AuthenticationHandlerFactory } from '../../../../src/auth/AuthenticationHandlerFactory';
 import { RequestHandlerFactory } from '../../../../src/comm/http/RequestHandlerFactory';
 import { ServiceNowInstance } from '../../../../src/sn/ServiceNowInstance';
+import { SessionManager } from '../../../../src/comm/http/SessionManager';
 
 // Mock factories
 jest.mock('../../../../src/auth/AuthenticationHandlerFactory');
@@ -40,6 +41,7 @@ describe('TableAPIRequest', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        SessionManager.resetInstance();
 
         mockAuthHandler = new MockAuthenticationHandler();
         mockRequestHandler = new MockRequestHandler();

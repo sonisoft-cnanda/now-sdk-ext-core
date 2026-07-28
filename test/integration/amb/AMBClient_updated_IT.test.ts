@@ -12,7 +12,7 @@ import { AMBClient } from "../../../src/sn/amb/AMBClient";
 import { ServiceNowInstance, ServiceNowSettingsInstance } from "../../../src/sn/ServiceNowInstance";
 import { getCredentials } from "@servicenow/sdk-cli/dist/auth/index.js";
 import { TableAPIRequest } from "../../../src/comm/http/TableAPIRequest";
-import { SN_SN_INSTANCE_ALIAS } from '../../test_utils/test_config';
+import { SN_INSTANCE_ALIAS } from '../../test_utils/test_config';
 
 const { window } = new JSDOM();
 

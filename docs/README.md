@@ -163,6 +163,8 @@ try {
 - [Application Manager](./ApplicationManager.md) - Application management and validation
 - [App Repository](./AppRepoApplication.md) - Repository install and publish operations
 - [ATF Test Executor](./ATFTestExecutor.md) - Automated test execution
+- [Script Tracer](./script_tracer/README.md) - Real-time server-side script tracing
+- [ActiveSessionRegistry](./ActiveSessionRegistry.md) - Stateful workflow sessions for MCP and CLI
 - [API Reference](./APIReference.md) - Complete API documentation
 - [Examples & Recipes](./Examples.md) - Common use cases and patterns
 

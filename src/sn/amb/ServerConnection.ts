@@ -109,7 +109,7 @@ export class ServerConnection {
 		}
 
 		if (!this._sessionCookies) {
-			throw new Error("Session cookies not configured. Call setSessionCookies() before connecting.");
+			throw new Error("Session cookies not configured. Call AMBClient.authenticate() before connect().");
 		}
 		const cookieHeader = this._sessionCookies;
 
@@ -157,18 +157,26 @@ export class ServerConnection {
 		return  this.getBaseUrl() + "/" + ambServletPath;
 	}
 
-	public getBaseUrl():string{
+	public getBaseUrl(): string {
 		if (!this._instanceUrl) {
-			throw new Error("Instance URL not configured. Call setInstanceUrl() before connecting.");
+			throw new Error("Instance URL not configured. Call AMBClient.authenticate() before connect().");
 		}
 		return this._instanceUrl;
 	}
 
-	public getUserToken():string{
+	public getUserToken(): string {
 		if (!this._userToken) {
-			throw new Error("User token not configured. Call setUserToken() before connecting.");
+			throw new Error("User token not configured. Call AMBClient.authenticate() before connect().");
 		}
 		return this._userToken;
+	}
+
+	public getSessionCookies(): string | null {
+		return this._sessionCookies;
+	}
+
+	public getInstanceUrl(): string | null {
+		return this._instanceUrl;
 	}
 
 

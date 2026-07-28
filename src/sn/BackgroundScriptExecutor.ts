@@ -16,6 +16,7 @@ import { IHttpResponse } from "../comm/http/IHttpResponse";
 import { isNil } from "../util/utils";
 import { CSRFTokenHelper } from "../util/CSRFTokenHelper";
 import { TableAPIRequest } from "../comm/http/TableAPIRequest";
+import { SessionManager } from "../comm/http/SessionManager";
 
 
 export class BackgroundScriptExecutor {
@@ -31,7 +32,7 @@ export class BackgroundScriptExecutor {
        
             this.instance = instance;
             this.scope = scope;
-            this.snRequest = new ServiceNowRequest(this.instance);
+            this.snRequest = SessionManager.getInstance().getRequest(this.instance);
             this._tableAPI = new TableAPIRequest(this.instance);
     }
 

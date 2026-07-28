@@ -6,7 +6,7 @@ import {Logger} from "../../util/Logger";
 import { ServerConnection } from "./ServerConnection";
 import { ChannelListener } from "./ChannelListener";
 import { ServiceNowInstance } from "../ServiceNowInstance";
-import { ServiceNowRequest } from "../../comm/http/ServiceNowRequest";
+import { SessionManager } from "../../comm/http/SessionManager";
 import { HTTPRequest } from "../../comm/http/HTTPRequest";
 
 
@@ -44,8 +44,8 @@ export class AMBClient{
         this._logger.info("Authenticating to ServiceNow to obtain session cookies...");
 
         try {
-            // Create a ServiceNow request to authenticate
-            const snRequest = new ServiceNowRequest(this._instance);
+            // Get or create a ServiceNow request via SessionManager (reused across components)
+            const snRequest = SessionManager.getInstance().getRequest(this._instance);
             
             // Get the session which triggers login
             const session: any = await snRequest.getUserSession();
@@ -207,7 +207,11 @@ export class AMBClient{
             } else if (typeof cookieStore.getCookies === 'function') {
                 const domain = instanceUrl ? new URL(instanceUrl).hostname : null;
                 this._logger.debug(`Getting cookies for domain: ${domain}`);
-                const domainCookies = cookieStore.getCookies(domain || '<servicenow_instance_url>');
+                if (!domain) {
+                    this._logger.warn("No domain available for cookie extraction");
+                    return null;
+                }
+                const domainCookies = cookieStore.getCookies(domain);
                 if (Array.isArray(domainCookies)) {
                     this._logger.debug(`Found ${domainCookies.length} cookies for domain`);
                     domainCookies.forEach((cookie: any) => {

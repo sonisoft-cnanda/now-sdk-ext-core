@@ -1,4 +1,4 @@
-import {Logger} from"../../util/Logger";
+import {Logger} from "../../util/Logger";
 
 export class  SessionExtension {
 	static META_CONNECT = "/meta/connect";

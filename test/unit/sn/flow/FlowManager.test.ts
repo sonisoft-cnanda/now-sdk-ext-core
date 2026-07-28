@@ -10,6 +10,7 @@ import { FlowManager } from '../../../../src/sn/flow/FlowManager';
 import { BackgroundScriptExecutionResult, ScriptExecutionOutputLine } from '../../../../src/sn/BackgroundScriptExecutor';
 import { AuthenticationHandlerFactory } from '../../../../src/auth/AuthenticationHandlerFactory';
 import { RequestHandlerFactory } from '../../../../src/comm/http/RequestHandlerFactory';
+import { SessionManager } from '../../../../src/comm/http/SessionManager';
 import { ExecuteFlowOptions, FlowScriptResultEnvelope, FlowLifecycleEnvelope, ProcessFlowApiResponse } from '../../../../src/sn/flow/FlowModels';
 
 // Mock getCredentials
@@ -95,6 +96,7 @@ describe('FlowManager - Unit Tests', () => {
 
     beforeEach(async () => {
         jest.clearAllMocks();
+        SessionManager.resetInstance();
 
         mockAuthHandler = new MockAuthenticationHandler();
         mockRequestHandler = new MockRequestHandler();

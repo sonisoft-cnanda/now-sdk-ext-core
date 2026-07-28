@@ -12,7 +12,7 @@ import {GraphQLSubscriptionExtension} from "./GraphQLSubscriptionExtension";
 import {SessionExtension} from "./SessionExtension";
 import {TokenManagementExtension} from "./TokenManagementExtension";
 import { AMBConstants } from "./AMBConstants";
-import { Logger } from"../../util/Logger";
+import { Logger } from "../../util/Logger";
 
 export type SubscriptionConfig = {
 	subscriptionCallback?:Function;

@@ -9,6 +9,7 @@ import { IHttpResponse } from '../../../../src/comm/http/IHttpResponse';
 import { MockAuthenticationHandler } from '../../__mocks__/servicenow-sdk-mocks';
 import { AuthenticationHandlerFactory } from '../../../../src/auth/AuthenticationHandlerFactory';
 import { RequestHandlerFactory } from '../../../../src/comm/http/RequestHandlerFactory';
+import { SessionManager } from '../../../../src/comm/http/SessionManager';
 import { ServiceNowInstance } from '../../../../src/sn/ServiceNowInstance';
 
 // Mock factories
@@ -41,6 +42,7 @@ describe('UserRequest', () => {
 
     beforeEach(() => {
         jest.clearAllMocks();
+        SessionManager.resetInstance();
 
         mockAuthHandler = new MockAuthenticationHandler();
         mockRequestHandler = new MockRequestHandler();

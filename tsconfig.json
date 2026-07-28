@@ -24,7 +24,7 @@
     "outDir": "dist",
     "rootDir": "./src",
     "moduleSuffixes": [""],
-    "maxNodeModuleJsDepth": 0, // <--- ADD THIS
+    "maxNodeModuleJsDepth": 0,
     "allowJs": true,
     "checkJs": false,
     "types": ["node", "jest", "crypto-js", "crypto-js/enc-base64"],
@@ -51,8 +51,6 @@
     "dist/",
     "logs",
     "build",
-    "test/**/*",
-    "scratch_code",
-    "src/assets/**/*"
+    "test/**/*"
   ]
 }

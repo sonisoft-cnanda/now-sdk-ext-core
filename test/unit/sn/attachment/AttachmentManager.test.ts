@@ -9,6 +9,7 @@ import { createGetCredentialsMock, MockAuthenticationHandler } from '../../__moc
 import { IHttpResponse } from '../../../../src/comm/http/IHttpResponse';
 import { AuthenticationHandlerFactory } from '../../../../src/auth/AuthenticationHandlerFactory';
 import { RequestHandlerFactory } from '../../../../src/comm/http/RequestHandlerFactory';
+import { SessionManager } from '../../../../src/comm/http/SessionManager';
 import { AttachmentManager } from '../../../../src/sn/attachment/AttachmentManager';
 
 // Mock getCredentials
@@ -59,6 +60,7 @@ describe('AttachmentManager - Unit Tests', () => {
 
     beforeEach(async () => {
         jest.clearAllMocks();
+        SessionManager.resetInstance();
 
         mockAuthHandler = new MockAuthenticationHandler();
         mockRequestHandler = new MockRequestHandler();
