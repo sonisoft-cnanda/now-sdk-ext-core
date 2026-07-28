@@ -53,11 +53,11 @@
   "types": "./dist/index.d.ts",
   "dependencies": {
     "@servicenow/glide": "^27.0.5",
-    "@servicenow/sdk": "4.3.0",
-    "@servicenow/sdk-build-core": "4.3.0",
-    "@servicenow/sdk-cli": "4.3.0",
+    "@servicenow/sdk": "4.9.2",
+    "@servicenow/sdk-build-core": "4.9.2",
+    "@servicenow/sdk-cli": "4.9.2",
     "@servicenow/sdk-cli-core": "3.0.3",
-    "@servicenow/sdk-core": "4.3.0",
+    "@servicenow/sdk-core": "4.9.2",
     "@ts-morph/common": "^0.24.0",
     "@xmldom/xmldom": "^0.8.10",
     "async": "3.2.6",
@@ -142,6 +142,6 @@
     "lodash": "^4.17.23"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=26.0.0"
   }
 }
