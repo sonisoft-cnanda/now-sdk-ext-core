@@ -96,15 +96,23 @@ describe('ActiveSessionRegistry', () => {
 
         it('returns null for expired session', () => {
             const registry = ActiveSessionRegistry.getInstance();
+            // Same race as 'evicts expired sessions': a 1ms TTL could expire
+            // between createSession() and getSession(), so getSession returned
+            // null and the following line threw. Expiry is forced explicitly
+            // below, so the TTL only needs to be long enough to survive the
+            // fetch.
+            const ttlMs = 60_000;
             const id = registry.createSession({
                 type: 'script-tracer',
                 instanceAlias: 'dev01',
-                ttlMs: 1, // 1ms TTL
+                ttlMs,
             });
 
-            // Force expiry by advancing time
-            const session = registry.getSession(id)!;
-            session.lastAccessedAt = new Date(Date.now() - 100);
+            const session = registry.getSession(id);
+            expect(session).not.toBeNull();
+
+            // Force expiry deterministically rather than by waiting.
+            session!.lastAccessedAt = new Date(Date.now() - ttlMs * 2);
 
             expect(registry.getSession(id)).toBeNull();
             expect(registry.size).toBe(0);
@@ -260,16 +268,26 @@ describe('ActiveSessionRegistry', () => {
 
         it('evicts expired sessions', () => {
             const registry = ActiveSessionRegistry.getInstance();
+            // TTL must be long enough that the session is still live when we
+            // fetch it below. A 1ms TTL raced with scheduling delay: under CI
+            // load the session expired before getSession(), which then returned
+            // null and made the next line throw
+            // "TypeError: Cannot set properties of null (setting 'lastAccessedAt')".
+            // Expiry is forced explicitly via lastAccessedAt instead, so the
+            // test does not depend on wall-clock timing at all.
+            const ttlMs = 60_000;
             const id = registry.createSession({
                 type: 'script-tracer',
                 instanceAlias: 'dev01',
-                ttlMs: 1,
+                ttlMs,
             });
             registry.createSession({ type: 'impersonation', instanceAlias: 'dev01' });
 
-            // Force expiry
-            const session = registry.getSession(id)!;
-            session.lastAccessedAt = new Date(Date.now() - 100);
+            const session = registry.getSession(id);
+            expect(session).not.toBeNull();
+
+            // Push last access well beyond the TTL so eviction is deterministic.
+            session!.lastAccessedAt = new Date(Date.now() - ttlMs * 2);
 
             const all = registry.listSessions();
             expect(all).toHaveLength(1);
