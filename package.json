@@ -1,6 +1,6 @@
 {
   "name": "@sonisoft/now-sdk-ext-core",
-  "version": "3.8.1",
+  "version": "3.9.0",
   "description": "Comprehensive TypeScript library extending ServiceNow SDK with application management, ATF testing, real-time log monitoring, AMB event subscriptions, and automation tools",
   "keywords": [
     "servicenow",
@@ -16,7 +16,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/sonisoft-cnanda/nowsdk-ext-core.git"
+    "url": "https://github.com/sonisoft-cnanda/now-sdk-ext-core.git"
   },
   "type": "module",
   "author": "",
