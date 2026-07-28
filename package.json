@@ -90,7 +90,7 @@
     "@types/eslint__js": "^8.42.3",
     "@types/fs-extra": "^11.0.4",
     "@types/jest": "^30.0.0",
-    "@types/jquery": "3.5.30",
+    "@types/jquery": "4.0.1",
     "@types/lodash": "^4.17.7",
     "@types/mock-fs": "^4.13.4",
     "@types/node": "^22.3",
