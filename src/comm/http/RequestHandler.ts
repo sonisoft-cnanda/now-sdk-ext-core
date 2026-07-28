@@ -8,7 +8,6 @@ import { ICookieStore } from './ICookieStore';
 import { IAuthenticationHandler } from '../../auth/IAuthenticationHandler';
 import { Logger } from '../../util/Logger';
 import { makeRequest } from "@servicenow/sdk-cli-core/dist/http/index.js";
-import { parseXml } from '@servicenow/sdk-cli-core/dist/util/Util';
 import { DOMParser } from '@xmldom/xmldom';
 
 //axios.defaults.withCredentials = true;

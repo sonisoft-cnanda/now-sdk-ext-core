@@ -51,7 +51,6 @@
     "dist/",
     "logs",
     "build",
-    "test/**/*",
-    "scratch_code"
+    "test/**/*"
   ]
 }
