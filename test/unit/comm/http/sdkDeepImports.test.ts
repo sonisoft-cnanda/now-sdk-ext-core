@@ -4,8 +4,20 @@ import { describe, it, expect } from '@jest/globals';
  * Guard for the unversioned deep imports this library depends on.
  *
  * Several modules reach into `@servicenow/sdk-cli-core/dist/**` rather than the
- * package root, because the root exports nothing — importing it throws
- * ERR_PACKAGE_PATH_NOT_EXPORTED. Those `dist/` paths carry no semver contract.
+ * package root. Those `dist/` paths carry no semver contract.
+ *
+ * The root is unusable for a non-obvious reason. `sdk-cli-core` itself declares
+ * no `exports` map and a normal `main`, so it looks importable — but its
+ * `dist/index.js` re-exports from `@servicenow/sdk-build-core/dist/*`, and
+ * `sdk-build-core` DOES declare an `exports` map that permits only `.` and
+ * `./telemetry`. So importing the root fails with:
+ *
+ *   ERR_PACKAGE_PATH_NOT_EXPORTED: Package subpath './dist' is not defined by
+ *   "exports" in .../@servicenow/sdk-build-core/package.json
+ *
+ * Verified this is long-standing rather than a regression: the same failure
+ * occurs on sdk-build-core 4.3.0, whose exports map was already `{".": ...}`.
+ * 4.9.2 only added the `./telemetry` subpath.
  *
  * That means a ServiceNow SDK upgrade can move or rename a file and break us at
  * *import* time, which neither `tsc --noEmit` nor the rest of the unit suite can
@@ -54,12 +66,15 @@ describe('ServiceNow SDK deep imports', () => {
 
 // Deliberately not asserted here:
 //
-// 1. That `@servicenow/sdk-cli-core` has no public root entry point. Under Node
-//    it throws ERR_PACKAGE_PATH_NOT_EXPORTED — the reason these deep imports
-//    exist — but jest's resolver reports a different error, so pinning the code
-//    would test the runner rather than the SDK. Check it with plain Node:
-//      node -e "import('@servicenow/sdk-cli-core').catch(e => console.log(e.code))"
-//    If that ever stops throwing, replace these deep imports with root imports.
+// 1. That the `@servicenow/sdk-cli-core` root is unreachable. Under Node it
+//    throws ERR_PACKAGE_PATH_NOT_EXPORTED (see the note above for why) — the
+//    reason these deep imports exist — but jest's resolver reports a different
+//    error, so pinning the code would test the runner rather than the SDK.
+//    Check it with plain Node instead:
+//      node -e "import('@servicenow/sdk-cli-core').catch(e => console.log(e.message))"
+//    If that ever starts succeeding — most likely because sdk-build-core widens
+//    its exports map — these deep imports can be replaced with root imports and
+//    this whole file becomes unnecessary. Worth re-checking on each SDK bump.
 //
 // 2. `@servicenow/sdk-cli/dist/auth/index.js` (getCredentials). That import
 //    belongs to now-sdk-ext-cli and now-sdk-ext-mcp, not to this package —
