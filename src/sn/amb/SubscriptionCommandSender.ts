@@ -1,5 +1,5 @@
 import {Properties as properties} from "./Properties";
-import {isNil, isObject} from "./Helper";
+import { isNil, isObject } from "../../util/utils";
 import {Logger} from "../../util/Logger";
 import { FunctionQueue } from "./FunctionQueue";
 

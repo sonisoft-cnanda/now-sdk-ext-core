@@ -30,12 +30,15 @@ ScriptTracer
 ## Usage
 
 ```typescript
-import { AMBClient } from "../amb/AMBClient";
-import { ScriptTracer } from "./ScriptTracer";
+import { AMBClient, MessageClientBuilder, ScriptTracer } from "@sonisoft/now-sdk-ext-core";
 
-// Authenticate and connect AMB
-const ambClient = new AMBClient();
-await ambClient.authenticate(instance);
+// AMBClient requires the subscription collection its constructor takes:
+//   constructor(clientSubscriptions, instance?)
+const builder = new MessageClientBuilder();
+const ambClient = new AMBClient(builder.buildClientSubscriptions(), instance);
+
+// authenticate() takes no arguments — the instance was supplied above.
+await ambClient.authenticate();
 await ambClient.connect();
 
 // Start tracing

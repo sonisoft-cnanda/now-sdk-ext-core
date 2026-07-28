@@ -22,9 +22,8 @@
   "author": "",
   "license": "MIT",
   "scripts": {
-    "build-index-export": "npx ctix build --config ./.ctirc",
-    "push": "npm run build && npm run pre-publish && npm run publish-registry",
-    "pre-publish": "npm run build-index-export",
+    "build-index-export": "npx ctix build --config ./.ctirc && node scripts/finalize-barrel.mjs",
+    "push": "npm run build && npm run publish-registry",
     "publish-registry": "npm publish",
     "alpha": "npm version premajor --preid alpha",
     "beta": " npm version premajor --preid beta",
@@ -42,7 +41,8 @@
     "watch-test:integration": "npm run test:integration -- --watchAll",
     "watch-ts": "tsc -w",
     "export-update-set": "node dist/cli/export-update-set.js",
-    "prepare": "git config core.hooksPath .githooks && sh scripts/setup-gitleaks.sh"
+    "prepare": "git config core.hooksPath .githooks && sh scripts/setup-gitleaks.sh",
+    "pre-publish": "npm run build-index-export"
   },
   "publishConfig": {
     "access": "public"

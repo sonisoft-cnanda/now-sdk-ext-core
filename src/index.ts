@@ -19,6 +19,8 @@ export * from './util/AppUtil.js';
 export * from './util/CSRFTokenHelper.js';
 export * from './util/Logger.js';
 export * from './util/NowStringUtil.js';
+export * from './util/utils.js';
+export * from './comm/http/ActiveSessionRegistry.js';
 export * from './comm/http/HTTPRequest.js';
 export * from './comm/http/HttpResponse.js';
 export * from './comm/http/ICookieStore.js';
@@ -29,13 +31,10 @@ export * from './comm/http/RequestHandler.js';
 export * from './comm/http/RequestHandlerFactory.js';
 export * from './comm/http/ServiceNowProcessorRequest.js';
 export * from './comm/http/ServiceNowRequest.js';
-// SessionManager is internal — use via ServiceNowRequest or AMBClient
-export * from './comm/http/ActiveSessionRegistry.js';
 export * from './comm/http/TableAPIRequest.js';
 export * from './comm/ws/ATFMessageHandler.js';
 export * from './sn/aggregate/AggregateModels.js';
 export * from './sn/aggregate/AggregateQuery.js';
-export * from './sn/amb/AuthenticatedWebSocket.js';
 export * from './sn/application/ApplicationDetailModel.js';
 export * from './sn/application/ApplicationManager.js';
 export * from './sn/application/AppRepoApplication.js';
@@ -89,3 +88,8 @@ export * from './sn/xml/XMLRecordModels.js';
 export * from './sn/user/factory/UserFactory.js';
 export * from './sn/user/model/IUser.js';
 export * from './sn/user/model/User.js';
+
+// --- appended by scripts/finalize-barrel.mjs (see that file for why) ---
+// Curated exports ctix cannot express: it omits src/sn/amb entirely because
+// that folder has its own index.ts covering every module in it.
+export * from './PublicApi.js';

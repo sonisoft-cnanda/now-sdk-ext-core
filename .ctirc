@@ -9,7 +9,9 @@
       "exclude": [
         "assets",
         "cli",
-        "types"
+        "types",
+        "sn/amb",
+        "comm/http/SessionManager"
       ],
       "exportFilename": "index.ts",
       "useSemicolon": true,
