@@ -46,3 +46,12 @@ export { MessageClientBuilder } from './sn/amb/MessageClientBuilder.js';
 export type { SubscriptionCollection, Context } from './sn/amb/MessageClientBuilder.js';
 export { Channel } from './sn/amb/Channel.js';
 export { ChannelListener } from './sn/amb/ChannelListener.js';
+
+/**
+ * Not in the generated barrel, on purpose. ctix exports whatever a directory's
+ * index.ts re-exports, and a credentials/index.ts would make importing this
+ * library enough to monkeypatch the SDK's credential storage. Installing the
+ * shim has to stay an explicit call.
+ */
+export { initCredentialStore } from './credentials/ensureShim.js';
+export type { InitCredentialStoreResult } from './credentials/ensureShim.js';
