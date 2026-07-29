@@ -2,7 +2,7 @@
 import {EventManager} from "./EventManager";
 import {Logger} from "../../util/Logger";
 
-import { isNil, isObject } from "./Helper";
+import { isNil, isObject } from "../../util/utils";
 import { AMBConstants } from "./AMBConstants";
 import { XMLHttpRequest } from "./XMLHttpRequest";
 import {Properties as properties} from "./Properties";
