@@ -11,7 +11,15 @@
  * This exists for embedders that do not control process startup.
  */
 
-/** Absence is normal today. A shim that loads and then fails is not. */
+/**
+ * Absence is legitimate. A shim that loads and then fails is not.
+ *
+ * sn-credstore is an OPTIONAL dependency of this package, because core is a
+ * library: making it required would force a credential shim onto every consumer,
+ * including ones that never call initCredentialStore(). So it can genuinely be
+ * missing — `npm install --no-optional`, a pruned install, a bundler that dropped
+ * it — and that must degrade rather than throw.
+ */
 function isNotInstalled(error: unknown): boolean {
     const err = error as NodeJS.ErrnoException | undefined;
     return (
@@ -57,11 +65,11 @@ export async function initCredentialStore(): Promise<InitCredentialStoreResult> 
 
     try {
         // Held in a variable so TypeScript does not try to resolve it. This
-        // package still compiles with moduleResolution "node", which predates
-        // and ignores `exports` maps, so a literal specifier fails to type-check
-        // even though Node resolves it correctly at runtime. Switching core to
-        // Node16 resolution would fix it properly, but that is a change with a
-        // much wider blast radius than this file.
+        // package still compiles with moduleResolution "node", which predates and
+        // ignores `exports` maps, so a literal specifier for the ./register
+        // subpath fails to type-check even though Node resolves it correctly at
+        // runtime. Switching core to Node16 resolution would fix it properly, but
+        // that is a change with a much wider blast radius than this file.
         const specifier = '@sonisoft/sn-credstore/register';
         await import(specifier);
         cached = { active: true };

@@ -144,5 +144,8 @@
   },
   "engines": {
     "node": ">=26.0.0"
+  },
+  "optionalDependencies": {
+    "@sonisoft/sn-credstore": "^1.0.0"
   }
 }
