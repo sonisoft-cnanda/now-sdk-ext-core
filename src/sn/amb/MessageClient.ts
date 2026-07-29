@@ -3,8 +3,8 @@
 //const {CometD, WebSocketTransport, LongPollingTransport } = cometd;
 
 import { CometD } from "cometd";
-import {LongPollingTransport} from "cometd/LongPollingTransport";
-import {WebSocketTransport} from "cometd/WebSocketTransport";
+import {LongPollingTransport} from "cometd/LongPollingTransport.js";
+import {WebSocketTransport} from "cometd/WebSocketTransport.js";
 import {ServerConnection} from "./ServerConnection";
 import {ChannelListener} from "./ChannelListener";
 import {GraphQLSubscriptionExtension} from "./GraphQLSubscriptionExtension";
