@@ -17,9 +17,18 @@
  */
 export class StaleInstanceError extends Error {
 
-    /** Stable machine-readable code. Prefer this over `instanceof` across module boundaries. */
+    /**
+     * The code as a CLASS constant, for comparing against an error you were handed:
+     * `err?.code === StaleInstanceError.code`. Prefer this over `instanceof` across
+     * module boundaries, where a second copy of the class breaks prototype checks.
+     *
+     * Distinct from the instance field of the same name below — static and prototype
+     * members do not collide, and both spellings are useful: this one at the call
+     * site, the instance one on the error itself.
+     */
     public static readonly code: string = "INSTANCE_STALE_DURING_REQUEST";
 
+    /** The code as carried BY an instance. Always equal to the static above. */
     public readonly code: string;
 
     public readonly remediation: string;

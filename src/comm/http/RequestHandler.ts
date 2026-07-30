@@ -11,7 +11,7 @@ import { makeRequest } from "@servicenow/sdk-cli-core/dist/http/index.js";
 import { DOMParser } from '@xmldom/xmldom';
 import { IServiceNowInstance } from '../../sn/IServiceNowInstance';
 import { StaleInstanceError } from '../../exception/StaleInstanceError';
-import { stripSecretsFromError } from '../../util/redact';
+import { stripSecretsFromError, redactValue } from '../../util/redact';
 
 //axios.defaults.withCredentials = true;
 
@@ -91,6 +91,40 @@ export class RequestHandler implements IRequestHandler{
      * a caller that predates the second parameter would otherwise start throwing on
      * a path that was never actually unsafe.
      */
+    /**
+     * Prepares a caught value for rethrowing.
+     *
+     * The original error is preserved rather than wrapped: `new Error(ex)` stringified
+     * the cause, discarded the stack, and flattened typed errors so `instanceof` failed
+     * at every call site — which would make StaleInstanceError unidentifiable. Secrets
+     * are stripped first, because the consumer's logger has no redaction format of its
+     * own.
+     */
+    private toThrowable(ex: unknown): Error {
+        if (ex instanceof Error) {
+            return stripSecretsFromError(ex);
+        }
+
+        // A thrown non-Error still has to be described, and String() on an object
+        // yields "[object Object]" — useless in a log. Redact before serializing,
+        // since a thrown plain object can carry credentials just as easily.
+        if (typeof ex === "string") {
+            return new Error(ex);
+        }
+        // `Object.prototype.toString.call` is typed as returning `any`; the cast keeps
+        // the type-checked lint rules satisfied without loosening anything real.
+        const fallback = Object.prototype.toString.call(ex) as string;
+        let described: string;
+        try {
+            described = JSON.stringify(redactValue(ex)) ?? fallback;
+        } catch {
+            // Cycles and throwing getters are already handled inside redactValue, but
+            // a hostile toJSON can still break stringify.
+            described = fallback;
+        }
+        return new Error(described);
+    }
+
     private assertSessionMatchesBoundInstance(): void {
         const bound = this._boundInstanceId;
         const forSession = this._sessionInstanceId;
@@ -245,10 +279,7 @@ export class RequestHandler implements IRequestHandler{
        }catch(ex){
 
         this._logger.error("Error during POST request.", {error:ex, response: response, request: request});
-        // Rethrow the original: wrapping in a new Error stringified the cause, discarded
-        // the stack, and flattened typed errors so `instanceof` failed at every call site.
-        // Scrubbed first — the consumer's logger has no redaction format of its own.
-        throw ex instanceof Error ? stripSecretsFromError(ex) : new Error(String(ex));
+        throw this.toThrowable(ex);
        }
     }
 
@@ -270,10 +301,7 @@ export class RequestHandler implements IRequestHandler{
             return response;
        }catch(ex){
         this._logger.error("Error during PUT request.", {error:ex, response: response, request: request});
-        // Rethrow the original: wrapping in a new Error stringified the cause, discarded
-        // the stack, and flattened typed errors so `instanceof` failed at every call site.
-        // Scrubbed first — the consumer's logger has no redaction format of its own.
-        throw ex instanceof Error ? stripSecretsFromError(ex) : new Error(String(ex));
+        throw this.toThrowable(ex);
        }
     }
 
@@ -296,10 +324,7 @@ export class RequestHandler implements IRequestHandler{
         return response;
        }catch(ex){
             this._logger.error("Error during GET request.", {error:ex, response: response, request: request});
-            // Rethrow the original: wrapping in a new Error stringified the cause, discarded
-            // the stack, and flattened typed errors so `instanceof` failed at every call site.
-            // Scrubbed first — the consumer's logger has no redaction format of its own.
-            throw ex instanceof Error ? stripSecretsFromError(ex) : new Error(String(ex));
+            throw this.toThrowable(ex);
        }
     }
 
@@ -320,10 +345,7 @@ export class RequestHandler implements IRequestHandler{
         return response;
        }catch(ex){
             this._logger.error("Error during DELETE request.", {error:ex, response: response, request: request});
-            // Rethrow the original: wrapping in a new Error stringified the cause, discarded
-            // the stack, and flattened typed errors so `instanceof` failed at every call site.
-            // Scrubbed first — the consumer's logger has no redaction format of its own.
-            throw ex instanceof Error ? stripSecretsFromError(ex) : new Error(String(ex));
+            throw this.toThrowable(ex);
        }
     }
 

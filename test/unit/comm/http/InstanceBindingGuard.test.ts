@@ -14,6 +14,7 @@ import { ServiceNowInstance } from '../../../../src/sn/ServiceNowInstance';
 import { ServiceNowRequest } from '../../../../src/comm/http/ServiceNowRequest';
 import { StaleInstanceError, isStaleInstanceError } from '../../../../src/exception/StaleInstanceError';
 import { MockAuthenticationHandler } from '../../__mocks__/servicenow-sdk-mocks';
+import { SNRequestBase } from '../../../../src/sn/SNRequestBase';
 
 function anInstance(alias: string): ServiceNowInstance {
     return new ServiceNowInstance({ alias, host: `${alias}.service-now.com` });
@@ -156,6 +157,37 @@ describe('RequestHandler error propagation', () => {
 
         expect(err).toBeInstanceOf(Error);
         expect((err as Error).message).toContain('a bare string');
+    });
+});
+
+describe('SNRequestBase instance swap', () => {
+    // The public snInstance setter used to change the instance while leaving _req
+    // bound to the previous one. Both ids on that handler stayed pointed at the old
+    // instance, so they still MATCHED and the dispatch guard saw nothing wrong —
+    // requests silently kept going to the old instance through exported API.
+    class Manager extends SNRequestBase {}
+
+    it('rebuilds the bound request when the instance is swapped', () => {
+        const dev = anInstance('dev');
+        const prod = anInstance('prod');
+        const manager = new Manager(dev);
+        const before = manager.request;
+
+        manager.snInstance = prod;
+
+        expect(manager.request).not.toBe(before);
+        expect(manager.request.getInstance()).toBe(prod);
+        expect((manager.request._requestHandler as any)._boundInstanceId).toBe(prod.getInstanceId());
+    });
+
+    it('leaves the request alone when set to the same instance', () => {
+        const dev = anInstance('dev');
+        const manager = new Manager(dev);
+        const before = manager.request;
+
+        manager.snInstance = dev;
+
+        expect(manager.request).toBe(before);
     });
 });
 
