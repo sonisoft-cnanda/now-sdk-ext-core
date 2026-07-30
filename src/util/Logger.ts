@@ -1,9 +1,36 @@
 import * as winston from "winston";
+import { redactValue, isSecretKey, REDACTED } from "./redact";
 const { combine, timestamp, json, metadata, label} = winston.format;
 const { format, transports } = winston;
 
 
 export class Logger{
+
+	/**
+	 * Strips credential material from every log entry.
+	 *
+	 * Applied as a format rather than fixed at each call site on purpose. There are
+	 * ~40 logging calls across src/, several of which pass whole request configs and
+	 * session objects, and the set grows. Auditing call sites catches today's leaks
+	 * and none of tomorrow's; a format in the pipeline catches both.
+	 *
+	 * The specific leak that motivated it: RequestHandler built `{auth: this._session}`
+	 * and logged it at debug on every single request, writing live cookies and tokens
+	 * to logs/app-debug.log.
+	 */
+	static redactSecrets = winston.format((info) => {
+		for (const key of Object.keys(info)) {
+			if (key === "level" || key === "message" || key === "timestamp" || key === "label") {
+				continue;
+			}
+			if (isSecretKey(key)) {
+				(info as Record<string, unknown>)[key] = REDACTED;
+				continue;
+			}
+			(info as Record<string, unknown>)[key] = redactValue((info as Record<string, unknown>)[key]);
+		}
+		return info;
+	});
 
 	static errorFilter = winston.format((info) => {
 		return info.level === "error" ? info : false;
@@ -40,6 +67,9 @@ export class Logger{
         this._localLogger = winston.createLogger({
             level: this._logLevel,
             format: combine(
+                // First in the chain: redact before anything reshapes, nests, or
+                // serializes the entry, so no later format can capture a raw value.
+                Logger.redactSecrets(),
                 label({ label: this._labelName }),
                 timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
                 // Format the metadata object

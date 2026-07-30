@@ -9,6 +9,7 @@ import { ICookieStore } from "../comm/http/ICookieStore";
 import { ServiceNowInstance } from "../sn/ServiceNowInstance";
 import { getSafeUserSession } from "@servicenow/sdk-cli-core/dist/util/sessionToken.js";
 import { StaleInstanceError } from "../exception/StaleInstanceError";
+import { stripSecretsFromError } from "../util/redact";
 
 
 export class NowSDKAuthenticationHandler implements IAuthenticationHandler{
@@ -61,8 +62,12 @@ export class NowSDKAuthenticationHandler implements IAuthenticationHandler{
             this._logger.debug("Login Attempt Complete.");
             return session;
         }catch(e){
-            this._logger.error("Error during login.", e);
-            throw e;
+            // Of every error in the codebase this is the one most likely to be carrying
+            // the credential it just failed to use, and it propagates out to consumers
+            // whose loggers have no redaction format of their own.
+            const safe: unknown = stripSecretsFromError(e);
+            this._logger.error("Error during login.", safe);
+            throw safe;
         }
         return null;
     }

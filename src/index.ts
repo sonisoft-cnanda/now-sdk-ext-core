@@ -20,6 +20,7 @@ export * from './util/AppUtil.js';
 export * from './util/CSRFTokenHelper.js';
 export * from './util/Logger.js';
 export * from './util/NowStringUtil.js';
+export * from './util/redact.js';
 export * from './util/utils.js';
 export * from './comm/http/ActiveSessionRegistry.js';
 export * from './comm/http/HTTPRequest.js';
