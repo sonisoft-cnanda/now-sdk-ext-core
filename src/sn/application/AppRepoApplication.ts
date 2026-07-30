@@ -4,7 +4,7 @@ import { HTTPRequest } from "../../comm/http/HTTPRequest";
 import { IHttpResponse } from "../../comm/http/IHttpResponse";
 import { ServiceNowRequest } from "../../comm/http/ServiceNowRequest";
 import { ProgressWorker, ProgressResult } from "../ProgressWorker";
-import { OperationProgressCallback, createProgressEmitter } from "../OperationProgress";
+import { OperationProgressCallback, createProgressEmitter, toOperationProgress } from "../OperationProgress";
 
 /**
  * AppRepoApplication class for managing application repository operations
@@ -195,21 +195,13 @@ export class AppRepoApplication {
         let progress = await this.getProgress(progressId);
 
         this._logger.info(`Waiting for operation completion. Progress: ${progress.percent_complete}%`);
-        emit({
-            message: progress.status_message || progress.status_label || 'Operation started',
-            percentComplete: progress.percent_complete,
-            status: progress.status
-        });
+        emit(toOperationProgress(progress, 'Operation in progress'));
 
         while (progress.percent_complete < 100 && (Date.now() - startTime) < timeoutMs) {
             await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
             progress = await this.getProgress(progressId);
             this._logger.info(`Operation progress: ${progress.percent_complete}% - ${progress.status_label}`);
-            emit({
-                message: progress.status_message || progress.status_label || 'In progress',
-                percentComplete: progress.percent_complete,
-                status: progress.status
-            });
+            emit(toOperationProgress(progress, 'Operation in progress'));
         }
 
         if (progress.percent_complete < 100) {

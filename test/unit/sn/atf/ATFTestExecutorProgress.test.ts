@@ -1,4 +1,4 @@
-import { describe, it, expect, jest, beforeEach } from '@jest/globals';
+import { describe, it, expect, jest, beforeEach, afterEach } from '@jest/globals';
 import { ATFTestExecutor } from '../../../../src/sn/atf/ATFTestExecutor';
 import { ServiceNowInstance } from '../../../../src/sn/ServiceNowInstance';
 import type { OperationProgress } from '../../../../src/sn/OperationProgress';
@@ -22,6 +22,13 @@ describe('ATFTestExecutor progress reporting', () => {
             fn();
             return 0 as unknown as NodeJS.Timeout;
         }) as never);
+    });
+
+    afterEach(() => {
+        // Explicit rather than relying on jest's per-file isolation; the repo has
+        // no restoreMocks setting, and a global setTimeout stub left in place is
+        // the kind of thing that only bites once the file grows.
+        jest.restoreAllMocks();
     });
 
     /** Drives getTestSuiteProgress through a fixed sequence, then results. */

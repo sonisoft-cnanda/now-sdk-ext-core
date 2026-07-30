@@ -17,7 +17,7 @@ import {
     StoreAppOperationResult,
     StoreAppFinalResult
 } from "./StoreApplicationModels";
-import { OperationProgressCallback, createProgressEmitter } from "../OperationProgress";
+import { OperationProgressCallback, createProgressEmitter, toOperationProgress } from "../OperationProgress";
 
 export enum APP_TAB_CONTEXT {
     AVAILABLE_FOR_YOU = "available_for_you",
@@ -457,21 +457,13 @@ export class ApplicationManager {
        const startTime = Date.now();
        let progress = await progressWorker.getProgress(progressId);
        this._logger.info(`Installation progress: ${JSON.stringify(progress)}`);
-       emit({
-           message: progress.status_message || progress.status_label || 'Installation started',
-           percentComplete: progress.percent_complete,
-           status: progress.status
-       });
+       emit(toOperationProgress(progress, 'Installation in progress'));
 
        while (progress.percent_complete < 100 && (Date.now() - startTime) < timeoutMs) {
            await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
            progress = await progressWorker.getProgress(progressId);
            this._logger.info(`Installation progress: ${progress.percent_complete}%`);
-           emit({
-               message: progress.status_message || progress.status_label || 'Installing',
-               percentComplete: progress.percent_complete,
-               status: progress.status
-           });
+           emit(toOperationProgress(progress, 'Installation in progress'));
        }
 
        if (progress.percent_complete < 100) {

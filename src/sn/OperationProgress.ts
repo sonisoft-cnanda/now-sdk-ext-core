@@ -56,6 +56,50 @@ export function createProgressEmitter(
             return;
         }
         lastKey = key;
-        onProgress(progress);
+
+        // Best-effort. A consumer's reporting sink is not allowed to abort the
+        // operation it is reporting on: a throwing callback would otherwise take
+        // down a thirty-minute install that had already succeeded. Swallowed
+        // rather than logged here, because this module has no logger and adding
+        // one would make an error-reporting path able to fail on its own.
+        try {
+            onProgress(progress);
+        } catch {
+            /* progress reporting must never fail the operation */
+        }
+    };
+}
+
+/**
+ * Shape of the tracker payloads returned by ProgressWorker and the ATF and
+ * app-repo progress endpoints. Structural rather than imported, because the
+ * three sources declare their own near-identical response types.
+ */
+export interface TrackerLikeProgress {
+    percent_complete?: number;
+    status?: string;
+    status_label?: string;
+    status_message?: string;
+}
+
+/**
+ * Builds an OperationProgress from a tracker payload.
+ *
+ * Exists because the same message-fallback chain was repeated at six call sites
+ * across three files, differing only in the fallback string — the kind of
+ * duplication where one copy quietly drifts.
+ *
+ * `fallback` is only used when the platform reports no message at all. It is
+ * phrased by the caller because "started" is wrong for a poll that has been
+ * running for ten minutes.
+ */
+export function toOperationProgress(
+    progress: TrackerLikeProgress,
+    fallback: string,
+): OperationProgress {
+    return {
+        message: progress.status_message || progress.status_label || fallback,
+        percentComplete: progress.percent_complete,
+        status: progress.status,
     };
 }
