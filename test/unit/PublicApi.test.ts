@@ -79,6 +79,15 @@ function exportedNames(): string[] {
         expect(exportedNames()).toContain('AuthenticatedWebSocket');
     });
 
+    it('exports StaleInstanceError so callers can identify a cross-instance refusal', () => {
+        // The guard is only useful if consumers can distinguish it from a generic
+        // failure — retrying is the right response to this error and the wrong
+        // response to most others.
+        const names = exportedNames();
+        expect(names).toContain('StaleInstanceError');
+        expect(names).toContain('isStaleInstanceError');
+    });
+
     it('does not export SessionManager', () => {
         // Deliberately internal (removed from the barrel in f5379e4). ctix used
         // to re-add it on every full build; the barrel is hand-authored now so

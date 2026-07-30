@@ -149,7 +149,10 @@ export class BackgroundScriptExecutor {
         const isLoggedIn:boolean = response.headers["x-is-logged-in"] === "true" ? true : false
         if(response.status == 200 && isLoggedIn && !isNil(response.data)){
             csrfToken = CSRFTokenHelper.extractCSRFToken(response.data);
-            this._logger.debug("CSRF Token Received: " + csrfToken, {csrfToken:csrfToken});
+            // The token is deliberately not interpolated into the message. Logger's
+            // redaction format can scrub a `csrfToken` field but cannot scrub free text,
+            // so a secret concatenated into the message string reaches disk verbatim.
+            this._logger.debug("CSRF token received.", {received: !isNil(csrfToken)});
         }else{
             this._logger.error("getBackgroundScriptCSRFToken: Invalid response. Status not 200, not logged in, or response data is empty.", {response:response});
         }

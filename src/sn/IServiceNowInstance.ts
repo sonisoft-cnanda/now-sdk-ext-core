@@ -12,5 +12,16 @@ export interface IServiceNowInstance{
     //todo: Do we store the password in Secrets or the entire SN Instance? Can we store the entire array of SN Instances in secrets?
     getPassword():string;
 
-    get credential():unknown;   
+    get credential():unknown;
+
+    /**
+     * Stable, process-local identity used to bind a session to the instance it was
+     * minted for.
+     *
+     * Optional so that adding it is not a breaking change for anyone implementing
+     * this interface outside the repo. An implementation without it has no identity
+     * to compare, and every guard treats unknown identity as permissive rather than
+     * as a mismatch.
+     */
+    getInstanceId?():number;
 }
