@@ -8,7 +8,8 @@ This is the core library used by both the `nex` CLI (`now-sdk-ext-cli`) and the 
 
 ## Architecture
 
-- **Base Class**: `SNRequestBase` — parent for all manager classes. Encapsulates a `ServiceNowRequest` and provides logger utilities.
+- **Managers** — each takes a `ServiceNowInstance` and constructs its OWN `ServiceNowRequest` in its constructor. `SNRequestBase` exists and offers that shape, but only `UserRequest` extends it; do not assume a shared base.
+- **`SessionManager`** — caches a `ServiceNowRequest` per instance alias. Only four consumers use it (`TableAPIRequest`, `BackgroundScriptExecutor`, `AMBClient`, `ScriptTracer`); the other ~21 managers bypass it entirely. Internal — deliberately excluded from the public barrel.
 - **ServiceNowInstance** — central connection object holding host, username, alias, and credential. Passed to all manager constructors.
 - **ServiceNowRequest** — HTTP abstraction layer that handles authentication, CSRF tokens, cookies, and session management automatically via `@servicenow/sdk-cli-core`'s `makeRequest`.
 - **Communication Layer**: `RequestHandler` (HTTP with cookie/auth handling), `ATFMessageHandler` (WebSocket), `AuthenticatedWebSocket` (AMB event subscriptions via CometD).
@@ -47,16 +48,14 @@ src/
 │   ├── updateset/              # Update set management
 │   ├── user/                   # User management with factory pattern
 │   ├── workflow/               # Workflow management
-│   ├── xml/                    # XML record import/export
-│   └── factory/                # ISNFactory base pattern
-├── util/                       # Logger (Winston), CSRF helper, string utilities
-├── exception/                  # Custom exception classes
-├── encryption/                 # Encrypt/decrypt utilities
+│   └── xml/                    # XML record import/export
+├── util/                       # Logger (Winston), redact.ts, CSRF helper, string utilities
+├── exception/                  # Custom exception classes — ANY file here is auto-exported
+├── credentials/                # initCredentialStore() opt-in shim (see Key Patterns)
 ├── constants/                  # Extension, file, and ServiceNow constants
-├── model/                      # Shared types (ServiceNowResponse<T>, ReferenceLink, etc.)
-└── assets/                     # Static assets (excluded from build)
+└── model/                      # Shared types (ServiceNowResponse<T>, ReferenceLink, etc.)
 test/
-├── unit/                       # Fast unit tests (~180+ tests, mock-based)
+├── unit/                       # Fast unit tests (~1,400, mock-based)
 ├── integration/                # Integration tests (require ServiceNow credentials)
 └── test_utils/                 # Test configuration and utilities
 dist/                           # Compiled JS output (gitignored)
@@ -89,7 +88,7 @@ npm run watch-test         # Watch mode for unit tests
 
 - **Unit tests**: Mock-based, run in ~2-3 seconds, no ServiceNow instance required
 - **Integration tests**: Hit a real ServiceNow instance, require stored credentials
-- **Path aliases**: `@src/*` → `src/*`, `@test/*` → `test/*` (configured in tsconfig and jest)
+- **Path aliases**: `@src/*` and `@test/*` are configured in tsconfig and jest, but **no test actually uses them** — every test imports by relative path. Match the surrounding style rather than the config.
 
 ## Key Patterns
 
@@ -138,6 +137,6 @@ npm, so re-running it is a no-op rather than an error.
 ## Conventions
 
 - ES Modules (`"type": "module"` in package.json)
-- TypeScript strict mode, target ES2022
+- TypeScript target ES2022. NOTE: `strict` and `noImplicitAny` are **false** — do not write code that assumes strict null checks, and do not add non-null assertions to satisfy a checker that is not running
 - Semantic versioning via `semantic-release`
 - Pre-commit hooks configured in `.githooks/`
