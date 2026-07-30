@@ -17,6 +17,7 @@ import {
     StoreAppOperationResult,
     StoreAppFinalResult
 } from "./StoreApplicationModels";
+import { OperationProgressCallback, createProgressEmitter, toOperationProgress } from "../OperationProgress";
 
 export enum APP_TAB_CONTEXT {
     AVAILABLE_FOR_YOU = "available_for_you",
@@ -362,7 +363,8 @@ export class ApplicationManager {
    public async installStoreApplicationAndWait(
        options: StoreAppInstallOptions,
        pollIntervalMs?: number,
-       timeoutMs?: number
+       timeoutMs?: number,
+       onProgress?: OperationProgressCallback
    ): Promise<StoreAppFinalResult> {
        const operationResult = await this.installStoreApplication(options);
        const trackerId = operationResult.tracker_id || operationResult.trackerId || operationResult.links?.progress?.id;
@@ -372,7 +374,8 @@ export class ApplicationManager {
        return await this.waitForInstallationCompletion(
            trackerId,
            pollIntervalMs || this.DEFAULT_POLL_INTERVAL,
-           timeoutMs || this.DEFAULT_INSTALL_TIMEOUT
+           timeoutMs || this.DEFAULT_INSTALL_TIMEOUT,
+           onProgress
        );
    }
 
@@ -419,7 +422,8 @@ export class ApplicationManager {
    public async updateStoreApplicationAndWait(
        options: StoreAppUpdateOptions,
        pollIntervalMs?: number,
-       timeoutMs?: number
+       timeoutMs?: number,
+       onProgress?: OperationProgressCallback
    ): Promise<StoreAppFinalResult> {
        const operationResult = await this.updateStoreApplication(options);
        const trackerId = operationResult.tracker_id || operationResult.trackerId || operationResult.links?.progress?.id;
@@ -429,7 +433,8 @@ export class ApplicationManager {
        return await this.waitForInstallationCompletion(
            trackerId,
            pollIntervalMs || this.DEFAULT_POLL_INTERVAL,
-           timeoutMs || this.DEFAULT_INSTALL_TIMEOUT
+           timeoutMs || this.DEFAULT_INSTALL_TIMEOUT,
+           onProgress
        );
    }
 
@@ -444,17 +449,21 @@ export class ApplicationManager {
    private async waitForInstallationCompletion(
        progressId: string,
        pollIntervalMs: number,
-       timeoutMs: number
+       timeoutMs: number,
+       onProgress?: OperationProgressCallback
    ): Promise<StoreAppFinalResult> {
        const progressWorker = new ProgressWorker(this._instance);
+       const emit = createProgressEmitter(onProgress);
        const startTime = Date.now();
        let progress = await progressWorker.getProgress(progressId);
        this._logger.info(`Installation progress: ${JSON.stringify(progress)}`);
+       emit(toOperationProgress(progress, 'Installation in progress'));
 
        while (progress.percent_complete < 100 && (Date.now() - startTime) < timeoutMs) {
            await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
            progress = await progressWorker.getProgress(progressId);
            this._logger.info(`Installation progress: ${progress.percent_complete}%`);
+           emit(toOperationProgress(progress, 'Installation in progress'));
        }
 
        if (progress.percent_complete < 100) {

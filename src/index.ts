@@ -13,6 +13,7 @@ export * from './model/types.js';
 export * from './sn/Application.js';
 export * from './sn/BackgroundScriptExecutor.js';
 export * from './sn/IServiceNowInstance.js';
+export * from './sn/OperationProgress.js';
 export * from './sn/ProgressWorker.js';
 export * from './sn/ServiceNowInstance.js';
 export * from './sn/SNRequestBase.js';
