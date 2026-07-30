@@ -9,6 +9,8 @@ import { IAuthenticationHandler } from '../../auth/IAuthenticationHandler';
 import { Logger } from '../../util/Logger';
 import { makeRequest } from "@servicenow/sdk-cli-core/dist/http/index.js";
 import { DOMParser } from '@xmldom/xmldom';
+import { IServiceNowInstance } from '../../sn/IServiceNowInstance';
+import { StaleInstanceError } from '../../exception/StaleInstanceError';
 
 //axios.defaults.withCredentials = true;
 
@@ -23,6 +25,12 @@ export class RequestHandler implements IRequestHandler{
     _authHandler:IAuthenticationHandler;
 
     _session: any;
+
+    /** Identity of the instance this handler serves. Set once, at construction. */
+    private _boundInstanceId: number | undefined;
+
+    /** Identity of the instance the current `_session` was minted for. Written with the session. */
+    private _sessionInstanceId: number | undefined;
 
     /**
      * The Singleton's constructor should always be private to prevent direct
@@ -46,8 +54,50 @@ export class RequestHandler implements IRequestHandler{
 
 
 
-    public setSession(session: any){
+    public setSession(session: any, instance?: IServiceNowInstance){
         this._session = session;
+        // Deliberately reset to undefined when no instance is supplied: the session
+        // changed and we no longer know whose it is, so the guard must go permissive
+        // rather than keep asserting against the previous owner's id.
+        this._sessionInstanceId = instance?.getInstanceId?.();
+    }
+
+    public bindInstance(instance: IServiceNowInstance){
+        this._boundInstanceId = instance?.getInstanceId?.();
+    }
+
+    /**
+     * Refuses to build a request whose session belongs to a different instance.
+     *
+     * Placed immediately before `this._session` is read into the outgoing config,
+     * because that is the one point every request passes through — both the
+     * SessionManager-managed handlers and the ~21 managers that construct their own
+     * ServiceNowRequest and never touch SessionManager at all.
+     *
+     * Permissive when either side is unknown. A handler built without an instance
+     * (ATFTestExecutor does this, then immediately replaces it) or a session set by
+     * a caller that predates the second parameter would otherwise start throwing on
+     * a path that was never actually unsafe.
+     */
+    private assertSessionMatchesBoundInstance(): void {
+        const bound = this._boundInstanceId;
+        const forSession = this._sessionInstanceId;
+
+        if (bound === undefined || forSession === undefined) {
+            this._logger.debug("Instance binding not asserted; identity unknown on one side.", {
+                boundInstanceId: bound,
+                sessionInstanceId: forSession,
+            });
+            return;
+        }
+
+        if (bound !== forSession) {
+            throw new StaleInstanceError(
+                `Refusing to send a request for instance #${bound} using a session minted for instance #${forSession}.`,
+                "The connection was replaced while this request was in flight. Retry the operation; " +
+                    "a fresh session will be established for the correct instance.",
+            );
+        }
     }
 
     // public async request(config:AxiosRequestConfig):Promise<AxiosResponse<any,any>>{
@@ -183,7 +233,9 @@ export class RequestHandler implements IRequestHandler{
        }catch(ex){
 
         this._logger.error("Error during POST request.", {error:ex, response: response, request: request});
-        throw new Error(ex);
+        // Rethrow the original: wrapping in a new Error stringified the cause, discarded
+        // the stack, and flattened typed errors so `instanceof` failed at every call site.
+        throw ex instanceof Error ? ex : new Error(String(ex));
        }
     }
 
@@ -205,7 +257,9 @@ export class RequestHandler implements IRequestHandler{
             return response;
        }catch(ex){
         this._logger.error("Error during PUT request.", {error:ex, response: response, request: request});
-        throw new Error(ex);
+        // Rethrow the original: wrapping in a new Error stringified the cause, discarded
+        // the stack, and flattened typed errors so `instanceof` failed at every call site.
+        throw ex instanceof Error ? ex : new Error(String(ex));
        }
     }
 
@@ -228,7 +282,9 @@ export class RequestHandler implements IRequestHandler{
         return response;
        }catch(ex){
             this._logger.error("Error during GET request.", {error:ex, response: response, request: request});
-            throw new Error(ex);
+            // Rethrow the original: wrapping in a new Error stringified the cause, discarded
+            // the stack, and flattened typed errors so `instanceof` failed at every call site.
+            throw ex instanceof Error ? ex : new Error(String(ex));
        }
     }
 
@@ -249,12 +305,19 @@ export class RequestHandler implements IRequestHandler{
         return response;
        }catch(ex){
             this._logger.error("Error during DELETE request.", {error:ex, response: response, request: request});
-            throw new Error(ex);
+            // Rethrow the original: wrapping in a new Error stringified the cause, discarded
+            // the stack, and flattened typed errors so `instanceof` failed at every call site.
+            throw ex instanceof Error ? ex : new Error(String(ex));
        }
     }
 
     private async getRequestConfig(request: HTTPRequest):Promise<{ config: any }>{
-                                            
+
+        // Before the session is bound into the request. makeRequest derives the
+        // destination host from auth.instanceUrl, so a mismatch here does not send a
+        // bad cookie to the right host — it sends a valid session to the wrong one.
+        this.assertSessionMatchesBoundInstance();
+
         const config = {
             auth: this._session,
         } as any;

@@ -8,6 +8,7 @@ export * from './exception/FileException.js';
 export * from './exception/FileExistsException.js';
 export * from './exception/InvalidParameterException.js';
 export * from './exception/PathException.js';
+export * from './exception/StaleInstanceError.js';
 export * from './model/types.js';
 export * from './sn/Application.js';
 export * from './sn/BackgroundScriptExecutor.js';

@@ -24,7 +24,18 @@ export class ServiceNowRequest{
         this.auth = AuthenticationHandlerFactory.createAuthHandler(this._instance);
         this._requestHandler = RequestHandlerFactory.createRequestHandler( this.auth);
         this.auth.setRequestHandler(this._requestHandler);
-        
+
+        // Declare which instance this handler serves, so a session minted for any
+        // other instance is refused before it reaches the wire.
+        if (this._instance) {
+            this._requestHandler.bindInstance?.(this._instance);
+        }
+
+    }
+
+    /** The instance this request is bound to. Fixed at construction. */
+    public getInstance():ServiceNowInstance{
+        return this._instance;
     }
 
     public async executeRequest<T>(request: HTTPRequest) : Promise<IHttpResponse<T>>{

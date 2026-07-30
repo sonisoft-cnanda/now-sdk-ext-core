@@ -1,5 +1,20 @@
 import { IServiceNowInstance } from "./IServiceNowInstance";
 
+/**
+ * Monotonic source of instance identity.
+ *
+ * A ServiceNowInstance is immutable once constructed — every field is private with
+ * only a getter — so object identity *is* the generation, and a construction ordinal
+ * captures it exactly. Deliberately not a hash of the credential: identity must not
+ * require touching credential material.
+ *
+ * This is what lets a session be tied to the instance it was minted for. A consumer
+ * that refreshes a connection (now-sdk-ext-mcp evicts on a 30-minute TTL) constructs
+ * a new ServiceNowInstance, which takes a new id, which no longer matches the id
+ * recorded against a cached session.
+ */
+let nextInstanceId = 1;
+
 export interface ServiceNowSettingsInstance {
     host?:string;
     username?:string;
@@ -18,6 +33,8 @@ export class ServiceNowInstance implements IServiceNowInstance{
     private _password:string;
     
     private _credential:unknown;
+
+    private readonly _instanceId:number = nextInstanceId++;
 
     constructor(snInstanceSettingsObj?:ServiceNowSettingsInstance | null){
         if(typeof snInstanceSettingsObj != 'undefined' && snInstanceSettingsObj != null){
@@ -67,5 +84,16 @@ export class ServiceNowInstance implements IServiceNowInstance{
 
     public get credential():unknown{
         return this._credential;
+    }
+
+    /**
+     * Stable identity for this instance object, unique within the process.
+     *
+     * Used to tie a session to the instance it was minted for, so a request can
+     * never be dispatched with another instance's credentials. Not persisted and
+     * not meaningful across processes.
+     */
+    getInstanceId():number{
+        return this._instanceId;
     }
 }
