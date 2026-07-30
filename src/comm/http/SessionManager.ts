@@ -97,13 +97,19 @@ export class SessionManager {
             return existing;
         }
 
-        const authPromise = (async () => {
+        const authPromise: Promise<ServiceNowRequest> = (async () => {
             try {
                 this._logger.debug(`Authenticating session for alias: ${key}`);
                 await request.getUserSession();
                 return request;
             } finally {
-                this._authPromises.delete(key);
+                // Only clear our own entry. An instance swap on this alias evicts the
+                // map and a fresh caller can install a NEW promise under the same key
+                // while this one is still settling — an unconditional delete would
+                // remove theirs, costing a duplicate login.
+                if (this._authPromises.get(key) === authPromise) {
+                    this._authPromises.delete(key);
+                }
             }
         })();
 

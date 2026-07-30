@@ -26,7 +26,12 @@ export interface IRequestHandler{
     /**
      * Declares which instance this handler serves. Set once, at construction.
      * A session recorded for any other instance will be refused at dispatch.
+     *
+     * Optional so that adding it is not a breaking change for anyone implementing
+     * this interface outside the repo. A handler that does not implement it simply
+     * has no bound identity, and the dispatch guard stays permissive — the same
+     * behaviour as a handler built without an instance.
      */
-    bindInstance(instance: IServiceNowInstance);
+    bindInstance?(instance: IServiceNowInstance);
 
 }

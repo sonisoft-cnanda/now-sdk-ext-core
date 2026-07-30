@@ -56,11 +56,22 @@ export class RequestHandler implements IRequestHandler{
 
 
     public setSession(session: any, instance?: IServiceNowInstance){
+        const previous = this._sessionInstanceId;
         this._session = session;
         // Deliberately reset to undefined when no instance is supplied: the session
         // changed and we no longer know whose it is, so the guard must go permissive
         // rather than keep asserting against the previous owner's id.
         this._sessionInstanceId = instance?.getInstanceId?.();
+
+        // Going from known to unknown silently disables the cross-instance guard for
+        // this handler. `instance` is optional and easy to forget, so say so out loud
+        // rather than only at debug level from inside the assertion.
+        if (previous !== undefined && this._sessionInstanceId === undefined) {
+            this._logger.warn(
+                "Session replaced without an owning instance; the cross-instance guard is now inactive for this handler.",
+                { previousSessionInstanceId: previous },
+            );
+        }
     }
 
     public bindInstance(instance: IServiceNowInstance){

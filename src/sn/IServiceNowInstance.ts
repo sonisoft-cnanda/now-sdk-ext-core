@@ -14,6 +14,14 @@ export interface IServiceNowInstance{
 
     get credential():unknown;
 
-    /** Stable, process-local identity used to bind a session to the instance it was minted for. */
-    getInstanceId():number;
+    /**
+     * Stable, process-local identity used to bind a session to the instance it was
+     * minted for.
+     *
+     * Optional so that adding it is not a breaking change for anyone implementing
+     * this interface outside the repo. An implementation without it has no identity
+     * to compare, and every guard treats unknown identity as permissive rather than
+     * as a mismatch.
+     */
+    getInstanceId?():number;
 }

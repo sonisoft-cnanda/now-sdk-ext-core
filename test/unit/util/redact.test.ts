@@ -184,4 +184,39 @@ describe('stripSecretsFromError', () => {
         expect(stripSecretsFromError(null)).toBeNull();
         expect(stripSecretsFromError(undefined)).toBeUndefined();
     });
+
+    // `new Error(msg, {cause})` installs cause as a NON-ENUMERABLE own property, so an
+    // Object.keys walk never sees it. A wrapped network or auth failure is exactly the
+    // shape that carries a credential-bearing cause, so missing it would defeat the
+    // function's stated purpose.
+    it('scrubs a non-enumerable cause', () => {
+        const cause: any = new Error('inner');
+        cause.config = { auth: aBasicSession() };
+        const err = new Error('outer', { cause });
+
+        const out: any = stripSecretsFromError(err);
+
+        expect(JSON.stringify(out.cause)).not.toContain('SUPER-SECRET-USER-TOKEN');
+        expect(out.cause.message).toBe('inner');
+    });
+
+    it('keeps cause non-enumerable after scrubbing', () => {
+        // Re-adding it as enumerable would make it start appearing in JSON.stringify
+        // output everywhere an error is serialized.
+        const err = new Error('outer', { cause: new Error('inner') });
+        stripSecretsFromError(err);
+        expect(Object.getOwnPropertyDescriptor(err, 'cause')?.enumerable).toBe(false);
+        expect(Object.keys(err)).not.toContain('cause');
+    });
+
+    it('does not throw when cause cannot be replaced', () => {
+        const err = new Error('outer');
+        Object.defineProperty(err, 'cause', {
+            value: { password: 'LEAKED' },
+            enumerable: false,
+            writable: false,
+            configurable: false,
+        });
+        expect(() => stripSecretsFromError(err)).not.toThrow();
+    });
 });

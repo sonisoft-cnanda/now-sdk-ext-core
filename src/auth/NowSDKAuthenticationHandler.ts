@@ -8,7 +8,6 @@ import { IAuthenticationHandler } from "./IAuthenticationHandler";
 import { ICookieStore } from "../comm/http/ICookieStore";
 import { ServiceNowInstance } from "../sn/ServiceNowInstance";
 import { getSafeUserSession } from "@servicenow/sdk-cli-core/dist/util/sessionToken.js";
-import { StaleInstanceError } from "../exception/StaleInstanceError";
 import { stripSecretsFromError } from "../util/redact";
 
 
@@ -40,20 +39,18 @@ export class NowSDKAuthenticationHandler implements IAuthenticationHandler{
 
         try{
             const auth = {credentials: this._instance.credential};
-            const instanceAtStart = this._instance;
             const session : unknown = await getSafeUserSession(auth, this._logger);
             if(session){
-                // The await above is a full network login — the widest window in the
-                // system. If the instance this handler serves was swapped while it was
-                // open, installing the session now would bind one instance's
-                // credentials to another's handler.
-                if(this._instance !== instanceAtStart){
-                    throw new StaleInstanceError(
-                        "The instance changed while a login was in flight; discarding the session rather than installing it.",
-                        "Retry the operation. A fresh login will run against the current instance.",
-                    );
-                }
-                this._requestHandler.setSession(session, instanceAtStart);
+                // Recording WHICH instance this session was minted for is the whole
+                // point: RequestHandler compares it against the instance it is bound to
+                // before every dispatch, which is where a mismatch is actually caught.
+                //
+                // There is deliberately no re-check of this._instance across the await.
+                // It is assigned once in the constructor and never reassigned, and
+                // AuthenticationHandlerFactory builds a fresh handler per instance, so
+                // such a check could not fire — it would only imply a protection that
+                // does not exist here.
+                this._requestHandler.setSession(session, this._instance);
                 this.setLoggedIn(true);
             }else{
                 throw new Error("Unable to login.");

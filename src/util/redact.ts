@@ -181,6 +181,27 @@ export function stripSecretsFromError<T>(error: T): T {
             }
         }
     }
+
+    // `cause` has to be handled by name. `new Error(msg, {cause})` installs it as a
+    // NON-ENUMERABLE own property, so the Object.keys loop above never sees it — and
+    // a wrapped network or auth failure is exactly the shape that carries a
+    // credential-bearing cause. Reassigned through the same descriptor so it stays
+    // non-enumerable and does not start showing up in JSON.stringify output.
+    if ("cause" in err) {
+        try {
+            const redactedCause = isSecretKey("cause") ? REDACTED : redactValue(err.cause);
+            Object.defineProperty(err, "cause", {
+                value: redactedCause,
+                writable: true,
+                enumerable: false,
+                configurable: true,
+            });
+        } catch {
+            // A non-configurable cause cannot be replaced; leave it rather than throw
+            // from inside a function whose whole job is to make rethrowing safe.
+        }
+    }
+
     return error;
 }
 
