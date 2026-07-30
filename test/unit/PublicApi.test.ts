@@ -88,6 +88,16 @@ function exportedNames(): string[] {
         expect(names).toContain('isStaleInstanceError');
     });
 
+    it('exports the progress callback surface for long-running operations', () => {
+        // Consumers cannot pass onProgress to installStoreApplicationAndWait or
+        // waitForTestSuiteCompletion without the type, and cannot build their own
+        // dedupe without the emitter.
+        const names = exportedNames();
+        expect(names).toContain('createProgressEmitter');
+        expect(names).toContain('OperationProgress');
+        expect(names).toContain('OperationProgressCallback');
+    });
+
     it('does not export SessionManager', () => {
         // Deliberately internal (removed from the barrel in f5379e4). ctix used
         // to re-add it on every full build; the barrel is hand-authored now so

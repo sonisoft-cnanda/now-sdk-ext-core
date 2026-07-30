@@ -6,6 +6,7 @@ import { HTTPRequest } from "../../comm/http/HTTPRequest";
 import { IHttpResponse } from "../../comm/http/IHttpResponse";
 import { ServiceNowInstance } from "../ServiceNowInstance";
 import { ProgressResult, ProgressResultResponse } from "../ProgressWorker";
+import { OperationProgressCallback, createProgressEmitter } from "../OperationProgress";
 
 
 export class ATFTestExecutor{
@@ -226,12 +227,23 @@ export class ATFTestExecutor{
      * @param pollIntervalMs Polling interval in milliseconds (default: 5000)
      * @returns Promise<TestSuiteExecutionResult> The final execution results
      */
-    async waitForTestSuiteCompletion(progressId: string, pollIntervalMs: number = 5000): Promise<TestSuiteExecutionResult> {
+    async waitForTestSuiteCompletion(progressId: string, pollIntervalMs: number = 5000, onProgress?: OperationProgressCallback): Promise<TestSuiteExecutionResult> {
+        const emit = createProgressEmitter(onProgress);
         let progress: TestSuiteExecutionResponse = await this.getTestSuiteProgress(progressId);
-        
+        emit({
+            message: progress.status_message || progress.status_label || 'Test suite started',
+            percentComplete: progress.percent_complete,
+            status: progress.status
+        });
+
         while (progress.percent_complete < 100 && progress.status !== "3" && progress.status !== "4") {
             await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
             progress = await this.getTestSuiteProgress(progressId);
+            emit({
+                message: progress.status_message || progress.status_label || 'Running test suite',
+                percentComplete: progress.percent_complete,
+                status: progress.status
+            });
         }
 
         if (progress.links && progress.links.results && progress.links.results.id) {
@@ -272,9 +284,9 @@ export class ATFTestExecutor{
      * @param pollIntervalMs Polling interval in milliseconds (default: 5000)
      * @returns Promise<TestSuiteExecutionResult> The final execution results
      */
-    async executeTestSuiteAndWait(testSuiteSysId: string, options?: Partial<TestSuiteExecutionRequest>, pollIntervalMs: number = 5000): Promise<TestSuiteExecutionResult> {
+    async executeTestSuiteAndWait(testSuiteSysId: string, options?: Partial<TestSuiteExecutionRequest>, pollIntervalMs: number = 5000, onProgress?: OperationProgressCallback): Promise<TestSuiteExecutionResult> {
         const executionResponse = await this.executeTestSuite(testSuiteSysId, options);
-        return await this.waitForTestSuiteCompletion(executionResponse.links.progress.id, pollIntervalMs);
+        return await this.waitForTestSuiteCompletion(executionResponse.links.progress.id, pollIntervalMs, onProgress);
     }
 
     /**
@@ -284,9 +296,9 @@ export class ATFTestExecutor{
      * @param pollIntervalMs Polling interval in milliseconds (default: 5000)
      * @returns Promise<TestSuiteExecutionResult> The final execution results
      */
-    async executeTestSuiteByNameAndWait(testSuiteName: string, options?: Partial<TestSuiteExecutionRequest>, pollIntervalMs: number = 5000): Promise<TestSuiteExecutionResult> {
+    async executeTestSuiteByNameAndWait(testSuiteName: string, options?: Partial<TestSuiteExecutionRequest>, pollIntervalMs: number = 5000, onProgress?: OperationProgressCallback): Promise<TestSuiteExecutionResult> {
         const executionResponse = await this.executeTestSuiteByName(testSuiteName, options);
-        return await this.waitForTestSuiteCompletion(executionResponse.links.progress.id, pollIntervalMs);
+        return await this.waitForTestSuiteCompletion(executionResponse.links.progress.id, pollIntervalMs, onProgress);
     }
 
 }
