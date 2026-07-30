@@ -15,11 +15,12 @@ paths = [
     '''coverage''',
     '''\.bin''',
     '''package-lock\.json''',
-    # Local Winston output. Gitignored and never committed, but `gitleaks dir`
-    # walks the filesystem rather than the git index, so without this entry a
-    # local run drowns in ~105 findings from logs/app-*.log and buries anything
-    # real. Does not affect `gitleaks git`, which only sees committed content.
-    '''^logs/''',
+    # NOTE: '^logs/' used to be allowlisted here. A local `gitleaks dir` run drowned
+    # in ~105 findings from logs/app-*.log, because Logger wrote live sessions to
+    # disk — RequestHandler logged its whole request config, and config.auth IS the
+    # session. That is fixed at the source (see src/util/redact.ts, wired into
+    # Logger as a format), so the suppression is no longer needed and the logs are
+    # back under the scanner where they belong.
 ]
 
 # Synthetic placeholder values used as jest fixtures. Scoped to the exact

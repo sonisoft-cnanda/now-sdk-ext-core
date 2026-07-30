@@ -11,6 +11,7 @@ import { makeRequest } from "@servicenow/sdk-cli-core/dist/http/index.js";
 import { DOMParser } from '@xmldom/xmldom';
 import { IServiceNowInstance } from '../../sn/IServiceNowInstance';
 import { StaleInstanceError } from '../../exception/StaleInstanceError';
+import { stripSecretsFromError } from '../../util/redact';
 
 //axios.defaults.withCredentials = true;
 
@@ -235,7 +236,8 @@ export class RequestHandler implements IRequestHandler{
         this._logger.error("Error during POST request.", {error:ex, response: response, request: request});
         // Rethrow the original: wrapping in a new Error stringified the cause, discarded
         // the stack, and flattened typed errors so `instanceof` failed at every call site.
-        throw ex instanceof Error ? ex : new Error(String(ex));
+        // Scrubbed first — the consumer's logger has no redaction format of its own.
+        throw ex instanceof Error ? stripSecretsFromError(ex) : new Error(String(ex));
        }
     }
 
@@ -259,7 +261,8 @@ export class RequestHandler implements IRequestHandler{
         this._logger.error("Error during PUT request.", {error:ex, response: response, request: request});
         // Rethrow the original: wrapping in a new Error stringified the cause, discarded
         // the stack, and flattened typed errors so `instanceof` failed at every call site.
-        throw ex instanceof Error ? ex : new Error(String(ex));
+        // Scrubbed first — the consumer's logger has no redaction format of its own.
+        throw ex instanceof Error ? stripSecretsFromError(ex) : new Error(String(ex));
        }
     }
 
@@ -284,7 +287,8 @@ export class RequestHandler implements IRequestHandler{
             this._logger.error("Error during GET request.", {error:ex, response: response, request: request});
             // Rethrow the original: wrapping in a new Error stringified the cause, discarded
             // the stack, and flattened typed errors so `instanceof` failed at every call site.
-            throw ex instanceof Error ? ex : new Error(String(ex));
+            // Scrubbed first — the consumer's logger has no redaction format of its own.
+            throw ex instanceof Error ? stripSecretsFromError(ex) : new Error(String(ex));
        }
     }
 
@@ -307,7 +311,8 @@ export class RequestHandler implements IRequestHandler{
             this._logger.error("Error during DELETE request.", {error:ex, response: response, request: request});
             // Rethrow the original: wrapping in a new Error stringified the cause, discarded
             // the stack, and flattened typed errors so `instanceof` failed at every call site.
-            throw ex instanceof Error ? ex : new Error(String(ex));
+            // Scrubbed first — the consumer's logger has no redaction format of its own.
+            throw ex instanceof Error ? stripSecretsFromError(ex) : new Error(String(ex));
        }
     }
 
