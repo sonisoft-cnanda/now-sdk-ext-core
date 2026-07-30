@@ -8,7 +8,8 @@ This is the core library used by both the `nex` CLI (`now-sdk-ext-cli`) and the 
 
 ## Architecture
 
-- **Base Class**: `SNRequestBase` — parent for all manager classes. Encapsulates a `ServiceNowRequest` and provides logger utilities.
+- **Managers** — each takes a `ServiceNowInstance` and constructs its OWN `ServiceNowRequest` in its constructor. `SNRequestBase` exists and offers that shape, but only `UserRequest` extends it; do not assume a shared base.
+- **`SessionManager`** — caches a `ServiceNowRequest` per instance alias. Only four consumers use it (`TableAPIRequest`, `BackgroundScriptExecutor`, `AMBClient`, `ScriptTracer`); the other ~21 managers bypass it entirely. Internal — deliberately excluded from the public barrel.
 - **ServiceNowInstance** — central connection object holding host, username, alias, and credential. Passed to all manager constructors.
 - **ServiceNowRequest** — HTTP abstraction layer that handles authentication, CSRF tokens, cookies, and session management automatically via `@servicenow/sdk-cli-core`'s `makeRequest`.
 - **Communication Layer**: `RequestHandler` (HTTP with cookie/auth handling), `ATFMessageHandler` (WebSocket), `AuthenticatedWebSocket` (AMB event subscriptions via CometD).
@@ -47,16 +48,14 @@ src/
 │   ├── updateset/              # Update set management
 │   ├── user/                   # User management with factory pattern
 │   ├── workflow/               # Workflow management
-│   ├── xml/                    # XML record import/export
-│   └── factory/                # ISNFactory base pattern
-├── util/                       # Logger (Winston), CSRF helper, string utilities
-├── exception/                  # Custom exception classes
-├── encryption/                 # Encrypt/decrypt utilities
+│   └── xml/                    # XML record import/export
+├── util/                       # Logger (Winston), redact.ts, CSRF helper, string utilities
+├── exception/                  # Custom exception classes — ANY file here is auto-exported
+├── credentials/                # initCredentialStore() opt-in shim (see Key Patterns)
 ├── constants/                  # Extension, file, and ServiceNow constants
-├── model/                      # Shared types (ServiceNowResponse<T>, ReferenceLink, etc.)
-└── assets/                     # Static assets (excluded from build)
+└── model/                      # Shared types (ServiceNowResponse<T>, ReferenceLink, etc.)
 test/
-├── unit/                       # Fast unit tests (~180+ tests, mock-based)
+├── unit/                       # Fast unit tests (~1,400, mock-based)
 ├── integration/                # Integration tests (require ServiceNow credentials)
 └── test_utils/                 # Test configuration and utilities
 dist/                           # Compiled JS output (gitignored)
@@ -89,7 +88,7 @@ npm run watch-test         # Watch mode for unit tests
 
 - **Unit tests**: Mock-based, run in ~2-3 seconds, no ServiceNow instance required
 - **Integration tests**: Hit a real ServiceNow instance, require stored credentials
-- **Path aliases**: `@src/*` → `src/*`, `@test/*` → `test/*` (configured in tsconfig and jest)
+- **Path aliases**: `@src/*` and `@test/*` are configured in tsconfig and jest, but **no test actually uses them** — every test imports by relative path. Match the surrounding style rather than the config.
 
 ## Key Patterns
 
@@ -100,9 +99,44 @@ npm run watch-test         # Watch mode for unit tests
 - `initCredentialStore()` (from `src/credentials/ensureShim.ts`, exported via `PublicApi.ts`) opts into headless-safe credential storage. `@sonisoft/sn-credstore` is an **optional** dependency — required would force a credential shim onto every consumer of this library — so `initCredentialStore()` reports `{active: false, reason: 'not-installed'}` rather than throwing when it is absent. It is deliberately **not** in the generated barrel and has no import side effect: importing this library must never monkeypatch the SDK's credential storage. Applications that own their entry point should `import '@sonisoft/sn-credstore/register'` there instead — earlier and unconditional.
 - Winston-based `Logger` class for structured logging.
 
+## Releasing & Publishing
+
+**Publishing to npm uses a Trusted Publisher (OIDC), not an auth token.** npmjs is
+phasing token-based publishing out, so nothing here should reintroduce it.
+
+Practically, that means:
+
+- The workflow needs `permissions: id-token: write`. Without it npm cannot mint
+  the OIDC credential and the publish fails with an auth error that reads like a
+  missing token — which is the wrong thing to go looking for.
+- The package must be registered as a trusted publisher on npmjs, bound to this
+  repository and workflow file. Renaming `publish.yml`, or publishing from a
+  different workflow, breaks that binding.
+- `--provenance` works because of the same OIDC identity, which is why published
+  versions carry SLSA attestations.
+- Do NOT add an `NPM_TOKEN` back. If publishing fails, the fix is in the trusted
+  publisher configuration on npmjs, not a new secret.
+
+The release chain:
+
+1. Merge to `main` → `release.yml` runs `semantic-release` (conventional commits,
+   angular preset). It bumps the version, tags, and cuts a GitHub release.
+   `npmPublish` is `false` — semantic-release never publishes.
+2. That GitHub release fires `publish.yml`, which builds and publishes.
+
+Step 2 fires **only** because `release.yml` runs semantic-release with
+`RELEASE_TOKEN` rather than the default `GITHUB_TOKEN`. GitHub suppresses events
+raised by `GITHUB_TOKEN` so a workflow cannot trigger further workflows. Since
+`release.yml` falls back (`secrets.RELEASE_TOKEN || secrets.GITHUB_TOKEN`),
+removing that secret leaves releases working while publishing silently stops.
+
+`publish.yml` also accepts `workflow_dispatch` for backfilling a version, dry
+runs, or republishing a specific ref. It skips when the version already exists on
+npm, so re-running it is a no-op rather than an error.
+
 ## Conventions
 
 - ES Modules (`"type": "module"` in package.json)
-- TypeScript strict mode, target ES2022
+- TypeScript target ES2022. NOTE: `strict` and `noImplicitAny` are **false** — do not write code that assumes strict null checks, and do not add non-null assertions to satisfy a checker that is not running
 - Semantic versioning via `semantic-release`
 - Pre-commit hooks configured in `.githooks/`
