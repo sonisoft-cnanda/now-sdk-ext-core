@@ -429,6 +429,13 @@ export async function flushLogs(): Promise<void> {
 
     if (root === current) {
         root = undefined;
+        // Bump the epoch as well, exactly as configureLogging and resetLoggingForTests
+        // do. Dropping `root` alone is not enough: a Logger that already cached this
+        // instance sees an unchanged epoch, keeps the reference, and its next call is a
+        // write to an ended stream — which THROWS ("write after end"), losing the whole
+        // call rather than just the line. flushLogs is public API meant to be callable
+        // mid-process, not only on the way out.
+        epochCounter++;
     }
 }
 

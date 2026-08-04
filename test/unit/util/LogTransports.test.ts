@@ -192,6 +192,24 @@ describe('shared root logger', () => {
         );
     });
 
+    it('keeps its own label even when metadata carries one', async () => {
+        configureLogging({ file: true, level: 'debug' });
+        // Latent today, but metadata objects here are built ad hoc and grow. A caller
+        // key named `label` silently misattributed the record to another component.
+        new Logger('RealOwner').info('labelled message', { label: 'IMPOSTER', keep: 1 });
+        await flushLogs();
+
+        const dir = path.join(tmpRoot, 'now-sdk-ext', 'logs');
+        const raw = await readLogsContaining(dir, 'labelled message');
+        const line = raw
+            .split('\n')
+            .filter(Boolean)
+            .map((l) => JSON.parse(l) as { label?: string; metadata?: Record<string, unknown> })
+            .find((l) => (l.metadata as Record<string, unknown> | undefined)?.keep === 1);
+
+        expect(line?.label).toBe('RealOwner');
+    });
+
     it('still labels each record with its own logger name', async () => {
         configureLogging({ file: true, level: 'debug' });
         new Logger('AlphaManager').info('alpha message');
@@ -207,6 +225,40 @@ describe('shared root logger', () => {
 
         expect(lines.find((l) => l.message === 'alpha message')?.label).toBe('AlphaManager');
         expect(lines.find((l) => l.message === 'beta message')?.label).toBe('BetaManager');
+    });
+});
+
+describe('reuse after flushLogs', () => {
+    it('does not write to an ended stream — a Logger kept across a flush must rebuild', async () => {
+        configureLogging({ file: true, level: 'debug' });
+        const logger = new Logger('Reused');
+        logger.info('before flush');
+
+        // flushLogs ends the shared root. configureLogging and resetLoggingForTests
+        // both bump the epoch when they drop it; flushLogs did not, so any Logger that
+        // had already cached the root kept writing to the ended stream. That throws
+        // "write after end" — a crash, not a lost line — and flushLogs is public API
+        // meant to be called mid-process, not only on the way out.
+        await flushLogs();
+
+        expect(() => logger.info('after flush')).not.toThrow();
+
+        await flushLogs();
+        const dir = path.join(tmpRoot, 'now-sdk-ext', 'logs');
+        await expect(readLogsContaining(dir, 'after flush')).resolves.toContain('after flush');
+    });
+
+    it('keeps every live Logger usable, not just newly constructed ones', async () => {
+        configureLogging({ file: true, level: 'debug' });
+        const first = new Logger('First');
+        const second = new Logger('Second');
+        first.info('warmup');
+        second.info('warmup');
+
+        await flushLogs();
+
+        expect(() => first.warn('first still works')).not.toThrow();
+        expect(() => second.warn('second still works')).not.toThrow();
     });
 });
 

@@ -43,6 +43,21 @@ const SECRET_KEYS: readonly string[] = [
     "sysparm_ck",
     "apikey",
     "api_key",
+    // Bayeux/CometD. `clientId` is not an identifier in the harmless sense — it is the
+    // credential that authorises every subsequent message on an AMB connection, and
+    // SubscriptionCommandSender logs whole handshake responses as metadata.
+    "clientid",
+    "client_id",
+    // ServiceNow session cookies, by name. `redactMessage` already catches these in
+    // message text; without them here the same value was redacted in a string and left
+    // intact as a key. Listed explicitly rather than adding a `session` FRAGMENT, which
+    // would also destroy the deliberate non-secret diagnostics in AMBClient
+    // (`sessionKeys`, `sessionType`) that log key names and shapes but never values.
+    "jsessionid",
+    "glide_session_store",
+    "glide_user_route",
+    "glide_user_activity",
+    "glide_sso_id",
 ];
 
 /** Substrings that make a key secret regardless of what surrounds them. */

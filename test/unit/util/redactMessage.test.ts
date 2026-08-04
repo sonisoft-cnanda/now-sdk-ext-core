@@ -16,7 +16,7 @@
  */
 
 import { describe, it, expect } from '@jest/globals';
-import { redactMessage } from '../../../src/util/redact';
+import { redactMessage, redactValue, isSecretKey } from '../../../src/util/redact';
 
 describe('redactMessage', () => {
     describe('the leaks that motivated it', () => {
@@ -102,5 +102,40 @@ describe('redactMessage', () => {
             expect(out).not.toContain('xxxxxxxxxx');
             expect(elapsedMs).toBeLessThan(250);
         });
+    });
+});
+
+describe('key-based redaction of AMB/CometD session material', () => {
+    // SubscriptionCommandSender logs whole CometD responses as metadata on the
+    // grounds that metadata is redacted. That is only true if the key list actually
+    // covers what a Bayeux response carries.
+    it.each(['clientId', 'client_id', 'JSESSIONID', 'glide_session_store', 'glide_user_route'])(
+        'treats %s as secret',
+        (key) => {
+            expect(isSecretKey(key)).toBe(true);
+        },
+    );
+
+    it('redacts a Bayeux handshake response', () => {
+        const out = redactValue({
+            channel: '/meta/handshake',
+            clientId: 'CLIENTID_SENTINEL_1234',
+            ext: { glide_session_store: 'STORE_SENTINEL_5678', replay: true },
+            successful: true,
+        });
+        const text = JSON.stringify(out);
+        expect(text).not.toContain('CLIENTID_SENTINEL_1234');
+        expect(text).not.toContain('STORE_SENTINEL_5678');
+        // and stays useful for debugging
+        expect(text).toContain('/meta/handshake');
+        expect(text).toContain('successful');
+    });
+
+    it('does not redact the non-secret session diagnostics the AMB code relies on', () => {
+        // AMBClient deliberately logs key NAMES and shapes, never values. Broadening
+        // to a `session` fragment would have destroyed these.
+        expect(isSecretKey('sessionKeys')).toBe(false);
+        expect(isSecretKey('sessionType')).toBe(false);
+        expect(isSecretKey('extendSession')).toBe(false);
     });
 });

@@ -75,7 +75,10 @@ export class Logger {
             return { label: this._labelName };
         }
         if (typeof metadata === "object" && !Array.isArray(metadata)) {
-            return { label: this._labelName, ...(metadata as Record<string, unknown>) };
+            // Label last, deliberately. Metadata objects here are assembled ad hoc and
+            // grow over time; a caller key named `label` would otherwise misattribute
+            // the record to a component that never emitted it.
+            return { ...(metadata as Record<string, unknown>), label: this._labelName };
         }
         return { label: this._labelName, meta: metadata };
     }
