@@ -57,6 +57,71 @@ const SECRET_FRAGMENTS: readonly string[] = [
 /** Depth cap. Session and response graphs are deep; nothing useful lives past this. */
 const MAX_DEPTH = 8;
 
+/**
+ * Named patterns for secrets interpolated into a log MESSAGE.
+ *
+ * Key-based redaction cannot reach these: by the time a template literal has been
+ * evaluated there is no key left, only text. So this matches on the secret's NAME as it
+ * appears in the text — the same rule, applied to a different carrier.
+ *
+ * Every pattern is anchored on a name and bounded in what it will consume. An unbounded
+ * `.*` here would be a denial-of-service on the logging path, and a value-shaped pattern
+ * (entropy, length) would redact half of every ServiceNow sys_id.
+ */
+const MESSAGE_PATTERNS: readonly { readonly re: RegExp; readonly with: string }[] = [
+    // A Cookie/Set-Cookie header carries several pairs; take the whole line, or the
+    // second pair survives while the first is redacted.
+    { re: /\b(set-cookie|cookie)(\s*:\s*).+/gi, with: "$1$2" + REDACTED },
+    // `Bearer <token>` — the one case with no delimiter to key off.
+    { re: /\b(bearer\s+)[A-Za-z0-9._~+/-]{8,}=*/gi, with: "$1" + REDACTED },
+    // Session/servlet cookies by name, wherever they appear in the text.
+    {
+        re: /\b(JSESSIONID|glide_session_store|glide_user_route|glide_user_activity|glide_sso_id|sysparm_ck)(\s*=\s*)[^\s;,"']+/gi,
+        with: "$1$2" + REDACTED,
+    },
+    // `<secret-ish label> … : value` / `= value`. The middle is capped at 32 chars and
+    // may not itself contain a delimiter, which is what keeps this from running away —
+    // it is how `Session ID from debugger/start: <token>` is caught without also
+    // eating `Error during request. Status: 401`.
+    {
+        re: /\b(pass(?:word|wd)?|secret|tokens?|api[_-]?keys?|credentials?|cookies?|session[ _-]?id|authorization|x-usertoken)([^:=\n]{0,32}?[:=]\s*)[^\s,;)\]}]+/gi,
+        with: "$1$2" + REDACTED,
+    },
+];
+
+/** Cheap pre-filter. Most messages carry no delimiter and can skip the scan entirely. */
+function mayContainSecret(message: string): boolean {
+    return message.includes("=") || message.includes(":") || /bearer/i.test(message);
+}
+
+/**
+ * Removes credential material from a log message string.
+ *
+ * The leak this exists for: `ScriptTracer` logged `Session ID from debugger/start:
+ * ${token}` at INFO level, so a live session token landed in `app-info.log` on every
+ * trace. `AMBClient` did the same with session cookies, truncated to 80 characters —
+ * truncation is not redaction, and a partial cookie is still a cookie.
+ *
+ * Deliberately biased toward over-redaction. Losing `30s` from `token refresh: 30s`
+ * costs a diagnostic; leaking a session token costs an instance.
+ */
+export function redactMessage(message: string): string {
+    if (typeof message !== "string" || message.length === 0) {
+        return message;
+    }
+    if (!mayContainSecret(message)) {
+        return message;
+    }
+
+    let out = message;
+    for (const pattern of MESSAGE_PATTERNS) {
+        // Shared module-level regexes carry lastIndex between calls with /g.
+        pattern.re.lastIndex = 0;
+        out = out.replace(pattern.re, pattern.with);
+    }
+    return out;
+}
+
 export function isSecretKey(key: string): boolean {
     if (!key) {
         return false;

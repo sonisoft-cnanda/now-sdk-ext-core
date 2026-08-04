@@ -25,6 +25,7 @@ const RUN = `${Date.now()}`;
 const SECRET_TOKEN = `LEAKED-USER-TOKEN-${RUN}`;
 const SECRET_COOKIE = `LEAKED-COOKIE-${RUN}`;
 const SECRET_PASSWORD = `LEAKED-PASSWORD-${RUN}`;
+const SECRET_IN_MESSAGE = `LEAKEDVIAMESSAGE${RUN}`;
 const HARMLESS_PATH = `/api/now/table/incident_${RUN}`;
 
 /** Winston file transports flush asynchronously; poll rather than guess a delay. */
@@ -63,6 +64,11 @@ describe('Logger redaction (end to end, on disk)', () => {
             },
         });
 
+        // The other half of NEX-3, and the half a metadata format cannot reach: the
+        // secret is already text by the time the format runs. This is verbatim the
+        // shape ScriptTracer used to log at INFO on every trace.
+        logger.debug(`Session ID from debugger/start: ${SECRET_IN_MESSAGE}`);
+
         const err: any = new Error(`request failed ${RUN}`);
         err.config = { auth: { password: SECRET_PASSWORD } };
         logger.error('Error during request.', { error: err, request: { path: HARMLESS_PATH } });
@@ -77,6 +83,12 @@ describe('Logger redaction (end to end, on disk)', () => {
 
     it('does not write a session cookie to the debug log', () => {
         expect(debugContents).not.toContain(SECRET_COOKIE);
+    });
+
+    it('does not write a secret interpolated into the message string', () => {
+        expect(debugContents).not.toContain(SECRET_IN_MESSAGE);
+        // and still says what happened
+        expect(debugContents).toContain('Session ID from debugger/start');
     });
 
     it('does not write a password carried on a thrown error to the error log', () => {

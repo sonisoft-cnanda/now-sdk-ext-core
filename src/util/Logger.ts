@@ -1,5 +1,5 @@
 import * as winston from "winston";
-import { redactValue, isSecretKey, REDACTED } from "./redact";
+import { redactValue, isSecretKey, redactMessage, REDACTED } from "./redact";
 const { combine, timestamp, json, metadata, label} = winston.format;
 const { format, transports } = winston;
 
@@ -17,8 +17,16 @@ export class Logger{
 	 * The specific leak that motivated it: RequestHandler built `{auth: this._session}`
 	 * and logged it at debug on every single request, writing live cookies and tokens
 	 * to logs/app-debug.log.
+	 *
+	 * `message` is scrubbed separately by `redactMessage`. Key-based redaction cannot
+	 * reach a secret that has already been interpolated into a template literal — there
+	 * is no key left by then, only text — and that is how ScriptTracer wrote a live
+	 * session token to app-info.log on every trace.
 	 */
 	static redactSecrets = winston.format((info) => {
+		if (typeof info.message === "string") {
+			info.message = redactMessage(info.message);
+		}
 		for (const key of Object.keys(info)) {
 			if (key === "level" || key === "message" || key === "timestamp" || key === "label") {
 				continue;
