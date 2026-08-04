@@ -1,149 +1,126 @@
 import * as winston from "winston";
-import { redactValue, isSecretKey, redactMessage, REDACTED } from "./redact";
-const { combine, timestamp, json, metadata, label} = winston.format;
-const { format, transports } = winston;
+import { getRootLogger, logEpoch } from "./LogConfig";
 
+/**
+ * A named handle onto the process-wide logger.
+ *
+ * This used to build its own winston logger with four File transports per instance. It
+ * no longer builds anything: there are ~43 of these across the codebase, and
+ * `ServiceNowRequest` is constructed per HTTP call, so each request was opening four
+ * more never-closed append streams. That is where the 120 MB of logs came from, and it
+ * also made rotation impossible — File transports track size independently, so several
+ * on one path interleave renames and lose lines.
+ *
+ * Destination, level, and rotation now live in LogConfig and are set once by the
+ * application. See `configureLogging`.
+ */
+export class Logger {
+    _labelName: string;
 
-export class Logger{
+    /** Set only by `setLogger`. Overrides the shared root for this instance. */
+    private _override?: winston.Logger;
 
-	/**
-	 * Strips credential material from every log entry.
-	 *
-	 * Applied as a format rather than fixed at each call site on purpose. There are
-	 * ~40 logging calls across src/, several of which pass whole request configs and
-	 * session objects, and the set grows. Auditing call sites catches today's leaks
-	 * and none of tomorrow's; a format in the pipeline catches both.
-	 *
-	 * The specific leak that motivated it: RequestHandler built `{auth: this._session}`
-	 * and logged it at debug on every single request, writing live cookies and tokens
-	 * to logs/app-debug.log.
-	 *
-	 * `message` is scrubbed separately by `redactMessage`. Key-based redaction cannot
-	 * reach a secret that has already been interpolated into a template literal — there
-	 * is no key left by then, only text — and that is how ScriptTracer wrote a live
-	 * session token to app-info.log on every trace.
-	 */
-	static redactSecrets = winston.format((info) => {
-		if (typeof info.message === "string") {
-			info.message = redactMessage(info.message);
-		}
-		for (const key of Object.keys(info)) {
-			if (key === "level" || key === "message" || key === "timestamp" || key === "label") {
-				continue;
-			}
-			if (isSecretKey(key)) {
-				(info as Record<string, unknown>)[key] = REDACTED;
-				continue;
-			}
-			(info as Record<string, unknown>)[key] = redactValue((info as Record<string, unknown>)[key]);
-		}
-		return info;
-	});
+    private _cached?: winston.Logger;
+    private _epochSeen = -1;
 
-	static errorFilter = winston.format((info) => {
-		return info.level === "error" ? info : false;
-	  });
-
-	  static infoFilter = winston.format((info) => {
-		return info.level === "info" ? info : false;
-	  });
-
-	  static  debugFilter = winston.format((info) => {
-		return info.level === "debug" ? info : false;
-	  });
-
-    _labelName:string;
-	_localLogger:winston.Logger;
-
-  _logLevel:string;
-
-	public constructor(labelName:string, level:string = "info"){
-		this._labelName = labelName;
-    this._logLevel = level;
-		this.initLogger();
-	}
-
-    public setLogger(logger:winston.Logger):void{
-        this._localLogger = logger;
+    /**
+     * @param labelName Appears as `label` on every record from this instance.
+     * @param level Ignored. Kept so existing call sites still compile.
+     * @deprecated Pass the level to `configureLogging` instead — it applies process-wide.
+     */
+    public constructor(labelName: string, level?: string) {
+        this._labelName = labelName;
+        void level;
     }
 
-    public getLabel(){
-      return this._labelName;
+    /** Replaces the underlying winston logger for this instance only. Test seam. */
+    public setLogger(logger: winston.Logger): void {
+        this._override = logger;
     }
 
-    private initLogger():void{
-        this._localLogger = winston.createLogger({
-            level: this._logLevel,
-            format: combine(
-                // First in the chain: redact before anything reshapes, nests, or
-                // serializes the entry, so no later format can capture a raw value.
-                Logger.redactSecrets(),
-                label({ label: this._labelName }),
-                timestamp({ format: "YYYY-MM-DD HH:mm:ss" }),
-                // Format the metadata object
-                metadata({ fillExcept: ["message", "level", "timestamp", "label"] })
-            ),
-            transports: [
-              new transports.File({
-                filename: "logs/combined.log",
-                format: format.combine(timestamp(),format.json())
-              }),
-              new transports.File({
-                filename: "logs/app-error.log",
-                level: "error",
-                format: combine(Logger.errorFilter(), timestamp(), json()),
-              }),
-              new transports.File({
-                filename: "logs/app-info.log",
-                level: "info",
-                format: combine(Logger.infoFilter(), timestamp(), json()),
-              }),
-              new transports.File({
-                filename: "logs/app-debug.log",
-                level: "debug",
-                format: combine(Logger.debugFilter(), timestamp(), json()),
-              }),
-            ],
-            exitOnError: false
-          });
+    public getLabel(): string {
+        return this._labelName;
     }
 
-    public static createLogger(labelName:string):Logger{
+    /**
+     * @deprecated The `level` argument the constructor accepts is ignored; use
+     * `configureLogging({level})`.
+     */
+    public static createLogger(labelName: string): Logger {
         return new Logger(labelName);
     }
 
-	public debug(message:string, metadata?:unknown):void {
-		this._localLogger.debug(message, metadata);
-	}
+    /** Resolves the shared root, rebuilding the cached reference if config changed. */
+    private root(): winston.Logger {
+        if (this._override) {
+            return this._override;
+        }
+        if (this._epochSeen !== logEpoch()) {
+            this._cached = getRootLogger();
+            this._epochSeen = logEpoch();
+        }
+        return this._cached;
+    }
 
-    public info ( message:string, metadata?:unknown) :void{
-		this._localLogger.info(message, metadata);
-	}
+    /**
+     * Attaches this instance's label to the record.
+     *
+     * The label used to be a winston format bound to a per-instance logger. With one
+     * shared root it has to travel with the call. Callers pass all sorts of things as
+     * `metadata`, so a non-object is nested rather than spread — spreading a string
+     * would scatter it across numeric keys.
+     */
+    private meta(metadata?: unknown): Record<string, unknown> {
+        if (metadata === undefined || metadata === null) {
+            return { label: this._labelName };
+        }
+        if (typeof metadata === "object" && !Array.isArray(metadata)) {
+            return { label: this._labelName, ...(metadata as Record<string, unknown>) };
+        }
+        return { label: this._labelName, meta: metadata };
+    }
 
-	public error ( message:string, metadata?:unknown) :void{
-		this._localLogger.error(message, metadata);
-	}
+    public debug(message: string, metadata?: unknown): void {
+        this.root().debug(message, this.meta(metadata));
+    }
 
-	public warn ( message:string, metadata?:unknown) :void{
-		this._localLogger.warn(message, metadata);
-	}
+    public info(message: string, metadata?: unknown): void {
+        this.root().info(message, this.meta(metadata));
+    }
 
-	public addInfoMessage ( message:string, metadata?:unknown) :void{
-		this._localLogger.info(message, metadata);
-	}
+    public error(message: string, metadata?: unknown): void {
+        this.root().error(message, this.meta(metadata));
+    }
 
-	public addErrorMessage ( message:string, metadata?:unknown) :void{
-		this._localLogger.error(message, metadata);
-	}
+    public warn(message: string, metadata?: unknown): void {
+        this.root().warn(message, this.meta(metadata));
+    }
 
-	public addWarnMessage ( message:string, metadata?:unknown) :void{
-		this._localLogger.warn(message, metadata);
-	}
+    public verbose(message: string, metadata?: unknown): void {
+        this.root().verbose(message, this.meta(metadata));
+    }
 
-  public successful(message:string, metadata?:unknown){
-    this._localLogger.info(message, metadata);
-  }
+    public http(message: string, metadata?: unknown): void {
+        this.root().http(message, this.meta(metadata));
+    }
 
+    public silly(message: string, metadata?: unknown): void {
+        this.root().silly(message, this.meta(metadata));
+    }
+
+    public addInfoMessage(message: string, metadata?: unknown): void {
+        this.info(message, metadata);
+    }
+
+    public addErrorMessage(message: string, metadata?: unknown): void {
+        this.error(message, metadata);
+    }
+
+    public addWarnMessage(message: string, metadata?: unknown): void {
+        this.warn(message, metadata);
+    }
+
+    public successful(message: string, metadata?: unknown): void {
+        this.info(message, metadata);
+    }
 }
-
-

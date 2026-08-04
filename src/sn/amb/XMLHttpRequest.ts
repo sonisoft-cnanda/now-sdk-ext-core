@@ -19,9 +19,12 @@ import * as httpc from "node:http";
 import * as https from "node:https";
 import * as httpcProxyAgent from "http-proxy-agent";
 import * as httpsProxyAgent from "https-proxy-agent";
+import { Logger } from "../../util/Logger";
 
 // Bare minimum XMLHttpRequest implementation that works with CometD.
 export class XMLHttpRequest {
+
+    private static _logger: Logger = new Logger("XMLHttpRequest");
     static UNSENT = 0;
     static OPENED = 1;
     static HEADERS_RECEIVED = 2;
@@ -296,7 +299,9 @@ export class XMLHttpRequest {
 
     private debug(...args:any[]) {
         if (this.#options.logLevel === "debug") {
-            console.log.apply(this, Array.from(args));
+            // Never console.log here: this runs inside the MCP server process, where
+            // fd 1 carries JSON-RPC. The logger writes to stderr and redacts.
+            XMLHttpRequest._logger.debug("xhr", { args: Array.from(args) });
         }
     }
 }

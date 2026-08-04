@@ -87,16 +87,34 @@ and logged it at debug on every request — `config.auth` **is** the session. Th
 wrote live cookies and tokens to `logs/app-debug.log`, which is why
 `.gitleaks.toml` once had to allowlist `^logs/`.
 
-- Redaction is wired into `Logger` as a Winston format, so structured metadata is
-  handled for you.
-- **A format cannot scrub a message string.** Never interpolate a secret into the
-  message argument — that is how the CSRF token leaked. Pass it as a field, or
-  better, do not log it.
+- Redaction is wired into the shared logger as a Winston format, so structured
+  metadata is handled for you.
+- **Never interpolate a secret into the message argument.** `redactMessage` scrubs
+  named patterns out of message text as a backstop, but it matches on the secret's
+  NAME — it cannot know that an arbitrary token is a token. Pass it as a field, or
+  better, do not log it. ScriptTracer logged `Session ID …: ${token}` at INFO and
+  put a live session token on disk on every trace.
 - Before rethrowing, run the error through `stripSecretsFromError`. It scrubs in
   place so `instanceof` and the stack survive.
 
-The completion test is behavioural, not a unit assertion: log something, then
-grep `logs/*.log` for it.
+The completion test is behavioural, not a unit assertion: log something, then read
+the log file back and grep it. See `test/unit/util/LoggerRedaction.test.ts`, which
+opts into file logging in a temp directory to do exactly that.
+
+### 5a. Logging destination is the application's choice, never the library's
+
+File logging is **off by default**. `src/util/LogConfig.ts` owns one process-wide
+winston logger; `Logger` is only a named facade onto it. Three rules follow:
+
+- **Never write to stdout.** The MCP server carries JSON-RPC there, and one stray
+  `console.log` desynchronises the whole session. `test/unit/util/NoStdoutWrites.test.ts`
+  scans `src/` for this, because no unit test executes every code path.
+- **Never construct a logger with `transports: []`.** Winston `console.error`s the
+  RAW info object when a logger has no transports, and does so *before* the format
+  chain runs — so redaction never happens. "Off" is a transport with `silent: true`.
+- Configuration is process-global because ~43 field initializers do
+  `private _logger = new Logger("Name")` with no arguments. Do not try to thread
+  options through manager constructors.
 
 ### 6. Force state in tests; never wait on the clock
 
