@@ -61,6 +61,7 @@
     "@servicenow/sdk-core": "4.9.2",
     "@ts-morph/common": "^0.24.0",
     "@xmldom/xmldom": "^0.8.10",
+    "acorn": "^8.18.0",
     "async": "3.2.6",
     "bluebird": "3.7.2",
     "cometd": "^9.0.0",

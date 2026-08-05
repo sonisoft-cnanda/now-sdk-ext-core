@@ -47,10 +47,21 @@ export function policyRefusal(decision: Decision): PolicyRefusalError {
     const error = new Error(detail) as PolicyRefusalError & Record<symbol, unknown>;
     error.name = "PolicyRefusalError";
     error[POLICY_REFUSAL] = true;
+    // Non-enumerable AND writable, both load-bearing.
+    //
+    // `stripSecretsFromError` walks `Object.keys(err)` and reassigns every object-valued
+    // child through the redactor. An enumerable, non-writable `decision` made that throw
+    // `Cannot assign to read only property 'decision'` — which replaced the refusal with
+    // a TypeError on the way out, so callers saw a crash instead of a refusal and
+    // `isPolicyRefusal` returned false. Found by the live integration run, not by any
+    // unit test, because nothing in isolation puts a refusal through the redactor.
+    //
+    // Non-enumerable also keeps it out of JSON.stringify and out of log serialisation,
+    // which is where it would otherwise show up as noise.
     Object.defineProperty(error, "decision", {
         value: decision,
-        enumerable: true,
-        writable: false,
+        enumerable: false,
+        writable: true,
         configurable: true,
     });
     return error;

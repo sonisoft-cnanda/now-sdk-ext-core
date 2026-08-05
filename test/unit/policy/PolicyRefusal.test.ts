@@ -11,6 +11,7 @@
 
 import { describe, it, expect } from "@jest/globals";
 import { isPolicyRefusal, policyRefusal, refusalFor } from "../../../src/policy/PolicyRefusal";
+import { stripSecretsFromError } from "../../../src/util/redact";
 
 describe("policyRefusal", () => {
     it("is a real Error, so stacks and normal handling still work", () => {
@@ -88,5 +89,35 @@ describe("policyRefusal decision passthrough", () => {
             decidingLayer: "default",
         });
         expect(error.decision.verbs).toEqual(["execute", "write"]);
+    });
+});
+
+describe("survives the error path it actually travels", () => {
+    it("can be passed through stripSecretsFromError without throwing", () => {
+        // Regression: `decision` was defined non-writable AND enumerable, so the
+        // redactor's `Object.keys` walk tried to reassign it and threw
+        // "Cannot assign to read only property 'decision'". That TypeError then
+        // REPLACED the refusal, so callers saw a crash and isPolicyRefusal returned
+        // false — the gate looked broken. Caught by the live integration run; no unit
+        // test put a refusal through the redactor until this one.
+        const error = refusalFor("write", "default");
+        expect(() => stripSecretsFromError(error)).not.toThrow();
+    });
+
+    it("is still recognisable after redaction", () => {
+        const error = refusalFor("write", "default");
+        stripSecretsFromError(error);
+        expect(isPolicyRefusal(error)).toBe(true);
+    });
+
+    it("keeps its decision after redaction", () => {
+        const error = refusalFor("execute", "NEX_POLICY_DENY");
+        stripSecretsFromError(error);
+        expect(error.decision.decidingLayer).toBe("NEX_POLICY_DENY");
+    });
+
+    it("keeps `decision` out of JSON serialisation", () => {
+        // Non-enumerable, so it does not become noise in every logged error.
+        expect(JSON.stringify(refusalFor("write", "default"))).not.toContain("decidingLayer");
     });
 });

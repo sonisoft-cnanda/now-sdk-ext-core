@@ -14,6 +14,7 @@ export * from './policy/Policy.js';
 export * from './policy/PolicyEnv.js';
 export * from './policy/PolicyRefusal.js';
 export * from './policy/PolicyTypes.js';
+export * from './policy/ScanScript.js';
 export * from './sn/Application.js';
 export * from './sn/BackgroundScriptExecutor.js';
 export * from './sn/IServiceNowInstance.js';
