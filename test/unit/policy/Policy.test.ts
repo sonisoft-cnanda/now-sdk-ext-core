@@ -116,3 +116,22 @@ describe("allowAllLayer", () => {
         expect(checkRequirement(both).allowed).toBe(true);
     });
 });
+
+describe("audit attribution", () => {
+    it("names every layer that granted, not just the first verb's", () => {
+        // Raised in review of #49. execute from one layer, write from another: naming
+        // only the first makes the audit log wrong about how a mutation was permitted,
+        // and that log is what surfaces a missing floor rule.
+        installPolicy([grantLayer("env-allow", ["execute"]), grantLayer("default", ["write"])]);
+        const decision = checkRequirement(both);
+
+        expect(decision.allowed).toBe(true);
+        expect(decision.decidingLayer).toContain("env-allow");
+        expect(decision.decidingLayer).toContain("default");
+    });
+
+    it("does not repeat a layer that granted both verbs", () => {
+        installPolicy([grantLayer("default", ["write", "execute"])]);
+        expect(checkRequirement(both).decidingLayer).toBe("default");
+    });
+});

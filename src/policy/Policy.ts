@@ -13,11 +13,16 @@ import {
  * INERT UNTIL CONFIGURED. With no policy installed every check allows, so importing
  * this library changes nothing for existing consumers — `new TableAPIRequest(i).post()`
  * behaves exactly as it did. The applications that are actually driven by agents (the
- * `nex` CLI and the MCP server) install a deny-by-default policy in their entrypoints.
+ * `nex` CLI and the MCP server) install a policy in their entrypoints.
  *
  * That split is deliberate. The risk being managed is "an agent drives the CLI or the
- * MCP server", not "a program imports this library"; denying by default here would
- * break every embedder to mitigate a risk they do not have.
+ * MCP server", not "a program imports this library"; gating here by default would break
+ * every embedder to mitigate a risk they do not have.
+ *
+ * Those applications currently install a ladder whose LAST layer grants both verbs, so
+ * changes are permitted unless something above revokes them — `NEX_POLICY_DENY`, or a
+ * CLI deny flag. Flipping to deny-by-default is deleting that trailing layer; nothing
+ * in this file assumes either direction.
  */
 
 /**
@@ -113,10 +118,17 @@ export function checkRequirement(requirement: Requirement): Decision {
         }
     }
 
+    // Report EVERY layer that granted, not just the first verb's.
+    //
+    // A requirement like ["execute", "write"] can be satisfied by two different layers
+    // — execute from the environment, write from the default — and naming only the
+    // first makes the audit log quietly wrong about how a mutation was permitted. That
+    // log is the thing meant to surface a missing floor rule, so it has to be accurate.
+    const granting = [...new Set(requirement.verbs.map((v) => resolveVerb(v).decidingLayer))];
     return {
         allowed: true,
         verbs: requirement.verbs,
-        decidingLayer: resolveVerb(requirement.verbs[0]).decidingLayer,
+        decidingLayer: granting.join(" + "),
     };
 }
 
