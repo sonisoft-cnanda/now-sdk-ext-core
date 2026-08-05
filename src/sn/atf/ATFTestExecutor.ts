@@ -36,7 +36,10 @@ export class ATFTestExecutor{
         };
 
         const proc:ServiceNowProcessorRequest = new ServiceNowProcessorRequest(this._instance);
-        const result:string =  await proc.execute("TestExecutorAjax", "start", "global", dataObj);
+        // Running a test suite executes logic somebody else authored, and ATF tests
+        // create and modify records as they run. Both verbs, deliberately.
+        const result:string =  await proc.execute("TestExecutorAjax", "start", "global", dataObj,
+            { verbs: ["execute", "write"], target: "instance" });
 
         //In this case, result is the progress worker id.
         if(result != null){

@@ -3,6 +3,7 @@ import { Logger } from "../../util/Logger";
 import { TableAPIRequest } from "../../comm/http/TableAPIRequest";
 import { IHttpResponse } from "../../comm/http/IHttpResponse";
 import { ServiceNowProcessorRequest } from "../../comm/http/ServiceNowProcessorRequest";
+import { READ_ONLY } from "../../policy/PolicyTypes";
 import { Parser } from 'xml2js';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -453,7 +454,11 @@ export class SyslogReader {
             'ChannelAjax',
             'logtail',
             'global',
-            processorArgs
+            processorArgs,
+            // Tailing reads. It only needs a POST because that is how the AJAX
+            // processor endpoint works, and the default would otherwise class every
+            // `nex log` as a write and refuse it.
+            READ_ONLY
         );
 
         if (response.status === 200) {
