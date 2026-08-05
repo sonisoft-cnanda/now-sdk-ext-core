@@ -19,6 +19,7 @@ export * from './sn/ServiceNowInstance.js';
 export * from './sn/SNRequestBase.js';
 export * from './util/AppUtil.js';
 export * from './util/CSRFTokenHelper.js';
+export * from './util/LogConfig.js';
 export * from './util/Logger.js';
 export * from './util/NowStringUtil.js';
 export * from './util/redact.js';

@@ -8,23 +8,32 @@
  * re-serializes from the raw meta — none of which a unit test on the function would
  * catch.
  *
- * Writes to the real logs/ directory, which is gitignored and is where the code under
- * test writes by design (Logger's file transports are hard-coded relative paths).
+ * Opts into file logging explicitly and points it at a temp directory. It used to write
+ * to a relative ./logs/ because that was the only thing Logger could do; since NEX-3
+ * that is off by default and configurable, so a test that needs files has to say so.
  */
 
-import { describe, it, expect, beforeAll } from '@jest/globals';
+import { describe, it, expect, beforeAll, afterAll } from '@jest/globals';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { Logger } from '../../../src/util/Logger';
+import {
+    configureLogging,
+    getLogConfig,
+    flushLogs,
+    resetLoggingForTests,
+} from '../../../src/util/LogConfig';
 
-const DEBUG_LOG = path.resolve(process.cwd(), 'logs/app-debug.log');
-const ERROR_LOG = path.resolve(process.cwd(), 'logs/app-error.log');
+let tmpRoot: string;
+let logFile: string;
 
 /** Unique per run, so a stale line from an earlier build cannot mask a regression. */
 const RUN = `${Date.now()}`;
 const SECRET_TOKEN = `LEAKED-USER-TOKEN-${RUN}`;
 const SECRET_COOKIE = `LEAKED-COOKIE-${RUN}`;
 const SECRET_PASSWORD = `LEAKED-PASSWORD-${RUN}`;
+const SECRET_IN_MESSAGE = `LEAKEDVIAMESSAGE${RUN}`;
 const HARMLESS_PATH = `/api/now/table/incident_${RUN}`;
 
 /** Winston file transports flush asynchronously; poll rather than guess a delay. */
@@ -43,11 +52,20 @@ async function waitForLogContaining(file: string, needle: string, timeoutMs = 50
 }
 
 describe('Logger redaction (end to end, on disk)', () => {
-    let debugContents: string;
-    let errorContents: string;
+    let contents: string;
+
+    afterAll(async () => {
+        await flushLogs();
+        resetLoggingForTests();
+        fs.rmSync(tmpRoot, { recursive: true, force: true });
+    });
 
     beforeAll(async () => {
-        const logger = new Logger('RedactionTest', 'debug');
+        tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'nex-redaction-'));
+        configureLogging({ file: true, dir: tmpRoot, level: 'debug' });
+        logFile = path.join(getLogConfig().dir, 'nex.log');
+
+        const logger = new Logger('RedactionTest');
 
         // Exactly the shape RequestHandler.getRequestConfig builds and then logs.
         logger.debug('Retrieved Configuration', {
@@ -63,29 +81,41 @@ describe('Logger redaction (end to end, on disk)', () => {
             },
         });
 
+        // The other half of NEX-3, and the half a metadata format cannot reach: the
+        // secret is already text by the time the format runs. This is verbatim the
+        // shape ScriptTracer used to log at INFO on every trace.
+        logger.debug(`Session ID from debugger/start: ${SECRET_IN_MESSAGE}`);
+
         const err: any = new Error(`request failed ${RUN}`);
         err.config = { auth: { password: SECRET_PASSWORD } };
         logger.error('Error during request.', { error: err, request: { path: HARMLESS_PATH } });
 
-        debugContents = await waitForLogContaining(DEBUG_LOG, HARMLESS_PATH);
-        errorContents = await waitForLogContaining(ERROR_LOG, `request failed ${RUN}`);
+        // One file now, not four: the level-split files were redundant (combined.log
+        // was a superset) and app-info.log excluded every warning.
+        contents = await waitForLogContaining(logFile, `request failed ${RUN}`);
     });
 
-    it('does not write a session token to the debug log', () => {
-        expect(debugContents).not.toContain(SECRET_TOKEN);
+    it('does not write a session token to the log', () => {
+        expect(contents).not.toContain(SECRET_TOKEN);
     });
 
-    it('does not write a session cookie to the debug log', () => {
-        expect(debugContents).not.toContain(SECRET_COOKIE);
+    it('does not write a session cookie to the log', () => {
+        expect(contents).not.toContain(SECRET_COOKIE);
     });
 
-    it('does not write a password carried on a thrown error to the error log', () => {
-        expect(errorContents).not.toContain(SECRET_PASSWORD);
+    it('does not write a secret interpolated into the message string', () => {
+        expect(contents).not.toContain(SECRET_IN_MESSAGE);
+        // and still says what happened
+        expect(contents).toContain('Session ID from debugger/start');
+    });
+
+    it('does not write a password carried on a thrown error', () => {
+        expect(contents).not.toContain(SECRET_PASSWORD);
     });
 
     it('still records the non-secret context, or the logs stop being useful', () => {
-        expect(debugContents).toContain(HARMLESS_PATH);
-        expect(debugContents).toContain('Retrieved Configuration');
-        expect(errorContents).toContain(`request failed ${RUN}`);
+        expect(contents).toContain(HARMLESS_PATH);
+        expect(contents).toContain('Retrieved Configuration');
+        expect(contents).toContain(`request failed ${RUN}`);
     });
 });

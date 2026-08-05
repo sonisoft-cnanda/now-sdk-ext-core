@@ -6,8 +6,12 @@ import { HttpResponse } from "./HttpResponse";
 import { HTTPRequest } from "./HTTPRequest";
 import { IHttpResponse } from "./IHttpResponse";
 import { ServiceNowInstance } from "../../sn/ServiceNowInstance";
+import { Logger } from "../../util/Logger";
+import { redactError } from "../../util/redact";
 
 export class ServiceNowProcessorRequest{
+
+    private static _logger: Logger = new Logger("ServiceNowProcessorRequest");
 
     _instance:ServiceNowInstance;
 
@@ -58,7 +62,11 @@ export class ServiceNowProcessorRequest{
             let request:HTTPRequest = {method: 'POST', path: XMLHTTP_PROCESSOR_ENDPOINT, headers: this._headers, query: null, fields:dataObj, body:null};
             resp = await req.post(request);
         }catch(err){
-            console.log(err);
+            // Was console.log, which writes to fd 1 — the MCP server's JSON-RPC channel.
+            // A single stray line there desynchronises the protocol framing.
+            ServiceNowProcessorRequest._logger.error("Processor request failed", {
+                error: redactError(err),
+            });
         }
        
 

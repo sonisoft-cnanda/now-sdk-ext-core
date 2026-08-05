@@ -98,8 +98,25 @@ export class SubscriptionCommandSender {
 	}
 
 	private  onResponse(response:any, channel:any, mode:any, triesLeft:any, retryDelay:any) {
-		this._logger.debug(`onResponse - response ${JSON.stringify(response)}, channel ${JSON.stringify(channel)}, mode : ${mode}, 
-			triesLeft ${triesLeft}, stopping : ${this.stopping}, tokenCount : ${this.tokenManager.getTokenCount()}, isBucketFull - ${this.isBucketFull()}, retryDelay - ${retryDelay}`);
+		// `response` and `channel` go in the metadata rather than the message, because
+		// only metadata passes through the redaction format. That is a real guarantee
+		// ONLY for keys the format recognises — a Bayeux response carries `clientId`,
+		// which authorises every later message on this connection, so it had to be
+		// added to SECRET_KEYS for this to be safe. Adding a field here that carries a
+		// secret under an unrecognised name puts it on disk.
+		/* eslint-disable @typescript-eslint/no-unsafe-assignment -- the whole CometD
+		   surface is `any`; these were already interpolated into the message before. */
+		this._logger.debug("onResponse", {
+			response: response,
+			channel: channel,
+			mode: mode,
+			triesLeft: triesLeft,
+			stopping: this.stopping,
+			tokenCount: this.tokenManager.getTokenCount(),
+			isBucketFull: this.isBucketFull(),
+			retryDelay: retryDelay,
+		});
+		/* eslint-enable @typescript-eslint/no-unsafe-assignment */
 
 		if (!this.stopping) {
 			triesLeft = triesLeft - 1;

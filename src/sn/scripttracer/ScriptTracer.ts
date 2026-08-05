@@ -79,12 +79,16 @@ export class ScriptTracer {
             const debuggerToken = debuggerResp.bodyObject?.result?.token;
             if (debuggerToken) {
                 this._sessionId = debuggerToken;
-                this._logger.info(`Session ID from debugger/start: ${this._sessionId}`);
+                // The value is a live session token. Log that one was obtained, never
+                // the token itself — and at debug, not info, so it is not on by default.
+                this._logger.debug("Session ID obtained", { source: "debugger/start" });
             } else {
                 // Fallback: derive from user token (first 32 chars upper-cased)
                 const userToken = this._ambClient.getServerConnection().getUserToken();
                 this._sessionId = this.deriveSessionId(userToken);
-                this._logger.warn(`No token in debugger/start response, derived from user token: ${this._sessionId}`);
+                this._logger.warn("No token in debugger/start response; derived session ID from user token", {
+                    source: "derived",
+                });
             }
 
             // Guard: session ID must be non-empty before subscribing

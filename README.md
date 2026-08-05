@@ -452,7 +452,8 @@ console.log('Return value:', result.result);
 
 ### Utilities
 
-- **`Logger`** - Winston-based logging with file output
+- **`Logger`** - Winston-based structured logging (stderr by default; file output is opt-in)
+- **`configureLogging`** - sets destination, level, and rotation for the whole process
 - **`NowStringUtil`** - String manipulation utilities
 - **`AppUtil`** - Application utility functions
 
@@ -581,15 +582,51 @@ const handler = new RequestHandler(instance, {
 });
 ```
 
-### Custom Logging
+### Logging
+
+Logging goes to **stderr at `warn` and above**, and **writes no files by default** —
+stdout is left clean for `--json` output and for MCP's JSON-RPC framing.
 
 ```typescript
 import { Logger } from '@sonisoft/now-sdk-ext-core';
 
-const logger = Logger.createLogger('MyApp');
+const logger = new Logger('MyApp');
 logger.info('Application started');
 logger.error('Error occurred', { details: errorObj });
 ```
+
+Credential material is stripped from both metadata and the message text before anything
+is written, so passing a whole request config or session object is safe.
+
+#### Turning on file logging
+
+The application that owns the entry point configures logging once, at boot. Libraries
+should not call this.
+
+```typescript
+import { configureLogging, flushLogs } from '@sonisoft/now-sdk-ext-core';
+
+configureLogging({
+    file: true,        // default false
+    level: 'debug',    // default 'info'
+    dir: './logs',     // default ~/.local/state/now-sdk-ext/logs (honours XDG_STATE_HOME)
+});
+
+// Winston buffers; process.exit() would drop the tail.
+await flushLogs();
+```
+
+Equivalent environment variables, honoured with no code change — this is how the MCP
+server is configured, since it has no flags:
+
+| Variable | Effect |
+| --- | --- |
+| `NEX_LOG_FILE` | `1`/`true` enables file logging |
+| `NEX_LOG_DIR` | Directory for log files. Implies `NEX_LOG_FILE` |
+| `NEX_LOG_LEVEL` | `error`, `warn`, `info`, `http`, `verbose`, `debug`, `silly` |
+
+Explicit `configureLogging()` arguments win over the environment, which wins over the
+defaults. Files rotate at 10 MB, keeping 5.
 
 ### Authentication Handler
 

@@ -3,6 +3,7 @@ import {MessageClient, SubscriptionConfig} from "./MessageClient";
 import Base64 from "crypto-js/enc-base64.js";
 import Utf8 from "crypto-js/enc-utf8.js";
 import {Logger} from "../../util/Logger";
+import { redactError, stripSecretsFromError } from "../../util/redact";
 import { ServerConnection } from "./ServerConnection";
 import { ChannelListener } from "./ChannelListener";
 import { ServiceNowInstance } from "../ServiceNowInstance";
@@ -84,9 +85,12 @@ export class AMBClient{
                 if (typeof cookieJar.getCookieStringSync === 'function') {
                     try {
                         cookieString = cookieJar.getCookieStringSync(instanceUrl);
-                        this._logger.debug(`Extracted cookies via getCookieStringSync: ${cookieString?.substring(0, 80)}...`);
+                        // Length, not content. A truncated cookie is still a cookie.
+                        this._logger.debug("Extracted cookies via getCookieStringSync", {
+                            length: cookieString?.length ?? 0,
+                        });
                     } catch (e) {
-                        this._logger.debug(`getCookieStringSync failed: ${e}`);
+                        this._logger.debug("getCookieStringSync failed", { error: redactError(e) });
                     }
                 }
                 
@@ -94,9 +98,11 @@ export class AMBClient{
                 if (!cookieString && typeof cookieJar.getCookieString === 'function') {
                     try {
                         cookieString = await cookieJar.getCookieString(instanceUrl);
-                        this._logger.debug(`Extracted cookies via getCookieString: ${cookieString?.substring(0, 80)}...`);
+                        this._logger.debug("Extracted cookies via getCookieString", {
+                            length: cookieString?.length ?? 0,
+                        });
                     } catch (e) {
-                        this._logger.debug(`getCookieString failed: ${e}`);
+                        this._logger.debug("getCookieString failed", { error: redactError(e) });
                     }
                 }
                 
@@ -109,7 +115,7 @@ export class AMBClient{
                             this._logger.debug(`Extracted ${cookies.length} cookies via getCookiesSync`);
                         }
                     } catch (e) {
-                        this._logger.debug(`getCookiesSync failed: ${e}`);
+                        this._logger.debug("getCookiesSync failed", { error: redactError(e) });
                     }
                 }
                 
@@ -129,7 +135,9 @@ export class AMBClient{
                 this._serverConnection.setSessionCookies(cookieString);
                 this._authenticated = true;
                 this._logger.info("Successfully authenticated and obtained session cookies");
-                this._logger.debug(`Cookies: ${cookieString.substring(0, 100)}...`);
+                this._logger.debug("Session cookies set on the connection", {
+                    length: cookieString.length,
+                });
             } else {
                 this._logger.error("Could not extract session cookies!");
                 this._logger.debug("Session structure", { 
@@ -142,8 +150,13 @@ export class AMBClient{
                 throw new Error("Failed to extract session cookies for AMB connection");
             }
         } catch (error) {
-            this._logger.error(`Authentication failed: ${error}`);
-            throw new Error(`Failed to authenticate for AMB connection: ${error}`);
+            this._logger.error("Authentication failed", { error: redactError(error) });
+            // The cause travels on `cause`, scrubbed in place so its stack survives.
+            // Interpolating it into the message would put it somewhere no consumer's
+            // redaction can reach.
+            throw new Error("Failed to authenticate for AMB connection", {
+                cause: stripSecretsFromError(error),
+            });
         }
     }
 
@@ -206,7 +219,7 @@ export class AMBClient{
                 });
             } else if (typeof cookieStore.getCookies === 'function') {
                 const domain = instanceUrl ? new URL(instanceUrl).hostname : null;
-                this._logger.debug(`Getting cookies for domain: ${domain}`);
+                this._logger.debug("Getting cookies for domain", { domain: domain });
                 if (!domain) {
                     this._logger.warn("No domain available for cookie extraction");
                     return null;
@@ -244,13 +257,13 @@ export class AMBClient{
             
             if (cookies.length > 0) {
                 const cookieString = cookies.join('; ');
-                this._logger.debug(`Final cookie string length: ${cookieString.length}`);
+                this._logger.debug("Built cookie string", { length: cookieString.length });
                 return cookieString;
             } else {
                 this._logger.warn("No cookies extracted from store");
             }
         } catch (e) {
-            this._logger.error(`Error extracting cookies from store: ${e}`);
+            this._logger.error("Error extracting cookies from store", { error: redactError(e) });
         }
         
         return null;
