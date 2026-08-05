@@ -33,7 +33,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const barrelPath = resolve(root, 'src/index.ts');
 
 /** Modules ctix exports that must NOT be public. */
-const DROP = ['./comm/http/SessionManager.js'];
+const DROP = ['./comm/http/SessionManager.js', './policy/internal/Classify.js'];
 
 /** Curated exports ctix cannot express, declared in src/PublicApi.ts. */
 const APPEND = './PublicApi.js';

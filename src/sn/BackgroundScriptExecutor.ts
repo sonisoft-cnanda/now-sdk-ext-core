@@ -12,6 +12,10 @@ import { Logger } from "../util/Logger";
 
 import { HTTPRequest } from "../comm/http/HTTPRequest";
 import { BG_SCRIPT_ENDPOINT } from "../constants/ServiceNow";
+import { checkRequirement } from "../policy/Policy";
+import { isPolicyRefusal, policyRefusal } from "../policy/PolicyRefusal";
+import { requirementForScript } from "../policy/ScanScript";
+import { Requirement } from "../policy/PolicyTypes";
 import { IHttpResponse } from "../comm/http/IHttpResponse";
 import { isNil } from "../util/utils";
 import { CSRFTokenHelper } from "../util/CSRFTokenHelper";
@@ -36,6 +40,37 @@ export class BackgroundScriptExecutor {
             this._tableAPI = new TableAPIRequest(this.instance);
     }
 
+    /**
+     * Refuses a script the policy does not permit, before it is sent anywhere.
+     *
+     * Running caller-supplied code always needs `execute`; the scan decides whether it
+     * also needs `write`. The scan is unsound by design and leans toward `write` on
+     * anything it cannot resolve — see ScanScript for what it cannot see at all.
+     *
+     * Pass the script that will ACTUALLY be sent. Callers doing `{param}` substitution
+     * must substitute first, or a parameter value of `gr.insert()` walks straight past.
+     */
+    private assertScriptPermitted(script: string): Requirement {
+        const { verbs, reasons } = requirementForScript(script);
+        const decision = checkRequirement({ verbs, target: "instance" });
+        if (decision.allowed) {
+            return { verbs, target: "instance" };
+        }
+
+        this._logger.warn("Refused a background script", {
+            verbs: decision.verbs,
+            decidingLayer: decision.decidingLayer,
+            detected: reasons,
+        });
+
+        const detail = reasons.length > 0
+            ? `${decision.remediation ?? "Not permitted."} The script ${reasons.join("; ")}.`
+            : decision.remediation;
+        throw policyRefusal({ ...decision, remediation: detail });
+    }
+
+    /** @returns what this script needs, for the HTTP layer to agree with. */
+
     public async executeScript(script: string, scope: string = this.scope, instance:ServiceNowInstance = this.instance): Promise<BackgroundScriptExecutionResult> {
         if (!instance || !(instance instanceof ServiceNowInstance)) {
             throw new Error("instance must be a ServiceNowInstance");
@@ -47,7 +82,8 @@ export class BackgroundScriptExecutor {
             throw new Error("script must be a string");
         }
 
-       
+        const scriptRequirement = this.assertScriptPermitted(script);
+
         try {
 
            const gck:string =  await this.getBackgroundScriptCSRFToken();
@@ -77,7 +113,11 @@ export class BackgroundScriptExecutor {
                 path: BG_SCRIPT_ENDPOINT,
                 headers: {"Content-Type":"application/x-www-form-urlencoded"},
                 query: null,
-                body: params
+                body: params,
+                // Declared so the HTTP gate reaches the SAME conclusion the script scan
+                // did. Without it the POST default adds `write` on top of the floor's
+                // `execute`, and a read-only diagnostic script needs write for no reason.
+                requires: scriptRequirement
             };
             this._logger.debug("Execute Background Script Request.", {request:request, formData:fd})
             const response: IHttpResponse<string> = await this.snRequest.post<string>(request);
@@ -176,6 +216,24 @@ export class BackgroundScriptExecutor {
             throw new Error("script must be a non-empty string");
         }
 
+        // Gated independently of executeScript. This method is public, so it is
+        // directly reachable — and persisting a sys_trigger is a LARGER privilege than
+        // running the script inline, because the job outlives the request that made it.
+        this.assertScriptPermitted(script);
+
+        // And `write` unconditionally, whatever the scan concluded about the script
+        // body: creating the sys_trigger record IS a write, independent of what the
+        // scheduled script goes on to do.
+        const triggerDecision = checkRequirement({ verbs: ["write"], target: "instance" });
+        if (!triggerDecision.allowed) {
+            throw policyRefusal({
+                ...triggerDecision,
+                remediation:
+                    `${triggerDecision.remediation ?? "Not permitted."} ` +
+                    `Scheduling a script creates a sys_trigger record, which is a write.`,
+            });
+        }
+
         const triggerName = description || `ExtCore_Trigger_${Date.now()}`;
 
         // Calculate next_action as 1 second from now
@@ -247,11 +305,21 @@ export class BackgroundScriptExecutor {
      * @returns Either a BackgroundScriptExecutionResult or TriggerExecutionResult
      */
     public async executeScriptAuto(script: string, scope?: string): Promise<BackgroundScriptExecutionResult | TriggerExecutionResult> {
+        // BEFORE the try, deliberately. The catch below falls back to sys_trigger on
+        // any failure, so a refusal raised inside executeScript would be swallowed and
+        // the refused script would run anyway — later, on a schedule, silently.
+        this.assertScriptPermitted(script);
+
         try {
             this._logger.info("Attempting script execution via background script page...");
             const result = await this.executeScript(script, scope || this.scope);
             return result;
         } catch (error) {
+            // Second layer: even if the check above is ever refactored away, a refusal
+            // must never be treated as "the page failed, try the other route".
+            if (isPolicyRefusal(error)) {
+                throw error;
+            }
             const err: Error = error as Error;
             this._logger.warn(`Background script execution failed: ${err.message}. Falling back to sys_trigger.`);
             const triggerResult = await this.executeScriptViaTrigger(script);

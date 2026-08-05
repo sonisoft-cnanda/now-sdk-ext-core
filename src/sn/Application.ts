@@ -1,5 +1,4 @@
 import { parseXml, getScopeMetadataFromInstance, getNowTableRequest, monitorUninstallWorkerCompletion, getAppAndSummary } from "@servicenow/sdk-cli-core/dist/util/index.js";
-import { makeRequest, parseResponseBody } from "@servicenow/sdk-cli-core/dist/http/index.js";
 import { getSafeUserSession } from "@servicenow/sdk-cli-core/dist/util/sessionToken.js";
 import { ServiceNowRequest } from "../comm/http/ServiceNowRequest";
 import { ServiceNowInstance } from "./ServiceNowInstance";
@@ -145,16 +144,27 @@ export class Application {
             sysparm_delete_all: 'true',
             sysparm_ck: auth.userToken ?? '',
         };
-        const r = await (makeRequest)({
-            auth,
+        // Routed through snRequest, not makeRequest directly.
+        //
+        // This is the most destructive call in the library — sysparm_delete_all on an
+        // application — and calling makeRequest here put it OUTSIDE the one point every
+        // other request passes through, so the permission gate could not see it. The
+        // gate would have been true of everything except the thing that matters most.
+        //
+        // Not an architectural requirement: changeApplication and convertToStoreApp in
+        // this same class already go through snRequest. Line was simply left behind.
+        const request: HTTPRequest = {
             method: 'POST',
             path: '/xmlhttp.do',
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            query: null,
+            body: null,
             fields: params,
-        });
-        if (!r.ok) {
-            (parseResponseBody)(r.clone());
-        }
-        const xml = await (parseXml)(await r.text());
+        };
+        const response: IHttpResponse<string> = await this.snRequest.post<string>(request);
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+        const xml = await (parseXml)(response.data);
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-member-access
         return xml['xml']['@_answer'];
     }
     

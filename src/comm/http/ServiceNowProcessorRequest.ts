@@ -6,6 +6,7 @@ import { HttpResponse } from "./HttpResponse";
 import { HTTPRequest } from "./HTTPRequest";
 import { IHttpResponse } from "./IHttpResponse";
 import { ServiceNowInstance } from "../../sn/ServiceNowInstance";
+import { Requirement } from "../../policy/PolicyTypes";
 import { Logger } from "../../util/Logger";
 import { redactError } from "../../util/redact";
 
@@ -24,9 +25,14 @@ export class ServiceNowProcessorRequest{
         "Content-Type":"application/x-www-form-urlencoded"
     };
 
-    public async execute(processor:string, processorMethod:string, scope:string, processorArgs:object):Promise<string>{
+    /**
+     * @param requires What this processor call needs. Defaults to `write`, because
+     * /xmlhttp.do is a POST and most processors mutate. Two callers legitimately differ
+     * and say so: SyslogReader reads, ATFTestExecutor executes.
+     */
+    public async execute(processor:string, processorMethod:string, scope:string, processorArgs:object, requires?:Requirement):Promise<string>{
         let retVal:string = null;
-        let resp:IHttpResponse<unknown> =  await this.doXmlHttpRequest(processor, processorMethod, scope, processorArgs);
+        let resp:IHttpResponse<unknown> =  await this.doXmlHttpRequest(processor, processorMethod, scope, processorArgs, requires);
         if(resp.status == 200){
             let data:string = resp.data as string;
             if(typeof data != 'undefined' && data && data.indexOf('answer=') != -1){
@@ -43,7 +49,7 @@ export class ServiceNowProcessorRequest{
         return retVal;
     }
 
-    async doXmlHttpRequest(processor:string, processorMethod:string, scope:string, processorArgs:object) : Promise<IHttpResponse<unknown>>{
+    async doXmlHttpRequest(processor:string, processorMethod:string, scope:string, processorArgs:object, requires?:Requirement) : Promise<IHttpResponse<unknown>>{
         let resp:IHttpResponse<unknown> = null;
 
         try{
@@ -59,7 +65,7 @@ export class ServiceNowProcessorRequest{
             //let data = qs.stringify(dataObj);
 
             let req:ServiceNowRequest = new ServiceNowRequest(this._instance);
-            let request:HTTPRequest = {method: 'POST', path: XMLHTTP_PROCESSOR_ENDPOINT, headers: this._headers, query: null, fields:dataObj, body:null};
+            let request:HTTPRequest = {method: 'POST', path: XMLHTTP_PROCESSOR_ENDPOINT, headers: this._headers, query: null, fields:dataObj, body:null, requires: requires};
             resp = await req.post(request);
         }catch(err){
             // Was console.log, which writes to fd 1 — the MCP server's JSON-RPC channel.

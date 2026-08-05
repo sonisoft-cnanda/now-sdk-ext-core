@@ -116,6 +116,30 @@ winston logger; `Logger` is only a named facade onto it. Three rules follow:
   `private _logger = new Logger("Name")` with no arguments. Do not try to thread
   options through manager constructors.
 
+### 5b. The permission gate has exactly one enforcement point
+
+`RequestHandler.getRequestConfig`, beside the cross-instance guard. Do not add a second.
+
+- **Never gate on the HTTP verb.** It lies both ways: `installStoreApplication` and
+  `updateStoreApplication` mutate via GET, `exportUpdateSet` GETs with
+  `sysparm_delete_when_done`, and `ServiceNowProcessorRequest` POSTs to *read*.
+  Classification lives in `policy/internal/Classify.ts` and keys on path **and query
+  params**.
+- **Adding a mutating endpoint that travels as a GET means adding a FLOOR rule.** There
+  is no static check for this — nothing can know that `/api/sn_appclient/.../install`
+  mutates. The audit log ("Permitted by policy", with the deciding layer) is the
+  backstop; a write permitted for a surprising reason shows up there.
+- **A `requires` declaration can correct a wrong default but never lowers a floor rule**,
+  and cannot move a floor match off `target: 'instance'` — otherwise declaring
+  `target: 'local'` would be a way to opt out of the gate.
+- **Refusals are branded with `Symbol.for`, never a class.** Two copies of this package
+  in a consumer's `node_modules` break `instanceof` silently, and
+  `BackgroundScriptExecutor` would then stop recognising a refusal and run the script
+  via `sys_trigger` anyway. Use `isPolicyRefusal`.
+- **Anything that catches broadly around a gated call must re-throw refusals.**
+  `executeScriptAuto` is the cautionary tale: its `catch` fell back to a scheduled job,
+  turning a refusal into a deferred execution.
+
 ### 6. Force state in tests; never wait on the clock
 
 `test/unit/comm/http/ActiveSessionRegistry.test.ts` records a real CI flake

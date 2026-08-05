@@ -12,6 +12,9 @@ import { DOMParser } from '@xmldom/xmldom';
 import { IServiceNowInstance } from '../../sn/IServiceNowInstance';
 import { StaleInstanceError } from '../../exception/StaleInstanceError';
 import { stripSecretsFromError, redactValue } from '../../util/redact';
+import { checkRequirement } from '../../policy/Policy';
+import { policyRefusal } from '../../policy/PolicyRefusal';
+import { classify } from '../../policy/internal/Classify';
 
 //axios.defaults.withCredentials = true;
 
@@ -123,6 +126,49 @@ export class RequestHandler implements IRequestHandler{
             described = fallback;
         }
         return new Error(described);
+    }
+
+    /**
+     * Refuses the request when policy does not permit what it would do.
+     *
+     * No-op until an application installs a policy, so embedding this library is
+     * unaffected. The `nex` CLI and the MCP server install a deny-by-default policy at
+     * startup, because those are the surfaces an agent drives.
+     *
+     * Allowed mutations are logged at info with the deciding layer. That log is the
+     * only thing that surfaces a missing floor rule — a mutating endpoint nobody
+     * classified shows up as a write that was permitted for the wrong reason — and it
+     * is what answers "why was this refused" when someone asks.
+     */
+    private assertPermitted(request: HTTPRequest): void {
+        const requirement = classify(request);
+        if (requirement.verbs.length === 0) {
+            return;
+        }
+
+        const decision = checkRequirement(requirement);
+        const path = typeof request.path === "string" ? request.path.split("?")[0] : "(unknown)";
+
+        if (!decision.allowed) {
+            this._logger.warn("Refused by policy", {
+                path,
+                method: request.method ?? "get",
+                verbs: decision.verbs,
+                decidingLayer: decision.decidingLayer,
+                floor: requirement.reasons,
+            });
+            throw policyRefusal(decision);
+        }
+
+        if (decision.decidingLayer !== "no-policy") {
+            this._logger.info("Permitted by policy", {
+                path,
+                method: request.method ?? "get",
+                verbs: decision.verbs,
+                grantedBy: decision.decidingLayer,
+                floor: requirement.reasons,
+            });
+        }
     }
 
     private assertSessionMatchesBoundInstance(): void {
@@ -355,6 +401,12 @@ export class RequestHandler implements IRequestHandler{
         // destination host from auth.instanceUrl, so a mismatch here does not send a
         // bad cookie to the right host — it sends a valid session to the wrong one.
         this.assertSessionMatchesBoundInstance();
+
+        // Same reasoning, same place: this is the one point every request passes
+        // through — both SessionManager-managed handlers and the ~21 managers that
+        // construct their own ServiceNowRequest. A second chokepoint elsewhere would
+        // only be a second thing to keep in sync.
+        this.assertPermitted(request);
 
         const config = {
             auth: this._session,
