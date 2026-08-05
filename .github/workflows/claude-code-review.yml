@@ -28,5 +28,30 @@ jobs:
             Review PR #${{ github.event.pull_request.number }} in this repository.
             Use `gh pr diff ${{ github.event.pull_request.number }}` to see the changes.
             Analyze the code for bugs, security issues, code style, and best practices.
-            Post your review using `gh pr review ${{ github.event.pull_request.number }}`.
+
+            This workflow runs again on every push, so you are often re-reviewing a PR
+            you have already commented on. Before deciding, check your own earlier
+            reviews with
+            `gh api repos/${{ github.repository }}/pulls/${{ github.event.pull_request.number }}/reviews`
+            and work out which of the findings you previously raised are now fixed.
+
+            Then post exactly one review with `gh pr review ${{ github.event.pull_request.number }}`,
+            choosing the state deliberately:
+
+            - `--approve` when nothing blocking remains, INCLUDING when your only
+              earlier objections have since been addressed. This is the one that
+              matters: GitHub keeps a CHANGES_REQUESTED review as the active verdict
+              until the same reviewer APPROVES. A `--comment`, however positive its
+              wording, does not clear it, and the PR stays unmergeable on a complaint
+              about a commit that is no longer the head.
+            - `--request-changes` only for something you would genuinely block a merge
+              on: a correctness bug, a security problem, a breaking change that is not
+              declared. Say plainly what would have to change to clear it.
+            - `--comment` for observations you do not want to block on, and only when
+              you have no outstanding `--request-changes` on this PR.
+
+            Prefer approving with non-blocking notes over requesting changes for style
+            preferences. Re-requesting changes for a finding you already raised and
+            that has since been fixed is a false positive — verify against the current
+            head, not against your memory of the earlier diff.
           claude_args: '--allowedTools "Bash(gh pr:*)" "Bash(gh api:*)"'
