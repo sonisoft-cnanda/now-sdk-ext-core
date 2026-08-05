@@ -444,6 +444,52 @@ console.log('Return value:', result.result);
 - **`CMDBRelationships`** - Query direct relationships and traverse CI graphs (BFS)
 - **`InstanceDiscovery`** - List tables, scoped apps, store apps, and plugins
 
+### Permission policy
+
+Core can refuse operations that would change a ServiceNow instance. **It is inert until
+an application installs a policy**, so importing this library changes nothing — the
+`nex` CLI and the MCP server install one at startup because those are the surfaces an
+AI agent drives.
+
+```typescript
+import { installPolicy, denyLayer, grantLayer } from '@sonisoft/now-sdk-ext-core';
+
+installPolicy([
+    denyLayer('lockdown', ['write']),                  // highest priority
+    grantLayer('default', ['write', 'execute']),       // lowest
+]);
+```
+
+Two verbs — `write` and `execute` — plus a `target` of `instance`, `local` or `session`.
+Only `instance` is gated, so a tool that overwrites a local file is not refused as an
+instance write. Layers are consulted in order and the first to answer `grant` or `deny`
+decides; `abstain` passes the question down.
+
+Reads are never gated.
+
+> **This is a guardrail, not a security boundary.** Anything holding the credential can
+> reach the instance directly — by calling the SDK, or with curl. What it buys is that
+> inadvertent mutation stops being silent, and that an environment variable can deny in
+> a way the calling code cannot override.
+
+#### Script scanning, and what it cannot see
+
+Background scripts are parsed to decide whether they need `write` on top of `execute`.
+Anything unresolvable — computed member access like `gr['inse'+'rt']()`, `eval`, or a
+parse failure — escalates to `write` rather than passing.
+
+**A `write`-free result means "nothing obviously writes", not "this cannot write."**
+These are invisible to any static scan:
+
+- Script Includes — `new global.MyUtil().doThing()`, where the write is in another file
+- `gs.eval(...)`
+- `sn_ws.RESTMessageV2` calling out to anything
+- `workflow.startFlow()`, `gs.getUser().setPreference()`
+- a `GlideRecord` reached through a variable the scan never resolves
+
+That is why `execute` is required regardless of what the scan concludes: permitting a
+script to run at all is the real decision.
+
 ### Logging & Real-time Events
 
 - **`SyslogReader`** - Log querying, formatting, export, and real-time tailing
