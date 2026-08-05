@@ -106,7 +106,7 @@
     "@types/ws": "^8.5.12",
     "chai": "6.2.2",
     "concurrently": "8.2.2",
-    "conventional-changelog-conventionalcommits": "^9.1.0",
+    "conventional-changelog-conventionalcommits": "^10.2.1",
     "create-ts-index": "^1.14.0",
     "ctix": "^2.6.4",
     "diff": "^9.0.0",
