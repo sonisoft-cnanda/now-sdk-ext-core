@@ -3,6 +3,7 @@
 /* eslint-disable @typescript-eslint/no-unsafe-return */
 /* eslint-disable @typescript-eslint/no-unsafe-call */
 import { XMLParser } from "fast-xml-parser";
+import { DOMParser } from "@xmldom/xmldom";
 import { ServiceNowRequest } from "../../comm/http/ServiceNowRequest";
 import { InvalidParameterException } from "../../exception/InvalidParameterException";
 import { ServiceNowTableResponse } from "../../model/types";
@@ -188,7 +189,7 @@ export class ClusterTransactionManager {
             const rows = html.matchAll(/<tr\b[^>]*\bsys_id=["']([0-9a-f]{32})["'][^>]*>([\s\S]*?)<\/tr>/gi);
             for (const row of rows) {
                 const cells = [...row[2].matchAll(/<td\b[^>]*>([\s\S]*?)<\/td>/gi)]
-                    .map((cell) => this.decodeHtml(this.stripTags(cell[1])));
+                    .map((cell) => this.cellText(cell[1]));
                 // List-2 rows surround the data with selection/icon and trailing spacer cells.
                 const dataCells = cells.length === columns.length ? cells : cells.slice(2, 2 + columns.length);
                 if (dataCells.length !== columns.length) throw new Error();
@@ -283,9 +284,14 @@ export class ClusterTransactionManager {
         return stripSecretsFromError(error);
     }
 
-    private stripTags(value: string): string { return value.replace(/<[^>]*>/g, "").trim(); }
-    private decodeHtml(value: string): string {
-        return value.replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<")
-            .replace(/&gt;/gi, ">").replace(/&quot;/gi, '"').replace(/&#39;/gi, "'");
+    private cellText(value: string): string {
+        const document = new DOMParser().parseFromString(
+            `<root>${value.replace(/&nbsp;/gi, "&#160;")}</root>`,
+            "application/xml",
+        );
+        if (document.getElementsByTagName("parsererror").length > 0) {
+            throw new Error("Could not parse a transaction list cell");
+        }
+        return document.documentElement.textContent?.trim() ?? "";
     }
 }
