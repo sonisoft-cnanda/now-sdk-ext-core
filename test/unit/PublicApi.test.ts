@@ -111,6 +111,35 @@ function exportedNames(): string[] {
         }
     });
 
+    it('exports the flow design-time definition contract', () => {
+        // getFlowArtifactDefinition/getActionDefinition are unusable from a typed
+        // consumer without their result and option types — the same shape of gap
+        // this file exists for.
+        const names = exportedNames();
+        for (const name of [
+            'FlowManager',
+            'FlowDefinitionOptions',
+            'FlowDesignArtifactType',
+            'FlowDefinitionFailureReason',
+            'FlowArtifactDefinitionResult',
+            'FlowArtifactSummary',
+            'ActionDefinitionResult',
+            'ActionDefinitionSummary',
+            'ActionStepSummary',
+        ]) {
+            expect(names).toContain(name);
+        }
+    });
+
+    it('still exports the pre-existing flow definition result types', () => {
+        // AC7 of NEX-106: adding the typed definition API must not remove the
+        // contract existing callers of getFlowDefinition/getFlowActions compile
+        // against.
+        const names = exportedNames();
+        expect(names).toContain('FlowDefinitionResult');
+        expect(names).toContain('FlowActionResult');
+    });
+
     it('does not export SessionManager', () => {
         // Deliberately internal (removed from the barrel in f5379e4). ctix used
         // to re-add it on every full build; the barrel is hand-authored now so

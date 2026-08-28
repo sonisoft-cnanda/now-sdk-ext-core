@@ -347,6 +347,240 @@ export interface ProcessFlowTestPayload {
 }
 
 // ============================================================
+// Design-Time Definition Types (ProcessFlow REST API, read-only)
+// ============================================================
+
+/**
+ * Artifact types whose design-time definition can be retrieved.
+ *
+ * Flows and subflows are served by the same endpoint and are distinguished by
+ * the `type` field ServiceNow reports in the payload; actions are served by the
+ * action-type endpoints.
+ */
+export type FlowDesignArtifactType = 'flow' | 'subflow';
+
+/**
+ * Stable, machine-readable reason for a definition retrieval failure.
+ *
+ * The ProcessFlow design-time routes are observed Workflow Studio APIs rather
+ * than a documented public REST contract, so callers should branch on this
+ * rather than on message text.
+ */
+export type FlowDefinitionFailureReason =
+    /** The supplied identifier was blank or was not a 32-character hex sys_id. */
+    | 'invalid_identifier'
+    /** The artifact exists but is not the type the called operation retrieves. */
+    | 'type_mismatch'
+    /** ServiceNow reported no such artifact (or returned an empty payload for it). */
+    | 'not_found'
+    /** The session is not permitted to read the artifact. */
+    | 'permission_denied'
+    /** ServiceNow answered, but its response carried an error code/message. */
+    | 'api_error'
+    /** ServiceNow answered with a body that did not match the expected wrapper. */
+    | 'malformed_response'
+    /** The request itself failed (transport error, or an unclassified HTTP status). */
+    | 'request_failed';
+
+/** Options common to every design-time definition retrieval. */
+export interface FlowDefinitionOptions {
+    /**
+     * Scope sys_id or scope name sent as `sysparm_transaction_scope`.
+     * Optional; ServiceNow resolves the artifact's own scope when omitted.
+     */
+    scope?: string;
+}
+
+/**
+ * Light, stable projection of a flow/subflow definition.
+ *
+ * Deliberately small: the full payload stays available and untouched on
+ * `definition`, because ServiceNow evolves that schema between families and
+ * normalising it here would make family upgrades breaking.
+ */
+export interface FlowArtifactSummary {
+    /** sys_id of the flow or subflow */
+    sysId: string;
+
+    /** Display name */
+    name: string;
+
+    /** Internal (scriptable) name */
+    internalName: string;
+
+    /** Description text, empty string when unset */
+    description: string;
+
+    /** Scope sys_id */
+    scope: string;
+
+    /** Scope name, e.g. "global" */
+    scopeName: string;
+
+    /** Publication status, e.g. "published", "draft" */
+    status: string;
+
+    /** Whether the artifact is active */
+    active: boolean;
+
+    /** Number of trigger instances (always 0 for a subflow) */
+    triggerCount: number;
+
+    /** Number of action instances */
+    actionCount: number;
+
+    /** Number of nested subflow instances */
+    subflowCount: number;
+
+    /** Number of flow logic instances (if/else, for-each, etc.) */
+    flowLogicCount: number;
+
+    /** Number of declared inputs */
+    inputCount: number;
+
+    /** Number of declared outputs */
+    outputCount: number;
+}
+
+/** Result of retrieving a flow or subflow design-time definition. */
+export interface FlowArtifactDefinitionResult {
+    /** Whether the definition was retrieved */
+    success: boolean;
+
+    /** The sys_id that was requested (trimmed) */
+    sysId: string;
+
+    /**
+     * Artifact type as reported by ServiceNow, when it is one this library
+     * recognises. Never inferred from the operation that was called.
+     */
+    artifactType?: FlowDesignArtifactType;
+
+    /**
+     * Raw `type` value ServiceNow reported. Populated whenever the response
+     * carried one, including values this library does not recognise.
+     */
+    reportedType?: string;
+
+    /**
+     * The complete, JSON-serializable definition payload exactly as ServiceNow
+     * returned it. Pass straight to `JSON.stringify`.
+     */
+    definition?: Record<string, unknown>;
+
+    /** Convenience projection of the most commonly used definition fields */
+    summary?: FlowArtifactSummary;
+
+    /** Actionable failure description; never contains a response body */
+    errorMessage?: string;
+
+    /** Machine-readable failure classification */
+    failureReason?: FlowDefinitionFailureReason;
+
+    /** Numeric error code reported by the processflow API, when present */
+    errorCode?: number;
+}
+
+/** Light projection of one step instance within an action definition. */
+export interface ActionStepSummary {
+    /** sys_id of the step instance */
+    stepId: string;
+
+    /** Execution order as reported by ServiceNow */
+    order: number;
+
+    /** Step label, e.g. "Script step" */
+    label: string;
+
+    /** Step type name, e.g. "Script" */
+    stepTypeName: string;
+
+    /** sys_id of the step type */
+    stepTypeId: string;
+}
+
+/** Light, stable projection of an action definition. */
+export interface ActionDefinitionSummary {
+    /** sys_id of the action type */
+    sysId: string;
+
+    /** Display name */
+    name: string;
+
+    /** Internal (scriptable) name */
+    internalName: string;
+
+    /** Description text, empty string when unset */
+    description: string;
+
+    /** Scope sys_id */
+    scope: string;
+
+    /** Scope name, e.g. "global" */
+    scopeName: string;
+
+    /** Publication state, e.g. "published", "draft" */
+    state: string;
+
+    /** Whether the action is active */
+    active: boolean;
+
+    /** Number of declared inputs */
+    inputCount: number;
+
+    /** Number of declared outputs */
+    outputCount: number;
+
+    /** Number of step instances */
+    stepCount: number;
+
+    /** Ordered step projections, ascending by `order` */
+    steps: ActionStepSummary[];
+}
+
+/**
+ * Result of retrieving a complete action design-time definition.
+ *
+ * A complete action needs two reads — metadata and step instances — so both are
+ * returned through this one contract. `success` is true only when both parts
+ * were retrieved.
+ */
+export interface ActionDefinitionResult {
+    /** Whether the complete definition was retrieved */
+    success: boolean;
+
+    /** The sys_id that was requested (trimmed) */
+    sysId: string;
+
+    /** Always 'action' on success; absent on failure */
+    artifactType?: 'action';
+
+    /**
+     * Raw action-type metadata exactly as ServiceNow returned it
+     * (`GET /api/now/processflow/action/action_types/{id}`).
+     */
+    metadata?: Record<string, unknown>;
+
+    /**
+     * Raw step instances exactly as ServiceNow returned them
+     * (`GET .../step_instances`), sorted ascending by `order`.
+     */
+    steps?: Array<Record<string, unknown>>;
+
+    /** Convenience projection of metadata plus ordered steps */
+    summary?: ActionDefinitionSummary;
+
+    /** Actionable failure description; never contains a response body */
+    errorMessage?: string;
+
+    /** Machine-readable failure classification */
+    failureReason?: FlowDefinitionFailureReason;
+
+    /** Numeric error code reported by the processflow API, when present */
+    errorCode?: number;
+}
+
+// ============================================================
 // Copy Flow Types (ProcessFlow REST API)
 // ============================================================
 
