@@ -144,6 +144,27 @@ const result = await executor.executeScript(script);
 console.log('Script output:', result.output);
 ```
 
+### Inspect and terminate cluster transactions
+
+Retrieval and termination are deliberately separate operations. A successful kill reports
+that ServiceNow accepted the request; call `getTransactions` later to observe eventual removal.
+
+```typescript
+import { ClusterTransactionManager } from '@sonisoft/now-sdk-ext-core';
+
+const transactions = new ClusterTransactionManager(instance);
+const active = await transactions.getTransactions({
+    pollIntervalMs: 1000,
+    timeoutMs: 60000,
+    limit: 500
+});
+
+const selected = active.find((transaction) => transaction.url === '/safe_test.do');
+if (selected) {
+    await transactions.killTransaction(selected.sys_id);
+}
+```
+
 ### Run ATF Tests
 
 ```typescript

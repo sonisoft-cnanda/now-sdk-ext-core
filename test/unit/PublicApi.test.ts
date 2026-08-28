@@ -98,6 +98,19 @@ function exportedNames(): string[] {
         expect(names).toContain('OperationProgressCallback');
     });
 
+    it('exports the cluster transaction manager and its supported contract', () => {
+        const names = exportedNames();
+        for (const name of [
+            'ClusterTransactionManager',
+            'ClusterTransaction',
+            'GetTransactionsOptions',
+            'KillTransactionOptions',
+            'KillTransactionResult',
+        ]) {
+            expect(names).toContain(name);
+        }
+    });
+
     it('does not export SessionManager', () => {
         // Deliberately internal (removed from the barrel in f5379e4). ctix used
         // to re-add it on every full build; the barrel is hand-authored now so
