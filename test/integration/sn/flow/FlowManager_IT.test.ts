@@ -1,9 +1,13 @@
+// This suite runs as real ESM (jest is invoked with --experimental-vm-modules),
+// where the `jest` object is not injected as a global.
+import { jest } from '@jest/globals';
 import { ServiceNowInstance, ServiceNowSettingsInstance } from '../../../../src/sn/ServiceNowInstance';
 import { getCredentials } from "@servicenow/sdk-cli/dist/auth/index.js";
 import { SN_INSTANCE_ALIAS } from '../../../test_utils/test_config';
 
 import { FlowManager } from '../../../../src/sn/flow/FlowManager';
-import { FlowExecutionResult, FlowContextStatusResult, FlowPublishResult, FlowDefinitionResult, FlowActionResult, FlowTestResult, FlowCopyResult, FlowContextDetailsResult, FlowLogResult } from '../../../../src/sn/flow/FlowModels';
+import { ProcessFlowRequest } from '../../../../src/comm/http/ProcessFlowRequest';
+import { FlowExecutionResult, FlowContextStatusResult, FlowPublishResult, FlowDefinitionResult, FlowActionResult, FlowTestResult, FlowCopyResult, FlowContextDetailsResult, FlowLogResult, FlowArtifactDefinitionResult, ActionDefinitionResult } from '../../../../src/sn/flow/FlowModels';
 
 const SECONDS = 1000;
 
@@ -822,5 +826,165 @@ describe('FlowManager - Integration Tests', () => {
             expect(result.success).toBe(true);
             expect(result.entries).toHaveLength(0);
         }, 120 * SECONDS);
+    });
+
+    // ============================================================
+    // Design-time definition retrieval (read-only ProcessFlow routes)
+    //
+    // One small artifact of each type, retrieved without executing it. Every
+    // sys_id is overridable so this runs against any instance that has a
+    // readable flow, subflow and action.
+    //
+    // Only names and collection sizes are printed. The definitions themselves
+    // contain scripts and field values and are deliberately not logged.
+    // ============================================================
+
+    describe('design-time definition retrieval', () => {
+        // Defaults are small OOB artifacts present on a stock developer instance.
+        const FLOW_SYS_ID = process.env.TEST_DEFINITION_FLOW_SYS_ID || 'ae20de1b83a79210e84dcba2722bc06e';
+        const SUBFLOW_SYS_ID = process.env.TEST_DEFINITION_SUBFLOW_SYS_ID || 'cb622e9624500210f8778ca667ee1a00';
+        const ACTION_SYS_ID = process.env.TEST_DEFINITION_ACTION_SYS_ID || '1df3d0cb534e2010c232ddeeff7b12e1';
+
+        /**
+         * Records every mutating path a definition read must not take, so a live
+         * run proves AC4 rather than merely asserting it in a mock.
+         */
+        function watchForExecution() {
+            const executeScript = jest.spyOn(
+                (flowMgr as any)._bgExecutor as { executeScript: (...args: unknown[]) => unknown },
+                'executeScript'
+            );
+            const post = jest.spyOn(ProcessFlowRequest.prototype, 'post');
+            return {
+                executeScript,
+                post,
+                assertReadOnly() {
+                    expect(executeScript).not.toHaveBeenCalled();
+                    expect(post).not.toHaveBeenCalled();
+                    executeScript.mockRestore();
+                    post.mockRestore();
+                }
+            };
+        }
+
+        it('should retrieve a flow definition without a context or execution', async () => {
+            const watch = watchForExecution();
+
+            const result: FlowArtifactDefinitionResult = await flowMgr.getFlowArtifactDefinition(FLOW_SYS_ID);
+
+            console.log('\n=== getFlowArtifactDefinition (flow) ===');
+            console.log('Success:', result.success);
+            console.log('Artifact type:', result.artifactType);
+            console.log('Name:', result.summary?.name);
+            console.log('Triggers/actions/logic:', result.summary?.triggerCount, result.summary?.actionCount, result.summary?.flowLogicCount);
+            console.log('Failure reason:', result.failureReason);
+
+            expect(result.success).toBe(true);
+            expect(result.artifactType).toBe('flow');
+            expect(result.reportedType).toBe('flow');
+            expect(result.definition).toBeDefined();
+            expect(result.definition!.actionInstances).toBeDefined();
+            expect(result.definition!.triggerInstances).toBeDefined();
+
+            // JSON-serializable, and round-trips without loss.
+            const json = JSON.stringify(result.definition);
+            expect(JSON.parse(json)).toEqual(result.definition);
+
+            watch.assertReadOnly();
+        }, 120 * SECONDS);
+
+        it('should retrieve a subflow definition with its inputs, outputs and logic', async () => {
+            const watch = watchForExecution();
+
+            const result: FlowArtifactDefinitionResult = await flowMgr.getSubflowDefinition(SUBFLOW_SYS_ID);
+
+            console.log('\n=== getSubflowDefinition ===');
+            console.log('Success:', result.success);
+            console.log('Artifact type:', result.artifactType);
+            console.log('Name:', result.summary?.name);
+            console.log('Inputs/outputs:', result.summary?.inputCount, result.summary?.outputCount);
+            console.log('Actions/subflows/logic:', result.summary?.actionCount, result.summary?.subflowCount, result.summary?.flowLogicCount);
+            console.log('Failure reason:', result.failureReason);
+
+            expect(result.success).toBe(true);
+            expect(result.artifactType).toBe('subflow');
+            expect(result.definition!.inputs).toBeDefined();
+            expect(result.definition!.outputs).toBeDefined();
+            expect(result.definition!.actionInstances).toBeDefined();
+            expect(result.definition!.subFlowInstances).toBeDefined();
+            expect(result.definition!.flowLogicInstances).toBeDefined();
+
+            const json = JSON.stringify(result.definition);
+            expect(JSON.parse(json)).toEqual(result.definition);
+
+            watch.assertReadOnly();
+        }, 120 * SECONDS);
+
+        it('should retrieve a complete action definition: metadata plus ordered steps', async () => {
+            const watch = watchForExecution();
+
+            const result: ActionDefinitionResult = await flowMgr.getActionDefinition(ACTION_SYS_ID);
+
+            console.log('\n=== getActionDefinition ===');
+            console.log('Success:', result.success);
+            console.log('Name:', result.summary?.name);
+            console.log('State:', result.summary?.state);
+            console.log('Inputs/outputs:', result.summary?.inputCount, result.summary?.outputCount);
+            console.log('Step count:', result.summary?.stepCount);
+            console.log('Step order:', result.summary?.steps.map((s) => `${s.order}:${s.stepTypeName}`).join(', '));
+            console.log('Failure reason:', result.failureReason);
+
+            expect(result.success).toBe(true);
+            expect(result.artifactType).toBe('action');
+            expect(result.metadata).toBeDefined();
+            expect(result.metadata!.inputs).toBeDefined();
+            expect(result.metadata!.outputs).toBeDefined();
+            expect(Array.isArray(result.steps)).toBe(true);
+
+            // Steps are ordered ascending and the projection matches the raw list.
+            const orders = result.summary!.steps.map((s) => s.order);
+            expect([...orders].sort((a, b) => a - b)).toEqual(orders);
+            expect(result.summary!.stepCount).toBe(result.steps!.length);
+
+            const json = JSON.stringify({ metadata: result.metadata, steps: result.steps });
+            expect(JSON.parse(json)).toEqual({ metadata: result.metadata, steps: result.steps });
+
+            watch.assertReadOnly();
+        }, 120 * SECONDS);
+
+        it('should not relabel a subflow as a flow', async () => {
+            const result: FlowArtifactDefinitionResult = await flowMgr.getFlowDesignDefinition(SUBFLOW_SYS_ID);
+
+            console.log('\n=== getFlowDesignDefinition (subflow sys_id) ===');
+            console.log('Success:', result.success);
+            console.log('Failure reason:', result.failureReason);
+            console.log('Reported type:', result.reportedType);
+
+            expect(result.success).toBe(false);
+            expect(result.failureReason).toBe('type_mismatch');
+            expect(result.reportedType).toBe('subflow');
+            expect(result.definition).toBeUndefined();
+        }, 120 * SECONDS);
+
+        it('should report a typed failure for an unknown sys_id', async () => {
+            const result: FlowArtifactDefinitionResult = await flowMgr.getFlowArtifactDefinition(
+                '00000000000000000000000000000000'
+            );
+
+            console.log('\n=== getFlowArtifactDefinition (unknown sys_id) ===');
+            console.log('Success:', result.success);
+            console.log('Failure reason:', result.failureReason);
+
+            expect(result.success).toBe(false);
+            expect(['not_found', 'api_error', 'malformed_response']).toContain(result.failureReason);
+            expect(result.errorMessage).toBeDefined();
+        }, 120 * SECONDS);
+
+        it('should report a typed failure for a malformed sys_id without a request', async () => {
+            const result: ActionDefinitionResult = await flowMgr.getActionDefinition('not-a-sys-id');
+
+            expect(result.success).toBe(false);
+            expect(result.failureReason).toBe('invalid_identifier');
+        }, 30 * SECONDS);
     });
 });
