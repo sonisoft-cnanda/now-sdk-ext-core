@@ -269,13 +269,16 @@ export class RequestHandler implements IRequestHandler{
             //const answer = xml['xml']['@_answer'];
 
             let data = null;
-            try{
-                
-                data = JSON.parse(responseBodyString);
-                
-            }catch(ex){
-                this._logger.error("Error parsing response body.", {error:ex, responseBodyString: responseBodyString});
+            if (request.responseFormat === "text") {
                 data = responseBodyString;
+            } else {
+                try{
+                    data = JSON.parse(responseBodyString);
+                }catch{
+                    // HTML and XML are valid responses for legacy ServiceNow endpoints.
+                    // Their bodies can contain live session material, so never log them.
+                    data = responseBodyString;
+                }
             }
             response = new HttpResponse<T>(data);
             response.data = data;

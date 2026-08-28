@@ -52,7 +52,7 @@ export class ClusterTransactionManager {
             this.throwIfAborted(options.signal);
             const initialize = await this._req.get<string>({
                 method: "GET", path: "/loading_transactions.do", headers: null,
-                query: null, body: null, requires: READ_ONLY,
+                query: null, body: null, requires: READ_ONLY, responseFormat: "text",
             });
             const page = this.responseText(initialize.data);
             const executionMatch = /\bvar\s+executionID\s*=\s*(['"])(.*?)\1\s*;/.exec(page);
@@ -86,7 +86,7 @@ export class ClusterTransactionManager {
                 : await this.resolveKillActionSysId();
             const security = await this._req.post<string>({
                 method: "POST", path: "/xmlhttp.do", headers: null, query: null, body: null,
-                requires: READ_ONLY,
+                requires: READ_ONLY, responseFormat: "text",
                 fields: {
                     sysparm_processor: "AJAXActionSecurity", sysparm_scope: "global",
                     sys_target: "v_cluster_transaction", sys_action: actionSysId,
@@ -170,7 +170,7 @@ export class ClusterTransactionManager {
         // stable list-2 structure. Keeping this behind one method preserves the planned seam.
         const response = await this._req.get<string>({
             method: "GET", path: "/v_cluster_transaction_list.do", headers: null, body: null,
-            requires: READ_ONLY,
+            requires: READ_ONLY, responseFormat: "text",
             query: { sysparm_query: query ?? "", sysparm_limit: limit },
         });
         return this.parseTransactionList(this.responseText(response.data), limit);

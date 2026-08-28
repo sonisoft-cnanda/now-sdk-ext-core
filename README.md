@@ -165,6 +165,33 @@ if (selected) {
 }
 ```
 
+Live integration coverage resolves credentials by alias from `@sonisoft/sn-credstore`;
+credentials do not belong in the repository or test environment variables. To verify
+retrieval against a configured instance:
+
+```bash
+SN_INSTANCE_ALIAS=dev281419 node --experimental-vm-modules node_modules/.bin/jest \
+  --forceExit --runInBand --testTimeout=240000 --runTestsByPath \
+  test/integration/sn/transaction/ClusterTransactionManager_IT.test.ts
+```
+
+The termination scenario is deliberately opt-in. First create a safe, disposable
+long-running transaction and obtain its exact `sys_id`, then bind both variables to that
+same identifier. The test proves the identifier is present, submits only that identifier,
+and performs a separate retrieval until removal is observed:
+
+```bash
+SN_INSTANCE_ALIAS=dev281419 \
+NEX_LIVE_KILL_TRANSACTION_SYS_ID=<safe-transaction-sys-id> \
+NEX_LIVE_KILL_CONFIRM=dev281419:<safe-transaction-sys-id> \
+node --experimental-vm-modules node_modules/.bin/jest \
+  --forceExit --runInBand --testTimeout=240000 --runTestsByPath \
+  test/integration/sn/transaction/ClusterTransactionManager_IT.test.ts
+```
+
+Do not copy OAuth tokens, passwords, cookies, or the credential-store file into `.env`.
+Only the non-secret alias and the one-time safe transaction identifier are inputs.
+
 ### Run ATF Tests
 
 ```typescript
