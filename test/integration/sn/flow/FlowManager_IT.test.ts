@@ -2,11 +2,11 @@
 // where the `jest` object is not injected as a global.
 import { jest } from '@jest/globals';
 import { ServiceNowInstance, ServiceNowSettingsInstance } from '../../../../src/sn/ServiceNowInstance';
-import { getCredentials } from "@servicenow/sdk-cli/dist/auth/index.js";
 import { SN_INSTANCE_ALIAS } from '../../../test_utils/test_config';
 
 import { FlowManager } from '../../../../src/sn/flow/FlowManager';
 import { ProcessFlowRequest } from '../../../../src/comm/http/ProcessFlowRequest';
+import { initCredentialStore } from '../../../../src/credentials/ensureShim';
 import { FlowExecutionResult, FlowContextStatusResult, FlowPublishResult, FlowDefinitionResult, FlowActionResult, FlowTestResult, FlowCopyResult, FlowContextDetailsResult, FlowLogResult, FlowArtifactDefinitionResult, ActionDefinitionResult } from '../../../../src/sn/flow/FlowModels';
 
 const SECONDS = 1000;
@@ -16,7 +16,23 @@ describe('FlowManager - Integration Tests', () => {
     let flowMgr: FlowManager;
 
     beforeAll(async () => {
-        const credential = await getCredentials(SN_INSTANCE_ALIAS);
+        await initCredentialStore();
+        const { getCredentials } = await import('@servicenow/sdk-cli/dist/auth/index.js');
+        let credential: unknown;
+        try {
+            credential = await getCredentials(SN_INSTANCE_ALIAS);
+        } catch {
+            // Jest's ESM loader can instantiate the SDK keychain before the
+            // optional shim sees it. Resolve the same encrypted alias through
+            // the credential store's public API so headless live tests remain
+            // runnable without copying secrets into environment variables.
+            const { loadConfig, parseKeyStore, vaultFor } = await import('@sonisoft/sn-credstore');
+            const vault = vaultFor(loadConfig());
+            const blob = await vault.getPassword();
+            const store = blob ? parseKeyStore(blob) : null;
+            credential = store?.[SN_INSTANCE_ALIAS]?.creds;
+            await vault.abandonLease();
+        }
 
         if (credential) {
             const snSettings: ServiceNowSettingsInstance = {
