@@ -15,6 +15,9 @@ export interface HTTPRequest {
 
     json?:object | null;
 
+    /** Keep successful HTML/XML responses as text without attempting JSON parsing. */
+    responseFormat?: "json" | "text";
+
     /**
      * What permission this request needs, when the HTTP verb would get it wrong.
      *

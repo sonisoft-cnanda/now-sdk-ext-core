@@ -95,6 +95,29 @@ describe("tier 2 — declared", () => {
         const r = req({ method: "PUT", requires: { verbs: ["write"], target: "local" } });
         expect(classify(r).target).toBe("local");
     });
+
+    it.each(["AJAXProgressStatusChecker", "AJAXActionSecurity"])(
+        "keeps %s processor POSTs read-only",
+        (processor) => {
+            const r = req({
+                method: "POST",
+                path: "/xmlhttp.do",
+                fields: { sysparm_processor: processor },
+                requires: READ_ONLY,
+            });
+            expect(classify(r).verbs).toEqual([]);
+        },
+    );
+
+    it("classifies the transaction kill POST as an instance write", () => {
+        const result = classify(req({
+            method: "POST",
+            path: "/v_cluster_transaction_list.do",
+            fields: { sysparm_checked_items: "22222222222222222222222222222222" },
+        }));
+        expect(result.verbs).toEqual(["write"]);
+        expect(result.target).toBe("instance");
+    });
 });
 
 describe("the floor cannot be lowered", () => {
