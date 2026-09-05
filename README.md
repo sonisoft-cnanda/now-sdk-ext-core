@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/@sonisoft/now-sdk-ext-core.svg)](https://www.npmjs.com/package/@sonisoft/now-sdk-ext-core)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Node.js Version](https://img.shields.io/badge/node-%3E%3D18.0.0-brightgreen)](https://nodejs.org)
+[![Node.js Version](https://img.shields.io/badge/node-%3E%3D26.0.0-brightgreen)](https://nodejs.org)
 
 A comprehensive TypeScript library that extends the ServiceNow SDK with powerful features for application management, automated testing, log monitoring, and more. Perfect for CI/CD pipelines, development automation, and DevOps workflows.
 
@@ -40,7 +40,7 @@ npm install @sonisoft/now-sdk-ext-core
 
 ### Prerequisites
 
-- Node.js 18.x or higher
+- Node.js 26.x or higher
 - ServiceNow CLI configured with instance credentials
 - TypeScript 5.x or higher (optional, for TypeScript projects)
 
@@ -51,7 +51,7 @@ npm install @sonisoft/now-sdk-ext-core
 npm install -g @servicenow/sdk
 
 # Configure your instance credentials
-snc configure profile set
+now-sdk auth --add https://dev12345.service-now.com --alias dev --type oauth
 ```
 
 ## ⚠️ Breaking Change — v3.0.0 (ServiceNow SDK 4.3.0)
@@ -70,9 +70,7 @@ snc configure profile set
 > npm install -g @servicenow/sdk@4.3.0
 >
 > # 2. Re-add each instance alias
-> snc configure profile set
-> # — or —
-> npx @servicenow/sdk auth --add <your-alias>
+> npx @servicenow/sdk auth --add https://dev12345.service-now.com --alias dev --type oauth
 >
 > # 3. Verify your aliases work
 > npx @servicenow/sdk auth --list
@@ -97,6 +95,97 @@ const instance = new ServiceNowInstance({
     credential: credential
 });
 ```
+
+### Inspect Table Behavior
+
+Use `SchemaDiscovery` for fields, choices and references, and `TableBehaviorDiscovery` for the configuration that can affect a record. Table behavior discovery is available from core **6.4.0**; **6.4.1** also fixes file-log flushing during shutdown. The same API powers [`nex behavior`](https://github.com/sonisoft-cnanda/now-sdk-ext-cli#table-behavior-discovery) and the [MCP behavior tools](https://github.com/sonisoft-cnanda/now-sdk-ext-mcp#table-behavior-discovery).
+
+Using the authenticated `instance` from the connection example:
+
+```typescript
+import { TableBehaviorDiscovery } from '@sonisoft/now-sdk-ext-core';
+
+const behavior = new TableBehaviorDiscovery(instance);
+const inventory = await behavior.discoverTableBehavior('change_request');
+
+for (const section of inventory.categories) {
+    console.log(section.category, section.status, section.items.length);
+}
+```
+
+The eight categories expose different sources of functional requirements:
+
+| Category | Configuration to inspect |
+| --- | --- |
+| `business_rules` | Before/after/async timing, operation flags, order, conditions and optional scripts (`sys_script`) |
+| `ui_actions` | Form/list/workspace placement, visibility conditions, roles and optional scripts (`sys_ui_action`) |
+| `client_scripts` | Client event type, target field, view and inherited applicability (`sys_script_client`) |
+| `ui_policies` | Conditions and field actions such as mandatory, visible and read-only (`sys_ui_policy`, `sys_ui_policy_action`) |
+| `data_policies` | Server field requirements and enforcement settings (`sys_data_policy2`, `sys_data_policy_rule`) |
+| `workflows` | Legacy workflow versions, start conditions and optional activity/transition definitions (`wf_workflow_version`) |
+| `flows` | Record triggers, operation/condition settings and optional current flow definitions (`sys_flow_record_trigger`, `sys_hub_flow`) |
+| `state_models` | State fields, transition conditions and required-field records in supported generic state-model layouts |
+
+Request detail immediately when you already know what you need:
+
+```typescript
+const automation = await behavior.discoverTableBehavior('change_request', {
+    categories: ['business_rules', 'flows', 'state_models'],
+    details: ['scripts', 'definitions', 'dependencies'],
+    dependencyDepth: 1,
+    maxBytes: 262144,
+});
+```
+
+Or retrieve up to 50 known references without repeating discovery. References retain their `kind`, `sourceTable` and `sysId`:
+
+```typescript
+const references = inventory.categories
+    .flatMap(section => section.items.map(item => item.reference))
+    .slice(0, 50);
+
+if (references.length > 0) {
+    const details = await behavior.getBehaviorDetails(references, {
+        details: ['scripts', 'definitions', 'dependencies'],
+        dependencyDepth: 1,
+        maxBytes: 262144,
+    });
+    console.log(details.items, details.remainingReferences);
+}
+```
+
+Direct detail calls also accept known flows (`kind: 'flows'`, `sourceTable: 'sys_hub_flow'`), subflows, actions, Script Includes and decision tables. Use source IDs from your instance; a discovery flow reference can identify its trigger record rather than the flow itself.
+
+**Defaults and output controls:**
+
+- Active configuration and applicable ancestors are included. Use `includeInherited: false` for direct table associations, or `includeInactive: true` for inactive/draft candidates where available.
+- All eight categories, 50 items per category (maximum 200), and a 65,536-byte JSON budget. `maxBytes` accepts 4,096–1,048,576 bytes.
+- Summaries include conditions and declarative field actions. Script bodies, full definitions and dependencies are opt-in through `details`. `dependencyDepth: 1` requires `dependencies` and expands at most 50 unique dependency references.
+- Filter with `categories`, metadata `name`, or up to 50 `sysIds`. `scope` selects the transaction scope for flow definition reads.
+
+Follow each category's `nextCursor` with the same table and filters:
+
+```typescript
+const rulePage = await behavior.discoverTableBehavior('change_request', {
+    categories: ['business_rules'],
+});
+const nextCursor = rulePage.categories[0]?.nextCursor;
+if (nextCursor) {
+    const nextPage = await behavior.discoverTableBehavior('change_request', {
+        categories: ['business_rules'],
+        cursors: { business_rules: nextCursor },
+    });
+    console.log(nextPage.categories);
+}
+```
+
+Inspect category `status`, warnings, item `omittedDetails` and detail-batch `remainingReferences`. Large scripts/definitions are omitted whole; retry narrower batches or increase the byte budget. An empty page can still have a continuation. If even continuation/failure metadata exceeds the budget, the call fails with recovery instructions.
+
+For **Change Management ATF planning**, combine schema fields/choices with UI/data-policy requirements, business-rule conditions, flow triggers and state-transition gates. Retrieve the relevant scripts/definitions, then use those requirements to choose test setup data, roles, transitions and assertions. Client mandatory fields and server enforcement remain separate requirements.
+
+Results describe `accessible_configuration`: account permissions, domain visibility and available metadata limit what can be read. Conditions and scripts are never evaluated, and discovery does not predict execution order across automation types. Runtime flow triggers and current design-time definitions have separate provenance; current definitions may differ from the version that executed. Script-started or non-record-triggered automation is not automatically inferred as a table association.
+
+Live validation covered **Australia** on `dev206299`; **Zurich** remains unverified. See the [Table Behavior guide](docs/TableBehaviorDiscovery.md) for source layouts, compatibility limits, dependency resolution and pagination details.
 
 ### Real-Time Log Monitoring
 
@@ -470,6 +559,9 @@ console.log('Return value:', result.result);
 
 - **`CodeSearch`** - Search across platform code by term, app, or table
 - **`SchemaDiscovery`** - Discover table schemas, explain fields, validate catalog items
+- **`TableBehaviorDiscovery`** - Read table automation, policy requirements and state gates; retrieve scripts, definitions and bounded dependencies in batches
+- **`BEHAVIOR_CATEGORIES`, `BehaviorReference`, `TableBehaviorOptions`, `BehaviorDetailOptions`** - Category constants and typed inputs shared by consumers
+- **`TableBehaviorResult`, `BehaviorDetailsResult`** - Configuration, provenance, warnings and continuation metadata
 
 ### Data Operations
 
@@ -641,6 +733,7 @@ Comprehensive documentation is available in the `/docs` directory:
 **Code, Schema & Search:**
 - **[Code Search](./docs/CodeSearch.md)** - Platform code search
 - **[Schema Discovery](./docs/SchemaDiscovery.md)** - Table schema and field discovery
+- **[Table Behavior Discovery](./docs/TableBehaviorDiscovery.md)** - Rules, UI/client behavior, policies, workflows, flow triggers and state models
 
 **Data Operations:**
 - **[Attachment Manager](./docs/AttachmentManager.md)** - File attachment operations
@@ -690,8 +783,8 @@ logger.info('Application started');
 logger.error('Error occurred', { details: errorObj });
 ```
 
-Credential material is stripped from both metadata and the message text before anything
-is written, so passing a whole request config or session object is safe.
+Named credential fields and recognized token patterns are redacted in metadata and
+message text. Pass structured metadata and avoid interpolating secrets into messages.
 
 #### Turning on file logging
 
@@ -710,6 +803,8 @@ configureLogging({
 // Winston buffers; process.exit() would drop the tail.
 await flushLogs();
 ```
+
+`flushLogs()` waits for the underlying file output to finish within a bounded timeout before returning. Await it before an explicit process exit; existing `Logger` instances remain usable after a flush.
 
 Equivalent environment variables, honoured with no code change — this is how the MCP
 server is configured, since it has no flags:
