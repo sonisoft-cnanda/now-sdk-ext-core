@@ -55,7 +55,9 @@ Legacy workflow detail includes activities, transition conditions and variable v
 
 Intended families: Zurich and Australia. Readers check table hierarchy and dictionary fields before issuing metadata filters; unavailable layouts or permissions are reported explicitly. All queries use the existing authenticated HTTP layer and respect its policy gate. Metadata reads are reused within a call, with at most four concurrent metadata probes; no persistent result cache is added.
 
-The checked-in Australia dictionary fixture was captured through read-only queries on 2026-09-05. Live validation covered all eight categories, flow/state detail, inherited configuration and non-change tables. Zurich validation remains a release gate; the Australia fixture is not presented as Zurich evidence.
+The checked-in Australia dictionary fixture was captured through read-only queries on 2026-09-05. Live validation covered all eight categories, flow/state detail, inherited configuration and non-change tables. Core 6.4.1 is released; live Zurich validation remains outstanding. The Australia fixture is not presented as Zurich evidence.
+
+Known pagination edge case in 6.4.1: with `includeInactive: false`, a flow page ending exactly at the item limit can emit a cursor into the excluded designer source. Following it may report an empty `unavailable` category despite the preceding runtime scan completing. This follow-up is tracked in [NEX-114](https://jengo.atlassian.net/browse/NEX-114).
 
 Primary references: [State Management](https://www.servicenow.com/docs/main/markdown/platform-administration/state-management/state-model), [flow runtime trigger linkage](https://support.servicenow.com/kb?id=KB2606177), and installed ServiceNow SDK trigger/state-model/data-policy serializers. `now-sdk explain trigger-api` and `now-sdk explain statemodel-api` describe the configuration semantics.
 
