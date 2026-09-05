@@ -59,6 +59,11 @@ function exportedNames(): string[] {
 }
 
 (hasBuild ? describe : describe.skip)('public API surface (dist/index.d.ts)', () => {
+    it('exports table behavior discovery and its typed contracts', () => {
+        const names = exportedNames();
+        for (const name of ['TableBehaviorDiscovery', 'BEHAVIOR_CATEGORIES', 'TableBehaviorOptions', 'TableBehaviorResult', 'BehaviorReference', 'BehaviorDetailsResult']) expect(names).toContain(name);
+    });
+
     it('exports the AMB types needed to construct a ScriptTracer', () => {
         const names = exportedNames();
         for (const name of ['AMBClient', 'MessageClientBuilder', 'Channel', 'ChannelListener']) {

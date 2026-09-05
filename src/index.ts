@@ -60,6 +60,8 @@ export * from './sn/batch/BatchModels.js';
 export * from './sn/batch/BatchOperations.js';
 export * from './sn/batch/QueryBatchModels.js';
 export * from './sn/batch/QueryBatchOperations.js';
+export * from './sn/behavior/BehaviorModels.js';
+export * from './sn/behavior/TableBehaviorDiscovery.js';
 export * from './sn/catalog/CatalogManager.js';
 export * from './sn/catalog/CatalogModels.js';
 export * from './sn/cmdb/CMDBModels.js';
