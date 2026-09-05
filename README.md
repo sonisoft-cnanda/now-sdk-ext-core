@@ -18,6 +18,7 @@ A comprehensive TypeScript library that extends the ServiceNow SDK with powerful
 - 📦 **Update Set Management** - Create, clone, inspect, and manage update sets
 - 🔍 **Code Search** - Search across platform code, apps, and tables
 - 🗄️ **Schema Discovery** - Discover table schemas, explain fields, validate catalogs
+- **[Table Behavior](docs/TableBehaviorDiscovery.md)** - Discover automation, field requirements, and related artifact details
 - 📎 **Attachment Management** - Upload, list, and retrieve file attachments
 - ⚡ **Batch Operations** - Bulk create/update with variable substitution and query-based bulk operations
 - 🔧 **Workflow Management** - Create complete workflows programmatically
