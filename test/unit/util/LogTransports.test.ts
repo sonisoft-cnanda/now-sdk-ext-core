@@ -10,6 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import { once } from 'events';
 import * as winston from 'winston';
 import { Logger } from '../../../src/util/Logger';
 import {
@@ -228,7 +229,40 @@ describe('shared root logger', () => {
     });
 });
 
-describe('reuse after flushLogs', () => {
+describe('flushLogs', () => {
+    it('waits for the file write after the logger and transport have finished', async () => {
+        configureLogging({ file: true, console: false });
+        const current = getRootLogger();
+        const transport = current.transports.find((t) => t instanceof winston.transports.File);
+        if (!transport) throw new Error('File transport missing');
+        await once(transport, 'open');
+        const destination = (transport as unknown as { _dest: fs.WriteStream })._dest;
+        const write = destination._write.bind(destination);
+        let releaseWrite: (() => void) | undefined;
+        let notifyWrite: () => void;
+        const writeStarted = new Promise<void>((resolve) => { notifyWrite = resolve; });
+        const heldWrite = jest.spyOn(destination, '_write').mockImplementation((chunk: Buffer, encoding: BufferEncoding, callback: (error?: Error | null) => void) => {
+            releaseWrite = () => write(chunk, encoding, callback);
+            notifyWrite();
+        });
+        new Logger('FlushProbe').info('last line before exit');
+        await writeStarted;
+        const finished = once(current, 'finish');
+        let flushed = false;
+        const flushing = flushLogs().then(() => { flushed = true; });
+        try {
+            await finished;
+            await new Promise<void>((resolve) => setImmediate(resolve));
+            expect(flushed).toBe(false);
+        } finally {
+            releaseWrite?.();
+            await flushing;
+            heldWrite.mockRestore();
+        }
+        expect(fs.readFileSync(path.join(tmpRoot, 'now-sdk-ext', 'logs', 'nex.log'), 'utf8'))
+            .toContain('last line before exit');
+    });
+
     it('does not write to an ended stream — a Logger kept across a flush must rebuild', async () => {
         configureLogging({ file: true, level: 'debug' });
         const logger = new Logger('Reused');
