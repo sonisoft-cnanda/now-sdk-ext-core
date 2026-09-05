@@ -976,6 +976,10 @@ Check `initCredentialStore().active` when the application requires the headless
 backend. Imports alone never install the shim. Keep session state out of logs and
 source control. A saved state file does not renew itself.
 
+When upgrading a shared store, stop all clients first, upgrade every client
+(including standalone `now-sdk-x`) to sn-credstore 1.1.1 or later, then restart.
+The new lock protocol cannot safely run alongside older clients.
+
 Long-running embedders can supply a `credentialProvider` in
 `ServiceNowSettingsInstance`:
 
