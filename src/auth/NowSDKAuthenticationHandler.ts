@@ -13,6 +13,7 @@ export class NowSDKAuthenticationHandler implements IAuthenticationHandler {
     private _isLoggedIn = false;
     private _session: UserSession | undefined;
     private _credentials: SessionCredentials | undefined;
+    private _origin: string | undefined;
     private _pending: Promise<UserSession> | undefined;
     private _pinned = false;
     private _logger = new Logger('NowSDKAuthenticationHandler');
@@ -44,11 +45,14 @@ export class NowSDKAuthenticationHandler implements IAuthenticationHandler {
     private async login(): Promise<UserSession> {
         try {
             const provider = this._instance.credentialProvider;
-            const credentials = provider
+            const credentials = sessionCredentials(provider
                 ? await provider()
-                : sessionCredentials(this._instance.credential);
-            const previous = this._credentials ?? sessionCredentials(this._instance.credential);
-            if (new URL(credentials.instanceUrl).origin !== new URL(previous.instanceUrl).origin) {
+                : this._instance.credential);
+            const origin = new URL(credentials.instanceUrl).origin;
+            const expectedOrigin = this._origin ?? new URL(
+                sessionCredentials(this._instance.credential ?? credentials).instanceUrl,
+            ).origin;
+            if (origin !== expectedOrigin) {
                 throw new SessionAuthError('NEX_AUTH_ORIGIN_CHANGED', 'The alias now resolves to another instance. Create a new connection explicitly.');
             }
             if (credentials.type === 'oauth' && credentials.expires_at <= Date.now() / 1000) {
@@ -62,6 +66,7 @@ export class NowSDKAuthenticationHandler implements IAuthenticationHandler {
             this._requestHandler.setSession(session, this._instance);
             this._session = session;
             this._credentials = credentials;
+            this._origin = origin;
             this._isLoggedIn = true;
             return session;
         } catch (error: unknown) {

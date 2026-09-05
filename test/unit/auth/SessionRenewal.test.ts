@@ -38,6 +38,26 @@ beforeEach(() => {
 afterEach(() => jest.restoreAllMocks());
 
 describe('SDK session renewal', () => {
+    it('authenticates with a provider and no initial credential', async () => {
+        const provider = jest.fn(async () => credential());
+        const request = new ServiceNowRequest(new ServiceNowInstance({alias: 'test', credentialProvider: provider}));
+        await request.get({...read});
+        expect(provider).toHaveBeenCalledTimes(1);
+        expect(request.isLoggedIn()).toBe(true);
+        expect(requests).toBe(1);
+    });
+
+    it('pins the first provider origin even if its credential object is later mutated', async () => {
+        const current = credential();
+        const request = new ServiceNowRequest(new ServiceNowInstance({credentialProvider: async () => current}));
+        await request.get({...read});
+        current.instanceUrl = 'https://other.service-now.com';
+        calls.length = 0;
+        await expect((request.auth as NowSDKAuthenticationHandler).ensureSession(true))
+            .rejects.toMatchObject({code: 'NEX_AUTH_ORIGIN_CHANGED'});
+        expect(calls).toHaveLength(0);
+    });
+
     it('refreshes before expiry and coalesces concurrent requests', async () => {
         const initial = credential();
         const provider = jest.fn(async () => initial);
@@ -85,6 +105,25 @@ describe('SDK session renewal', () => {
         await request.post({...read, path: '/api/now/ui/impersonate/test-user'});
         await expect((request.auth as NowSDKAuthenticationHandler).ensureSession(true))
             .rejects.toMatchObject({code: 'NEX_SESSION_EXPIRED'});
+    });
+
+    it('requires a new instance to start a fresh workflow after pinned-session expiry', async () => {
+        const initial = credential();
+        const provider = jest.fn(async () => initial);
+        const instance = new ServiceNowInstance({alias: 'test', credential: initial, credentialProvider: provider});
+        const request = new ServiceNowRequest(instance);
+        await request.post({...read, path: '/api/now/ui/impersonate/test-user'});
+        if (initial.type === 'oauth') initial.expires_at = Math.floor(Date.now() / 1000) - 1;
+        calls.length = 0;
+        await expect(request.get({...read})).rejects.toMatchObject({code: 'NEX_SESSION_EXPIRED'});
+        expect(provider).toHaveBeenCalledTimes(1);
+        expect(calls).toHaveLength(0);
+
+        const fresh = new ServiceNowRequest(new ServiceNowInstance({
+            alias: 'test', credentialProvider: async () => credential(),
+        }));
+        await fresh.get({...read});
+        expect(fresh.isLoggedIn()).toBe(true);
     });
 
     it('rejects an alias changing origins before sending requests there', async () => {

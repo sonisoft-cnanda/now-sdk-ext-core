@@ -888,15 +888,21 @@ Long-running embedders can supply a `credentialProvider` in
 const credentialProvider = () => resolveSessionCredentials('dev206299');
 const instance = new ServiceNowInstance({
     alias: 'dev206299',
-    credential: await credentialProvider(),
     credentialProvider,
 });
 ```
+
+An initial `credential` is optional. When supplied, its origin constrains the first
+provider result. Otherwise, the first successful login establishes the origin;
+renewal cannot change it, even if a provider reuses a mutable credential object.
 
 Requests renew credentials/session cookies before expiry. An authentication failure
 can retry an ordinary read once; writes and stateful workflows are never replayed.
 Impersonation/debugger sessions are pinned and report expiry rather than silently
 losing workflow state. A provider resolving to a different origin is refused.
+Pinning lasts for the handler's lifetime, including after stopping impersonation
+or debugging. At a safe workflow boundary, create a new `ServiceNowInstance` to
+start a fresh session. Reusing the same alias on that new instance is supported.
 
 `SessionAuthError.code` distinguishes invalid configuration, changed origin,
 temporary renewal failure, session expiry, and rejected OAuth renewal requiring login.
