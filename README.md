@@ -957,3 +957,49 @@ For issues, questions, or contributions:
 ---
 
 **Made with ❤️ for the ServiceNow Developer Community**
+
+## Browser sessions and automatic renewal
+
+`createBrowserSession({alias})` resolves a stored SDK alias, refreshes OAuth through
+the SDK, and returns `{alias, instanceUrl, createdAt, oauthExpiresAt, storageState}`.
+`createdAt` is milliseconds; `oauthExpiresAt` is UNIX seconds and only a renewal hint.
+`storageState` is secret and directly compatible with Playwright:
+
+```ts
+const store = await initCredentialStore();
+if (!store.active) throw new Error('Headless credential storage is required');
+const session = await createBrowserSession({alias: 'dev206299'});
+const context = await browser.newContext({storageState: session.storageState});
+```
+
+Check `initCredentialStore().active` when the application requires the headless
+backend. Imports alone never install the shim. Keep session state out of logs and
+source control. A saved state file does not renew itself.
+
+Long-running embedders can supply a `credentialProvider` in
+`ServiceNowSettingsInstance`:
+
+```ts
+const credentialProvider = () => resolveSessionCredentials('dev206299');
+const instance = new ServiceNowInstance({
+    alias: 'dev206299',
+    credentialProvider,
+});
+```
+
+An initial `credential` is optional. When supplied, its origin constrains the first
+provider result. Otherwise, the first successful login establishes the origin;
+renewal cannot change it, even if a provider reuses a mutable credential object.
+
+Requests renew credentials/session cookies before expiry. An authentication failure
+can retry an ordinary read once; writes and stateful workflows are never replayed.
+Impersonation/debugger sessions are pinned and report expiry rather than silently
+losing workflow state. A provider resolving to a different origin is refused.
+Pinning lasts for the handler's lifetime, including after stopping impersonation
+or debugging. At a safe workflow boundary, create a new `ServiceNowInstance` to
+start a fresh session. Reusing the same alias on that new instance is supported.
+
+`SessionAuthError.code` distinguishes invalid configuration, changed origin,
+temporary renewal failure, session expiry, and rejected OAuth renewal requiring login.
+Inspect the code structurally across package copies. Alias-based helpers reject SDK
+environment credentials that would silently override the alias.

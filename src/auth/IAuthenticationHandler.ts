@@ -3,6 +3,8 @@ import { IRequestHandler } from "../comm/http/IRequestHandler";
 
 
 export interface IAuthenticationHandler{
+    ensureSession?(force?: boolean): Promise<unknown>;
+    pinSession?(): void;
 
     doLogin();
 

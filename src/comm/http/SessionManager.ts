@@ -88,6 +88,7 @@ export class SessionManager {
         const request = this.getRequest(instance);
 
         if (request.isLoggedIn()) {
+            await request.getUserSession();
             return request;
         }
 

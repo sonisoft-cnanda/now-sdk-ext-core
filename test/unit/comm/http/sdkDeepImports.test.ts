@@ -34,6 +34,13 @@ import { describe, it, expect } from '@jest/globals';
  * updated — that is precisely the failure this test exists to surface in CI.
  */
 describe('ServiceNow SDK deep imports', () => {
+    it('exposes credential resolution and cookie bootstrap', async () => {
+        const auth = await import('@servicenow/sdk-cli/dist/auth/index.js');
+        const sessions = await import('@servicenow/sdk-cli-core/dist/auth/index.js');
+        expect(typeof auth.getCredentials).toBe('function');
+        expect(typeof auth.getUserSession).toBe('function');
+        expect(typeof sessions.getUserSession).toBe('function');
+    });
     it('dist/http/index.js exposes makeRequest and parseResponseBody', async () => {
         const mod = await import('@servicenow/sdk-cli-core/dist/http/index.js');
         expect(typeof mod.makeRequest).toBe('function');
