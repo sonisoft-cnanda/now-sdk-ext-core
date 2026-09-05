@@ -15,6 +15,7 @@ import { stripSecretsFromError, redactValue } from '../../util/redact';
 import { checkRequirement } from '../../policy/Policy';
 import { policyRefusal } from '../../policy/PolicyRefusal';
 import { classify } from '../../policy/internal/Classify';
+import { SessionAuthError } from '../../auth/SessionAuthError';
 
 //axios.defaults.withCredentials = true;
 
@@ -223,7 +224,7 @@ export class RequestHandler implements IRequestHandler{
         }
       }
 
-    private async doRequest<T>(request: HTTPRequest): Promise<HttpResponse<T>> {
+    private async doRequest<T>(request: HTTPRequest, retried = false): Promise<HttpResponse<T>> {
         let response:HttpResponse<T> = null;
        const {config} = await this.getRequestConfig(request);
        this._logger.debug("Retrieved Configuration", {config:config});
@@ -235,6 +236,19 @@ export class RequestHandler implements IRequestHandler{
         // }
         
         const resp = await makeRequest(config);
+        if (resp.status === 401 && this._authHandler.ensureSession) {
+            const requirement = classify(request);
+            const stateful = /\/(?:impersonate|debugger|scripttracer)(?:\/|$)/.test(request.path);
+            await resp.body?.cancel();
+            if (!retried && !stateful && requirement.verbs.length === 0 && requirement.target === 'instance') {
+                await this._authHandler.ensureSession(true);
+                return this.doRequest<T>(request, true);
+            }
+            throw new SessionAuthError('NEX_SESSION_EXPIRED', 'Session authentication failed. Renew at a safe boundary; this operation was not replayed.');
+        }
+        if (resp.ok && /\/(?:impersonate|debugger|scripttracer)(?:\/|$)/.test(request.path)) {
+            this._authHandler.pinSession?.();
+        }
         let responseBodyString: string | null = null;
         if (!resp.ok) {
            
@@ -410,6 +424,8 @@ export class RequestHandler implements IRequestHandler{
         // construct their own ServiceNowRequest. A second chokepoint elsewhere would
         // only be a second thing to keep in sync.
         this.assertPermitted(request);
+        await this._authHandler.ensureSession?.();
+        this.assertSessionMatchesBoundInstance();
 
         const config = {
             auth: this._session,

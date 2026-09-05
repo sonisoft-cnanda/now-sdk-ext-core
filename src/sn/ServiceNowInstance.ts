@@ -1,4 +1,5 @@
 import { IServiceNowInstance } from "./IServiceNowInstance";
+import type { CredentialProvider } from "../auth/CredentialProvider";
 
 /**
  * Monotonic source of instance identity.
@@ -22,6 +23,7 @@ export interface ServiceNowSettingsInstance {
     isDefault?:boolean;
     password?:string;
     credential?:unknown;
+    credentialProvider?: CredentialProvider;
 }
 
 export class ServiceNowInstance implements IServiceNowInstance{
@@ -33,10 +35,12 @@ export class ServiceNowInstance implements IServiceNowInstance{
     private _password:string;
     
     private _credential:unknown;
+    public readonly credentialProvider: CredentialProvider | undefined;
 
     private readonly _instanceId:number = nextInstanceId++;
 
     constructor(snInstanceSettingsObj?:ServiceNowSettingsInstance | null){
+        this.credentialProvider = snInstanceSettingsObj?.credentialProvider;
         if(typeof snInstanceSettingsObj != 'undefined' && snInstanceSettingsObj != null){
             if(snInstanceSettingsObj.host){
                 this._host = snInstanceSettingsObj.host;

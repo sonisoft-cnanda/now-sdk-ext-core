@@ -152,6 +152,12 @@ function exportedNames(): string[] {
         expect(exportedNames()).not.toContain('SessionManager');
     });
 
+    it('exports browser sessions and alias-bound credential renewal', () => {
+        const names = exportedNames();
+        for (const name of ['createBrowserSession', 'BrowserSession', 'CredentialProvider',
+            'resolveSessionCredentials', 'SessionAuthError']) expect(names).toContain(name);
+    });
+
     it('does not leak the CometD transport internals', () => {
         // These are ~2,900 lines of protocol plumbing. Publishing them would
         // make every refactor semver-major, and exporting `XMLHttpRequest`

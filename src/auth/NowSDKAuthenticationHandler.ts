@@ -1,101 +1,82 @@
-/* eslint-disable @typescript-eslint/no-unsafe-member-access */
-/* eslint-disable @typescript-eslint/no-explicit-any */
-//import { UISession } from "@servicenow/sdk-cli-core/dist/util/UISession";
-import { IRequestHandler } from "../comm/http/IRequestHandler";
-import { Logger } from "../util/Logger";
-import { IAuthenticationHandler } from "./IAuthenticationHandler";
-//import { Creds, login } from "@servicenow/sdk-cli-core/dist/command/login";
-import { ICookieStore } from "../comm/http/ICookieStore";
-import { ServiceNowInstance } from "../sn/ServiceNowInstance";
-import { getSafeUserSession } from "@servicenow/sdk-cli-core/dist/util/sessionToken.js";
-import { stripSecretsFromError } from "../util/redact";
+import { IRequestHandler } from '../comm/http/IRequestHandler';
+import { Logger } from '../util/Logger';
+import { IAuthenticationHandler } from './IAuthenticationHandler';
+import { ICookieStore } from '../comm/http/ICookieStore';
+import { ServiceNowInstance } from '../sn/ServiceNowInstance';
+import { getUserSession } from '@servicenow/sdk-cli/dist/auth/index.js';
+import type { UserSession } from '@servicenow/sdk-cli/dist/auth/index.js';
+import { sessionCredentials, SessionCredentials } from './CredentialProvider';
+import { SessionAuthError } from './SessionAuthError';
 
+export class NowSDKAuthenticationHandler implements IAuthenticationHandler {
+    private _requestHandler: IRequestHandler;
+    private _isLoggedIn = false;
+    private _session: UserSession | undefined;
+    private _credentials: SessionCredentials | undefined;
+    private _pending: Promise<UserSession> | undefined;
+    private _pinned = false;
+    private _logger = new Logger('NowSDKAuthenticationHandler');
 
-export class NowSDKAuthenticationHandler implements IAuthenticationHandler{
+    constructor(private readonly _instance: ServiceNowInstance) {}
 
-    private _requestHandler:IRequestHandler;
-  
-    private _isLoggedIn:boolean = false;
-
-    private _session:unknown;
-
-    private _logger:Logger;
-
-    private _instance:ServiceNowInstance;
-
-    public constructor(instance:ServiceNowInstance){
-        this._logger = new Logger("NowSDKAuthenticationHandler");
-        this._instance = instance;
+    public async doLogin(): Promise<UserSession> {
+        return this.ensureSession(true);
     }
 
-    public async doLogin() : Promise<any>{
-        const session:unknown =  await this.login();
-        this._session = session;
-
-        return session;
-    }
-
-    private async login() : Promise<unknown>{
-
-        try{
-            const auth = {credentials: this._instance.credential};
-            const session : unknown = await getSafeUserSession(auth, this._logger);
-            if(session){
-                // Recording WHICH instance this session was minted for is the whole
-                // point: RequestHandler compares it against the instance it is bound to
-                // before every dispatch, which is where a mismatch is actually caught.
-                //
-                // There is deliberately no re-check of this._instance across the await.
-                // It is assigned once in the constructor and never reassigned, and
-                // AuthenticationHandlerFactory builds a fresh handler per instance, so
-                // such a check could not fire — it would only imply a protection that
-                // does not exist here.
-                this._requestHandler.setSession(session, this._instance);
-                this.setLoggedIn(true);
-            }else{
-                throw new Error("Unable to login.");
+    public async ensureSession(force = false): Promise<UserSession> {
+        if (this._pending !== undefined) return this._pending;
+        const credentials = this._credentials;
+        const due = credentials?.type === 'oauth' &&
+            credentials.expires_at - Date.now() / 1000 <= 15 * 60;
+        if (!force && this._isLoggedIn && !due) return this._session;
+        if (this._pinned && this._session) {
+            if (!force && credentials?.type === 'oauth' && credentials.expires_at > Date.now() / 1000) {
+                return this._session;
             }
-           
-            this._logger.debug("Login Attempt Complete.");
-            return session;
-        }catch(e){
-            // Of every error in the codebase this is the one most likely to be carrying
-            // the credential it just failed to use, and it propagates out to consumers
-            // whose loggers have no redaction format of their own.
-            const safe: unknown = stripSecretsFromError(e);
-            this._logger.error("Error during login.", safe);
-            throw safe;
+            throw new SessionAuthError('NEX_SESSION_EXPIRED', 'A stateful session expired. Restart the workflow at a safe boundary; it was not replayed.');
         }
-        return null;
+        const pending = this.login();
+        this._pending = pending;
+        try { return await pending; }
+        finally { if (this._pending === pending) this._pending = undefined; }
     }
 
-    public getRequestHandler():IRequestHandler{
-        return this._requestHandler;
+    private async login(): Promise<UserSession> {
+        try {
+            const provider = this._instance.credentialProvider;
+            const credentials = provider
+                ? await provider()
+                : sessionCredentials(this._instance.credential);
+            const previous = this._credentials ?? sessionCredentials(this._instance.credential);
+            if (new URL(credentials.instanceUrl).origin !== new URL(previous.instanceUrl).origin) {
+                throw new SessionAuthError('NEX_AUTH_ORIGIN_CHANGED', 'The alias now resolves to another instance. Create a new connection explicitly.');
+            }
+            if (credentials.type === 'oauth' && credentials.expires_at <= Date.now() / 1000) {
+                throw new SessionAuthError('NEX_SESSION_EXPIRED', 'Access token expired. Supply an alias-bound credentialProvider to enable automatic SDK renewal.');
+            }
+            const value: unknown = await getUserSession(credentials);
+            if (!value || typeof value !== 'object' || !('cookie' in value) || !value.cookie) {
+                throw new SessionAuthError('NEX_AUTH_TEMPORARY', 'The SDK did not create a session. Check connectivity and retry.');
+            }
+            const session = value as UserSession;
+            this._requestHandler.setSession(session, this._instance);
+            this._session = session;
+            this._credentials = credentials;
+            this._isLoggedIn = true;
+            return session;
+        } catch (error: unknown) {
+            this._isLoggedIn = false;
+            if (error instanceof SessionAuthError) throw error;
+            throw new SessionAuthError('NEX_AUTH_TEMPORARY', 'Session renewal failed. Check credential storage and instance connectivity, then retry.');
+        }
     }
 
-    public setRequestHandler(requestHandler:IRequestHandler){
-        this._requestHandler = requestHandler;
-    }
-
-    public isLoggedIn():boolean{
-        return this._isLoggedIn;
-    }
-
-    public setLoggedIn(loggedIn:boolean){
-        this._isLoggedIn = loggedIn;
-    }
-
-    public getToken():string{
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-call
-        return (this._session as any).getToken() as string;
-    }
-
-    public getCookies():ICookieStore{
-        // eslint-disable-next-line @typescript-eslint/no-unsafe-return, @typescript-eslint/no-unsafe-call
-        return (this._session as any).getCookies();
-    }
-
-    public getSession():unknown{
-        return this._session;
-    }
+    public pinSession(): void { this._pinned = true; }
+    public getRequestHandler(): IRequestHandler { return this._requestHandler; }
+    public setRequestHandler(handler: IRequestHandler): void { this._requestHandler = handler; }
+    public isLoggedIn(): boolean { return this._isLoggedIn; }
+    public setLoggedIn(value: boolean): void { this._isLoggedIn = value; }
+    public getToken(): string { return this._session?.userToken ?? ''; }
+    public getCookies(): ICookieStore { return this._session?.cookie; }
+    public getSession(): UserSession | undefined { return this._session; }
 }
