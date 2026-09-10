@@ -20,6 +20,7 @@
 import * as winston from "winston";
 import { homedir, tmpdir } from "os";
 import { join } from "path";
+import type { WriteStream } from "fs";
 import { redactValue, isSecretKey, redactMessage, REDACTED } from "./redact";
 
 const { combine, timestamp, json, metadata, printf } = winston.format;
@@ -414,12 +415,16 @@ export async function flushLogs(): Promise<void> {
     }
     await settle(2);
 
-    // The logger's own `finish` is not enough. It fires when the logger stream ends,
-    // which is before each File transport has drained to disk — so a flush that waits
-    // only on the logger returns with the file still empty.
+    // Winston's transport finishes before its underlying file output has drained.
     const waiters: Promise<void>[] = [
         once(current, "finish"),
         ...fileTransports.map((t) => once(t, "finish")),
+        ...fileTransports.flatMap((t) => {
+            const destination = (t as unknown as { _dest?: WriteStream })._dest;
+            return destination && !destination.writableFinished
+                ? [once(destination, "finish")]
+                : [];
+        }),
     ];
 
     current.end();

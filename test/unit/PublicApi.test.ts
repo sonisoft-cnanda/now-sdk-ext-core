@@ -59,6 +59,11 @@ function exportedNames(): string[] {
 }
 
 (hasBuild ? describe : describe.skip)('public API surface (dist/index.d.ts)', () => {
+    it('exports table behavior discovery and its typed contracts', () => {
+        const names = exportedNames();
+        for (const name of ['TableBehaviorDiscovery', 'BEHAVIOR_CATEGORIES', 'TableBehaviorOptions', 'TableBehaviorResult', 'BehaviorReference', 'BehaviorDetailsResult']) expect(names).toContain(name);
+    });
+
     it('exports the AMB types needed to construct a ScriptTracer', () => {
         const names = exportedNames();
         for (const name of ['AMBClient', 'MessageClientBuilder', 'Channel', 'ChannelListener']) {
@@ -98,11 +103,59 @@ function exportedNames(): string[] {
         expect(names).toContain('OperationProgressCallback');
     });
 
+    it('exports the cluster transaction manager and its supported contract', () => {
+        const names = exportedNames();
+        for (const name of [
+            'ClusterTransactionManager',
+            'ClusterTransaction',
+            'GetTransactionsOptions',
+            'KillTransactionOptions',
+            'KillTransactionResult',
+        ]) {
+            expect(names).toContain(name);
+        }
+    });
+
+    it('exports the flow design-time definition contract', () => {
+        // getFlowArtifactDefinition/getActionDefinition are unusable from a typed
+        // consumer without their result and option types — the same shape of gap
+        // this file exists for.
+        const names = exportedNames();
+        for (const name of [
+            'FlowManager',
+            'FlowDefinitionOptions',
+            'FlowDesignArtifactType',
+            'FlowDefinitionFailureReason',
+            'FlowArtifactDefinitionResult',
+            'FlowArtifactSummary',
+            'ActionDefinitionResult',
+            'ActionDefinitionSummary',
+            'ActionStepSummary',
+        ]) {
+            expect(names).toContain(name);
+        }
+    });
+
+    it('still exports the pre-existing flow definition result types', () => {
+        // AC7 of NEX-106: adding the typed definition API must not remove the
+        // contract existing callers of getFlowDefinition/getFlowActions compile
+        // against.
+        const names = exportedNames();
+        expect(names).toContain('FlowDefinitionResult');
+        expect(names).toContain('FlowActionResult');
+    });
+
     it('does not export SessionManager', () => {
         // Deliberately internal (removed from the barrel in f5379e4). ctix used
         // to re-add it on every full build; the barrel is hand-authored now so
         // that cannot happen silently.
         expect(exportedNames()).not.toContain('SessionManager');
+    });
+
+    it('exports browser sessions and alias-bound credential renewal', () => {
+        const names = exportedNames();
+        for (const name of ['createBrowserSession', 'BrowserSession', 'CredentialProvider',
+            'resolveSessionCredentials', 'SessionAuthError']) expect(names).toContain(name);
     });
 
     it('does not leak the CometD transport internals', () => {
