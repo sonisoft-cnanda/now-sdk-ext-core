@@ -2464,4 +2464,552 @@ describe('FlowManager - Unit Tests', () => {
             expect(result.entries).toHaveLength(0);
         });
     });
+
+    // ================================================================
+    // Design-Time Definition API (read-only ProcessFlow routes)
+    //
+    // Shapes below mirror captured Workflow Studio traffic: flows and subflows
+    // come back from GET /processflow/flow/{id} under result.data and are told
+    // apart by `type`, while an action needs both action_types/{id} (metadata
+    // returned directly under `result`) and .../step_instances (result.steps).
+    // ================================================================
+
+    describe('design-time definition retrieval', () => {
+        const FLOW_SYS_ID = 'ae20de1b83a79210e84dcba2722bc06e';
+        const SUBFLOW_SYS_ID = 'cb622e9624500210f8778ca667ee1a00';
+        const ACTION_SYS_ID = '1df3d0cb534e2010c232ddeeff7b12e1';
+        const STEP_INSTANCES = [{ step_id: 'step1', order: 1 }];
+
+        function flowPayload(overrides: Record<string, unknown> = {}) {
+            return {
+                id: FLOW_SYS_ID,
+                name: 'Change - Conflict Detection',
+                internalName: 'change__conflict_detection',
+                description: 'Detects conflicts',
+                type: 'flow',
+                status: 'published',
+                active: true,
+                scope: 'global_scope_sys_id',
+                scopeName: 'global',
+                triggerInstances: [{ id: 't1' }],
+                actionInstances: [{ id: 'a1' }, { id: 'a2' }],
+                subFlowInstances: [],
+                flowLogicInstances: [{ id: 'l1' }, { id: 'l2' }],
+                inputs: [{ id: 'i1' }, { id: 'i2' }],
+                outputs: [],
+                ...overrides
+            };
+        }
+
+        function subflowPayload(overrides: Record<string, unknown> = {}) {
+            return flowPayload({
+                id: SUBFLOW_SYS_ID,
+                name: 'Add User or Group to additional role',
+                internalName: 'add_user_or_group_to_additional_role',
+                type: 'subflow',
+                scopeName: 'sn_collab_request',
+                triggerInstances: [],
+                actionInstances: [{ id: 'a1' }, { id: 'a2' }, { id: 'a3' }],
+                subFlowInstances: [{ id: 's1' }, { id: 's2' }],
+                outputs: [{ id: 'o1' }, { id: 'o2' }],
+                ...overrides
+            });
+        }
+
+        function actionMetadataPayload(overrides: Record<string, unknown> = {}) {
+            return {
+                id: ACTION_SYS_ID,
+                name: 'Add a Pause',
+                internal_name: 'add_a_pause',
+                description: 'Pauses the flow',
+                state: 'published',
+                active: true,
+                type: '',
+                scope: 'global_scope_sys_id',
+                scopename: 'global',
+                inputs: [{ id: 'i1' }],
+                outputs: [{ id: 'o1' }],
+                ...overrides
+            };
+        }
+
+        /** result.data envelope, as GET /processflow/flow/{id} returns it. */
+        function flowEnvelope(data: unknown) {
+            return {
+                data: {
+                    result: { data, errorMessage: '', errorCode: 0, integrationsPluginActive: false }
+                }
+            };
+        }
+
+        /** The action-type route returns the record directly under result. */
+        function bareEnvelope(result: unknown) {
+            return { data: { result } };
+        }
+
+        function httpError(status: number, body = '{"error":{"message":"secret record data"}}') {
+            return new Error(`Error during request. Status: ${status} Body: ${body}`);
+        }
+
+        // ------------------------------------------------------------
+        // AC1 / AC2 — flow and subflow retrieval
+        // ------------------------------------------------------------
+
+        describe('getFlowArtifactDefinition', () => {
+            it('should return an explicitly typed flow definition', async () => {
+                mockRequestHandler.get.mockResolvedValueOnce(flowEnvelope(flowPayload()));
+
+                const result = await flowMgr.getFlowArtifactDefinition(FLOW_SYS_ID);
+
+                expect(result.success).toBe(true);
+                expect(result.sysId).toBe(FLOW_SYS_ID);
+                expect(result.artifactType).toBe('flow');
+                expect(result.reportedType).toBe('flow');
+                expect(result.definition!.triggerInstances).toBeDefined();
+                expect(result.definition!.actionInstances).toBeDefined();
+                expect(result.failureReason).toBeUndefined();
+            });
+
+            it('should return an explicitly typed subflow definition with its design collections', async () => {
+                mockRequestHandler.get.mockResolvedValueOnce(flowEnvelope(subflowPayload()));
+
+                const result = await flowMgr.getFlowArtifactDefinition(SUBFLOW_SYS_ID);
+
+                expect(result.success).toBe(true);
+                expect(result.artifactType).toBe('subflow');
+                expect(result.summary).toEqual({
+                    sysId: SUBFLOW_SYS_ID,
+                    name: 'Add User or Group to additional role',
+                    internalName: 'add_user_or_group_to_additional_role',
+                    description: 'Detects conflicts',
+                    scope: 'global_scope_sys_id',
+                    scopeName: 'sn_collab_request',
+                    status: 'published',
+                    active: true,
+                    triggerCount: 0,
+                    actionCount: 3,
+                    subflowCount: 2,
+                    flowLogicCount: 2,
+                    inputCount: 2,
+                    outputCount: 2
+                });
+            });
+
+            it('should produce JSON-serializable definition data', async () => {
+                mockRequestHandler.get.mockResolvedValueOnce(flowEnvelope(flowPayload()));
+
+                const result = await flowMgr.getFlowArtifactDefinition(FLOW_SYS_ID);
+
+                const roundTripped = JSON.parse(JSON.stringify(result.definition)) as Record<string, unknown>;
+                expect(roundTripped).toEqual(flowPayload());
+            });
+
+            it('should read the definition without a context id or any script execution', async () => {
+                const bgSpy = jest.spyOn((flowMgr as any)._bgExecutor, 'executeScript');
+                mockRequestHandler.get.mockResolvedValueOnce(flowEnvelope(flowPayload()));
+
+                await flowMgr.getFlowArtifactDefinition(FLOW_SYS_ID);
+
+                expect(bgSpy).not.toHaveBeenCalled();
+                expect(mockRequestHandler.post).not.toHaveBeenCalled();
+                expect(mockRequestHandler.put).not.toHaveBeenCalled();
+                expect(mockRequestHandler.delete).not.toHaveBeenCalled();
+                expect(mockRequestHandler.get).toHaveBeenCalledTimes(1);
+                expect((mockRequestHandler.get.mock.calls[0][0] as any).path)
+                    .toBe(`/api/now/processflow/flow/${FLOW_SYS_ID}`);
+            });
+
+            it('should pass scope as the transaction scope query parameter', async () => {
+                mockRequestHandler.get.mockResolvedValueOnce(flowEnvelope(flowPayload()));
+
+                await flowMgr.getFlowArtifactDefinition(FLOW_SYS_ID, { scope: 'global' });
+
+                expect((mockRequestHandler.get.mock.calls[0][0] as any).query.sysparm_transaction_scope).toBe('global');
+            });
+
+            it('should surface an unrecognised type rather than mapping it onto a known one', async () => {
+                mockRequestHandler.get.mockResolvedValueOnce(flowEnvelope(flowPayload({ type: 'future_artifact' })));
+
+                const result = await flowMgr.getFlowArtifactDefinition(FLOW_SYS_ID);
+
+                expect(result.success).toBe(true);
+                expect(result.reportedType).toBe('future_artifact');
+                expect(result.artifactType).toBeUndefined();
+            });
+
+            it('should fail when the payload does not identify its type', async () => {
+                mockRequestHandler.get.mockResolvedValueOnce(flowEnvelope(flowPayload({ type: '' })));
+
+                const result = await flowMgr.getFlowArtifactDefinition(FLOW_SYS_ID);
+
+                expect(result.success).toBe(false);
+                expect(result.failureReason).toBe('malformed_response');
+                expect(result.errorMessage).toContain('does not identify its artifact type');
+            });
+        });
+
+        // ------------------------------------------------------------
+        // AC5 — type-specific operations never relabel
+        // ------------------------------------------------------------
+
+        describe('type-specific retrieval', () => {
+            it('getFlowDesignDefinition should accept a flow', async () => {
+                mockRequestHandler.get.mockResolvedValueOnce(flowEnvelope(flowPayload()));
+
+                const result = await flowMgr.getFlowDesignDefinition(FLOW_SYS_ID);
+
+                expect(result.success).toBe(true);
+                expect(result.artifactType).toBe('flow');
+            });
+
+            it('getFlowDesignDefinition should reject a subflow with a type mismatch', async () => {
+                mockRequestHandler.get.mockResolvedValueOnce(flowEnvelope(subflowPayload()));
+
+                const result = await flowMgr.getFlowDesignDefinition(SUBFLOW_SYS_ID);
+
+                expect(result.success).toBe(false);
+                expect(result.failureReason).toBe('type_mismatch');
+                expect(result.artifactType).toBeUndefined();
+                expect(result.reportedType).toBe('subflow');
+                expect(result.definition).toBeUndefined();
+                expect(result.errorMessage).toContain('to be a flow');
+            });
+
+            it('getSubflowDefinition should accept a subflow', async () => {
+                mockRequestHandler.get.mockResolvedValueOnce(flowEnvelope(subflowPayload()));
+
+                const result = await flowMgr.getSubflowDefinition(SUBFLOW_SYS_ID);
+
+                expect(result.success).toBe(true);
+                expect(result.artifactType).toBe('subflow');
+                expect(result.summary!.subflowCount).toBe(2);
+            });
+
+            it('getSubflowDefinition should reject a flow with a type mismatch', async () => {
+                mockRequestHandler.get.mockResolvedValueOnce(flowEnvelope(flowPayload()));
+
+                const result = await flowMgr.getSubflowDefinition(FLOW_SYS_ID);
+
+                expect(result.success).toBe(false);
+                expect(result.failureReason).toBe('type_mismatch');
+                expect(result.reportedType).toBe('flow');
+            });
+        });
+
+        // ------------------------------------------------------------
+        // AC6 — validation, permission, not-found, API and shape failures
+        // ------------------------------------------------------------
+
+        describe('failure contract', () => {
+            it.each([
+                ['blank', ''],
+                ['whitespace only', '   '],
+                ['too short', 'abc123'],
+                ['non-hex', 'zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz']
+            ])('should reject a %s identifier without throwing', async (_label, sysId) => {
+                const result = await flowMgr.getFlowArtifactDefinition(sysId);
+
+                expect(result.success).toBe(false);
+                expect(result.failureReason).toBe('invalid_identifier');
+                expect(mockRequestHandler.get).not.toHaveBeenCalled();
+            });
+
+            it('should reject a blank action identifier without throwing', async () => {
+                const result = await flowMgr.getActionDefinition('  ');
+
+                expect(result.success).toBe(false);
+                expect(result.failureReason).toBe('invalid_identifier');
+                expect(result.errorMessage).toContain('action sys_id is required');
+                expect(mockRequestHandler.get).not.toHaveBeenCalled();
+            });
+
+            it('should report a permission failure without leaking the response body', async () => {
+                mockRequestHandler.get.mockRejectedValueOnce(httpError(403));
+
+                const result = await flowMgr.getFlowArtifactDefinition(FLOW_SYS_ID);
+
+                expect(result.success).toBe(false);
+                expect(result.failureReason).toBe('permission_denied');
+                expect(result.errorMessage).toContain('HTTP 403');
+                expect(result.errorMessage).not.toContain('secret record data');
+            });
+
+            it('should report a 404 as not found', async () => {
+                mockRequestHandler.get.mockRejectedValueOnce(httpError(404));
+
+                const result = await flowMgr.getFlowArtifactDefinition(FLOW_SYS_ID);
+
+                expect(result.success).toBe(false);
+                expect(result.failureReason).toBe('not_found');
+                expect(result.errorMessage).not.toContain('secret record data');
+            });
+
+            it('should report an unclassified status as a request failure', async () => {
+                mockRequestHandler.get.mockRejectedValueOnce(httpError(500));
+
+                const result = await flowMgr.getFlowArtifactDefinition(FLOW_SYS_ID);
+
+                expect(result.success).toBe(false);
+                expect(result.failureReason).toBe('request_failed');
+                expect(result.errorMessage).toContain('HTTP 500');
+                expect(result.errorMessage).not.toContain('secret record data');
+            });
+
+            it('should report a transport error as a request failure', async () => {
+                mockRequestHandler.get.mockRejectedValueOnce(new Error('Network timeout'));
+
+                const result = await flowMgr.getFlowArtifactDefinition(FLOW_SYS_ID);
+
+                expect(result.success).toBe(false);
+                expect(result.failureReason).toBe('request_failed');
+                expect(result.errorMessage).toContain('Network timeout');
+            });
+
+            it('should report a non-success API envelope as an API error', async () => {
+                mockRequestHandler.get.mockResolvedValueOnce({
+                    data: {
+                        result: { data: null, errorMessage: 'Flow not found', errorCode: 1, integrationsPluginActive: false }
+                    }
+                });
+
+                const result = await flowMgr.getFlowArtifactDefinition(FLOW_SYS_ID);
+
+                expect(result.success).toBe(false);
+                expect(result.failureReason).toBe('api_error');
+                expect(result.errorCode).toBe(1);
+                expect(result.errorMessage).toBe('Flow not found');
+            });
+
+            it('should report an error message with no error code as an API error', async () => {
+                mockRequestHandler.get.mockResolvedValueOnce({
+                    data: { result: { data: null, errorMessage: 'Operation failed' } }
+                });
+
+                const result = await flowMgr.getFlowArtifactDefinition(FLOW_SYS_ID);
+
+                expect(result.success).toBe(false);
+                expect(result.failureReason).toBe('api_error');
+                expect(result.errorMessage).toBe('Operation failed');
+            });
+
+            it.each([
+                ['a missing result field', { data: {} }],
+                ['a null response', null],
+                ['a non-object result', { data: { result: 'not-an-object' } }],
+                ['an array result', { data: { result: [] } }]
+            ])('should report %s as a malformed response', async (_label, response) => {
+                mockRequestHandler.get.mockResolvedValueOnce(response);
+
+                const result = await flowMgr.getFlowArtifactDefinition(FLOW_SYS_ID);
+
+                expect(result.success).toBe(false);
+                expect(result.failureReason).toBe('malformed_response');
+            });
+
+            it('should read the RequestHandler-style bodyObject shape', async () => {
+                mockRequestHandler.get.mockResolvedValueOnce({
+                    bodyObject: {
+                        result: { data: flowPayload(), errorMessage: '', errorCode: 0, integrationsPluginActive: false }
+                    }
+                });
+
+                const result = await flowMgr.getFlowArtifactDefinition(FLOW_SYS_ID);
+
+                expect(result.success).toBe(true);
+                expect(result.artifactType).toBe('flow');
+            });
+
+            it.each([
+                ['null data', null],
+                ['an empty object', {}]
+            ])('should report %s as not found', async (_label, data) => {
+                mockRequestHandler.get.mockResolvedValueOnce(flowEnvelope(data));
+
+                const result = await flowMgr.getFlowArtifactDefinition(FLOW_SYS_ID);
+
+                expect(result.success).toBe(false);
+                expect(result.failureReason).toBe('not_found');
+            });
+        });
+
+        // ------------------------------------------------------------
+        // AC3 — complete action definition
+        // ------------------------------------------------------------
+
+        describe('getActionDefinition', () => {
+            const STEPS = [
+                { step_id: 'step2', order: 2, label: 'Second step', step_type_name: 'Script', step_type_id: 'st1' },
+                { step_id: 'step1', order: 1, label: 'First step', step_type_name: 'Log', step_type_id: 'st2' }
+            ];
+
+            function mockActionSuccess(metadata: unknown = actionMetadataPayload(), steps: unknown = STEPS) {
+                mockRequestHandler.get
+                    .mockResolvedValueOnce(bareEnvelope(metadata))
+                    .mockResolvedValueOnce(bareEnvelope({ steps }));
+            }
+
+            it('should compose metadata and ordered steps into one contract', async () => {
+                mockActionSuccess();
+
+                const result = await flowMgr.getActionDefinition(ACTION_SYS_ID);
+
+                expect(result.success).toBe(true);
+                expect(result.artifactType).toBe('action');
+                expect(result.metadata!.name).toBe('Add a Pause');
+                expect(result.metadata!.inputs).toBeDefined();
+                expect(result.metadata!.outputs).toBeDefined();
+                expect(result.steps!.map((s) => s.step_id)).toEqual(['step1', 'step2']);
+                expect(result.summary!.stepCount).toBe(2);
+                expect(result.summary!.steps.map((s) => s.order)).toEqual([1, 2]);
+                expect(result.summary!.internalName).toBe('add_a_pause');
+                expect(result.summary!.state).toBe('published');
+            });
+
+            it('should call only the two read routes and never execute a script', async () => {
+                const bgSpy = jest.spyOn((flowMgr as any)._bgExecutor, 'executeScript');
+                mockActionSuccess();
+
+                await flowMgr.getActionDefinition(ACTION_SYS_ID);
+
+                expect(bgSpy).not.toHaveBeenCalled();
+                expect(mockRequestHandler.post).not.toHaveBeenCalled();
+                expect(mockRequestHandler.get).toHaveBeenCalledTimes(2);
+                expect((mockRequestHandler.get.mock.calls[0][0] as any).path)
+                    .toBe(`/api/now/processflow/action/action_types/${ACTION_SYS_ID}`);
+                expect((mockRequestHandler.get.mock.calls[1][0] as any).path)
+                    .toBe(`/api/now/processflow/action/action_types/${ACTION_SYS_ID}/step_instances`);
+            });
+
+            it('should produce JSON-serializable metadata and steps', async () => {
+                mockActionSuccess();
+
+                const result = await flowMgr.getActionDefinition(ACTION_SYS_ID);
+
+                const roundTripped = JSON.parse(JSON.stringify({ metadata: result.metadata, steps: result.steps })) as Record<string, unknown>;
+                expect(roundTripped.metadata).toEqual(actionMetadataPayload());
+                expect((roundTripped.steps as unknown[])).toHaveLength(2);
+            });
+
+            it('should accept metadata wrapped in result.data', async () => {
+                mockActionSuccess({ data: actionMetadataPayload() });
+
+                const result = await flowMgr.getActionDefinition(ACTION_SYS_ID);
+
+                expect(result.success).toBe(true);
+                expect(result.metadata!.name).toBe('Add a Pause');
+            });
+
+            it('should keep API order when a step order is missing or non-numeric', async () => {
+                mockActionSuccess(actionMetadataPayload(), [
+                    { step_id: 'first', order: 1 },
+                    { step_id: 'unordered_a' },
+                    { step_id: 'unordered_b', order: 'not-a-number' }
+                ]);
+
+                const result = await flowMgr.getActionDefinition(ACTION_SYS_ID);
+
+                expect(result.steps!.map((s) => s.step_id)).toEqual(['first', 'unordered_a', 'unordered_b']);
+            });
+
+            it('should accept an action with no steps', async () => {
+                mockActionSuccess(actionMetadataPayload(), []);
+
+                const result = await flowMgr.getActionDefinition(ACTION_SYS_ID);
+
+                expect(result.success).toBe(true);
+                expect(result.steps).toEqual([]);
+                expect(result.summary!.stepCount).toBe(0);
+            });
+
+            it('should report an empty metadata payload as not found', async () => {
+                mockRequestHandler.get.mockResolvedValueOnce(bareEnvelope({}));
+
+                const result = await flowMgr.getActionDefinition(ACTION_SYS_ID);
+
+                expect(result.success).toBe(false);
+                expect(result.failureReason).toBe('not_found');
+                expect(mockRequestHandler.get).toHaveBeenCalledTimes(1);
+            });
+
+            it('should not describe a flow as an action', async () => {
+                mockRequestHandler.get.mockResolvedValueOnce(bareEnvelope(flowPayload()));
+
+                const result = await flowMgr.getActionDefinition(FLOW_SYS_ID);
+
+                expect(result.success).toBe(false);
+                expect(result.failureReason).toBe('type_mismatch');
+                expect(result.metadata).toBeUndefined();
+            });
+
+            it.each([
+                ['a missing steps key', {}],
+                ['a non-array steps value', { steps: 'not-an-array' }]
+            ])('should fail when the step instances response has %s', async (_label, stepsResult) => {
+                mockRequestHandler.get
+                    .mockResolvedValueOnce(bareEnvelope(actionMetadataPayload()))
+                    .mockResolvedValueOnce(bareEnvelope(stepsResult));
+
+                const result = await flowMgr.getActionDefinition(ACTION_SYS_ID);
+
+                expect(result.success).toBe(false);
+                expect(result.failureReason).toBe('malformed_response');
+                expect(result.errorMessage).toContain('steps array');
+                expect(result.steps).toBeUndefined();
+            });
+
+            it('should fail the whole read when only the step request is denied', async () => {
+                mockRequestHandler.get
+                    .mockResolvedValueOnce(bareEnvelope(actionMetadataPayload()))
+                    .mockRejectedValueOnce(httpError(403));
+
+                const result = await flowMgr.getActionDefinition(ACTION_SYS_ID);
+
+                expect(result.success).toBe(false);
+                expect(result.failureReason).toBe('permission_denied');
+                expect(result.errorMessage).toContain('action step instances');
+                expect(result.errorMessage).not.toContain('secret record data');
+                expect(result.metadata).toBeUndefined();
+            });
+
+            it('should report a metadata API error', async () => {
+                mockRequestHandler.get.mockResolvedValueOnce({
+                    data: { result: { data: null, errorMessage: 'Action not found', errorCode: 2 } }
+                });
+
+                const result = await flowMgr.getActionDefinition(ACTION_SYS_ID);
+
+                expect(result.success).toBe(false);
+                expect(result.failureReason).toBe('api_error');
+                expect(result.errorCode).toBe(2);
+            });
+
+            it('should pass scope to both reads', async () => {
+                mockActionSuccess();
+
+                await flowMgr.getActionDefinition(ACTION_SYS_ID, { scope: 'global' });
+
+                expect((mockRequestHandler.get.mock.calls[0][0] as any).query.sysparm_transaction_scope).toBe('global');
+                expect((mockRequestHandler.get.mock.calls[1][0] as any).query.sysparm_transaction_scope).toBe('global');
+            });
+        });
+
+        // ------------------------------------------------------------
+        // AC7 — the pre-existing definition calls still behave as before
+        // ------------------------------------------------------------
+
+        describe('source compatibility', () => {
+            it('should keep getFlowDefinition throwing on a blank sys_id', async () => {
+                await expect(flowMgr.getFlowDefinition('')).rejects.toThrow('Flow sys_id is required');
+            });
+
+            it('should keep getFlowActions returning only step instances', async () => {
+                mockRequestHandler.get.mockResolvedValueOnce(bareEnvelope({ steps: STEP_INSTANCES }));
+
+                const result = await flowMgr.getFlowActions(ACTION_SYS_ID);
+
+                expect(result.success).toBe(true);
+                expect(result.action).toEqual(STEP_INSTANCES);
+            });
+        });
+    });
 });

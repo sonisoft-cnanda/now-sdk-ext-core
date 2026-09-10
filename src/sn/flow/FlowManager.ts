@@ -37,13 +37,35 @@ import {
     FlowOperationsCore,
     FlowOperationsData,
     FlowActionReport,
-    FlowExecutionSource
+    FlowExecutionSource,
+    FlowDefinitionOptions,
+    FlowDesignArtifactType,
+    FlowDefinitionFailureReason,
+    FlowArtifactDefinitionResult,
+    FlowArtifactSummary,
+    ActionDefinitionResult,
+    ActionDefinitionSummary,
+    ActionStepSummary
 } from './FlowModels';
 import { TableAPIRequest } from '../../comm/http/TableAPIRequest';
 import { ProcessFlowRequest } from '../../comm/http/ProcessFlowRequest';
+import { IHttpResponse } from '../../comm/http/IHttpResponse';
 
 const RESULT_MARKER = '___FLOW_EXEC_RESULT___';
 const VALID_TYPES: FlowObjectType[] = ['flow', 'subflow', 'action'];
+
+/** A ServiceNow sys_id: exactly 32 hex characters. */
+const SYS_ID_PATTERN = /^[0-9a-f]{32}$/i;
+
+/** Longest identifier echoed back in a validation message. */
+const MAX_ECHOED_ID_LENGTH = 64;
+
+/** The failure half of a definition result, shared by both result contracts. */
+interface DefinitionFailure {
+    errorMessage: string;
+    failureReason: FlowDefinitionFailureReason;
+    errorCode?: number;
+}
 
 /** Shape of a sys_flow_log record as returned by the Table API. */
 interface FlowLogRecord {
@@ -432,6 +454,12 @@ export class FlowManager {
     /**
      * Fetch a flow definition from the ProcessFlow REST API.
      *
+     * Retained unchanged for existing callers. It reports neither the artifact
+     * type nor a machine-readable failure reason, and it throws (rather than
+     * returning a failure) for a blank sys_id.
+     *
+     * @see getFlowArtifactDefinition for the typed, non-throwing replacement.
+     *
      * @param flowSysId The sys_id of the flow to fetch
      * @param scope Optional scope sys_id for the transaction scope query parameter
      * @returns FlowDefinitionResult containing the raw flow definition object
@@ -489,14 +517,19 @@ export class FlowManager {
     }
 
     /**
-     * Fetch flow action (action type) data from the ProcessFlow REST API.
+     * Fetch an action's step instances from the ProcessFlow REST API.
      *
-     * Calls `GET /api/now/processflow/action/action_type/{action_sys_id}` to retrieve
-     * action type metadata used by Flow Designer.
+     * Calls `GET /api/now/processflow/action/action_types/{action_sys_id}/step_instances`.
+     * Despite the name this returns only the ordered steps — never the action's
+     * own metadata — so it cannot describe an action on its own.
+     *
+     * @deprecated Use {@link getActionDefinition}, which returns action metadata
+     * and step instances through one contract. This method keeps working and its
+     * signature is unchanged; it will be removed no earlier than the next major.
      *
      * @param actionSysId The sys_id of the action (action type) to fetch
      * @param scope Optional scope sys_id for the transaction scope query parameter
-     * @returns FlowActionResult containing the raw action data
+     * @returns FlowActionResult containing the raw step instance data
      */
     public async getFlowActions(actionSysId: string, scope?: string): Promise<FlowActionResult> {
         if (!actionSysId || actionSysId.trim().length === 0) {
@@ -548,6 +581,478 @@ export class FlowManager {
                 errorMessage: `Failed to fetch flow action: ${err.message}`
             };
         }
+    }
+
+    // ================================================================
+    // Design-Time Definition API (ProcessFlow REST, read-only)
+    //
+    // These operations only ever issue GETs to the ProcessFlow definition
+    // routes. They do not execute, test, copy, publish or otherwise mutate an
+    // artifact, they never touch BackgroundScriptExecutor, and they neither
+    // accept nor create a flow context.
+    // ================================================================
+
+    /**
+     * Retrieve the design-time definition of a flow **or** a subflow.
+     *
+     * Both are served by `GET /api/now/processflow/flow/{sys_id}` and are told
+     * apart by the `type` ServiceNow reports, which is echoed back verbatim on
+     * `reportedType` — the type is never inferred from the call site.
+     *
+     * The returned `definition` is the untouched payload and is safe to pass
+     * straight to `JSON.stringify`.
+     *
+     * @param sysId sys_id of the flow or subflow
+     * @param options Optional scope for the transaction scope query parameter
+     */
+    public getFlowArtifactDefinition(sysId: string, options?: FlowDefinitionOptions): Promise<FlowArtifactDefinitionResult> {
+        return this._fetchFlowArtifactDefinition(sysId, options);
+    }
+
+    /**
+     * Retrieve the design-time definition of a flow.
+     *
+     * Fails with `failureReason: 'type_mismatch'` when the sys_id belongs to a
+     * subflow (or anything else) rather than silently relabelling it.
+     *
+     * @param flowSysId sys_id of the flow
+     * @param options Optional scope for the transaction scope query parameter
+     */
+    public getFlowDesignDefinition(flowSysId: string, options?: FlowDefinitionOptions): Promise<FlowArtifactDefinitionResult> {
+        return this._fetchFlowArtifactDefinition(flowSysId, options, 'flow');
+    }
+
+    /**
+     * Retrieve the design-time definition of a subflow, including its inputs,
+     * outputs, actions, nested subflows and flow logic.
+     *
+     * Fails with `failureReason: 'type_mismatch'` when the sys_id belongs to a
+     * flow rather than silently relabelling it.
+     *
+     * @param subflowSysId sys_id of the subflow
+     * @param options Optional scope for the transaction scope query parameter
+     */
+    public getSubflowDefinition(subflowSysId: string, options?: FlowDefinitionOptions): Promise<FlowArtifactDefinitionResult> {
+        return this._fetchFlowArtifactDefinition(subflowSysId, options, 'subflow');
+    }
+
+    /**
+     * Retrieve a complete action definition: metadata plus ordered steps.
+     *
+     * A complete action needs two reads — `action/action_types/{id}` for the
+     * metadata and `action/action_types/{id}/step_instances` for the steps —
+     * which are composed into one result. `success` is true only when both
+     * parts were retrieved; a partial read is reported as a failure rather than
+     * as an action with no steps.
+     *
+     * `metadata` and `steps` are the untouched payloads and are safe to pass
+     * straight to `JSON.stringify`.
+     *
+     * @param actionSysId sys_id of the action type
+     * @param options Optional scope for the transaction scope query parameter
+     */
+    public async getActionDefinition(actionSysId: string, options?: FlowDefinitionOptions): Promise<ActionDefinitionResult> {
+        const sysId = this._normalizeDefinitionSysId(actionSysId);
+
+        const invalid = this._validateDefinitionSysId(sysId, 'action');
+        if (invalid) {
+            return { success: false, sysId, ...invalid };
+        }
+
+        this._logger.info(`Fetching action definition: ${sysId}`);
+
+        const pfr = new ProcessFlowRequest(this._instance);
+        const query = options?.scope ? { sysparm_transaction_scope: options.scope } : undefined;
+
+        let metadataResult: Record<string, unknown> | undefined;
+        try {
+            const response = await pfr.get<unknown>(
+                'action/action_types/{action_sys_id}',
+                { action_sys_id: sysId },
+                query
+            );
+            metadataResult = this._readProcessFlowResult(response);
+        } catch (error) {
+            return { success: false, sysId, ...this._classifyRequestFailure(error, 'action definition') };
+        }
+
+        if (!metadataResult) {
+            return { success: false, sysId, ...this._malformedResponse('action definition', sysId, 'did not contain a result object') };
+        }
+
+        const metadataError = this._readApiError(metadataResult);
+        if (metadataError) {
+            return { success: false, sysId, ...metadataError };
+        }
+
+        // The action-type route returns the record directly under `result`;
+        // other processflow routes wrap their payload in `result.data`. Accept
+        // either so a family upgrade that starts wrapping does not break this.
+        const metadata = this._asRecord(metadataResult['data']) ?? metadataResult;
+
+        if (Object.keys(metadata).length === 0) {
+            return {
+                success: false,
+                sysId,
+                failureReason: 'not_found',
+                errorMessage: `No action definition found for sys_id "${sysId}".`
+            };
+        }
+
+        // Guard against an action operation quietly describing a flow artifact.
+        const reportedType = this._stringField(metadata, 'type').trim();
+        if (reportedType === 'flow' || reportedType === 'subflow') {
+            return {
+                success: false,
+                sysId,
+                failureReason: 'type_mismatch',
+                errorMessage: `Expected sys_id "${sysId}" to be an action, but ServiceNow reports it as "${reportedType}".`
+            };
+        }
+
+        let stepsResult: Record<string, unknown> | undefined;
+        try {
+            const response = await pfr.get<unknown>(
+                'action/action_types/{action_sys_id}/step_instances',
+                { action_sys_id: sysId },
+                query
+            );
+            stepsResult = this._readProcessFlowResult(response);
+        } catch (error) {
+            return { success: false, sysId, ...this._classifyRequestFailure(error, 'action step instances') };
+        }
+
+        if (!stepsResult) {
+            return { success: false, sysId, ...this._malformedResponse('action step instances', sysId, 'did not contain a result object') };
+        }
+
+        const stepsError = this._readApiError(stepsResult);
+        if (stepsError) {
+            return { success: false, sysId, ...stepsError };
+        }
+
+        const rawSteps = stepsResult['steps'];
+        if (!Array.isArray(rawSteps)) {
+            return { success: false, sysId, ...this._malformedResponse('action step instances', sysId, 'did not contain a steps array') };
+        }
+
+        const steps = this._sortActionSteps(
+            rawSteps
+                .map((step) => this._asRecord(step))
+                .filter((step): step is Record<string, unknown> => step !== undefined)
+        );
+
+        this._logger.info(`Action definition fetched: ${sysId} (${steps.length} steps)`);
+
+        return {
+            success: true,
+            sysId,
+            artifactType: 'action',
+            metadata,
+            steps,
+            summary: this._buildActionSummary(sysId, metadata, steps)
+        };
+    }
+
+    /**
+     * Shared retrieval for flow and subflow definitions.
+     *
+     * @param sysId sys_id of the artifact
+     * @param options Optional scope
+     * @param expectedType When set, the reported type must match it exactly
+     * @internal
+     */
+    private async _fetchFlowArtifactDefinition(
+        sysId: string,
+        options?: FlowDefinitionOptions,
+        expectedType?: FlowDesignArtifactType
+    ): Promise<FlowArtifactDefinitionResult> {
+        const trimmed = this._normalizeDefinitionSysId(sysId);
+        const label = expectedType ?? 'flow or subflow';
+
+        const invalid = this._validateDefinitionSysId(trimmed, label);
+        if (invalid) {
+            return { success: false, sysId: trimmed, ...invalid };
+        }
+
+        this._logger.info(`Fetching ${label} definition: ${trimmed}`);
+
+        let apiResult: Record<string, unknown> | undefined;
+        try {
+            const response = await new ProcessFlowRequest(this._instance).get<unknown>(
+                'flow/{flow_sys_id}',
+                { flow_sys_id: trimmed },
+                options?.scope ? { sysparm_transaction_scope: options.scope } : undefined
+            );
+            apiResult = this._readProcessFlowResult(response);
+        } catch (error) {
+            return { success: false, sysId: trimmed, ...this._classifyRequestFailure(error, `${label} definition`) };
+        }
+
+        if (!apiResult) {
+            return { success: false, sysId: trimmed, ...this._malformedResponse(`${label} definition`, trimmed, 'did not contain a result object') };
+        }
+
+        const apiError = this._readApiError(apiResult);
+        if (apiError) {
+            return { success: false, sysId: trimmed, ...apiError };
+        }
+
+        const definition = this._asRecord(apiResult['data']);
+        if (!definition || Object.keys(definition).length === 0) {
+            return {
+                success: false,
+                sysId: trimmed,
+                failureReason: 'not_found',
+                errorMessage: `No ${label} definition found for sys_id "${trimmed}".`
+            };
+        }
+
+        const reportedType = this._stringField(definition, 'type').trim();
+        if (reportedType.length === 0) {
+            return { success: false, sysId: trimmed, ...this._malformedResponse(`${label} definition`, trimmed, 'does not identify its artifact type') };
+        }
+
+        if (expectedType && reportedType !== expectedType) {
+            return {
+                success: false,
+                sysId: trimmed,
+                reportedType,
+                failureReason: 'type_mismatch',
+                errorMessage: `Expected sys_id "${trimmed}" to be a ${expectedType}, but ServiceNow reports it as "${reportedType}".`
+            };
+        }
+
+        this._logger.info(`Fetched ${reportedType} definition: ${trimmed}`);
+
+        return {
+            success: true,
+            sysId: trimmed,
+            // Only set when ServiceNow reported a type this library knows. An
+            // unrecognised type is surfaced on reportedType rather than mapped
+            // onto the nearest known one.
+            artifactType: reportedType === 'flow' || reportedType === 'subflow' ? reportedType : undefined,
+            reportedType,
+            definition,
+            summary: this._buildFlowArtifactSummary(trimmed, definition)
+        };
+    }
+
+    // ================================================================
+    // Design-Time Definition Helpers
+    // ================================================================
+
+    /** Trim an incoming identifier, tolerating a non-string from JS callers. @internal */
+    private _normalizeDefinitionSysId(sysId: string): string {
+        return typeof sysId === 'string' ? sysId.trim() : '';
+    }
+
+    /** Validate a definition sys_id, returning a failure when it is unusable. @internal */
+    private _validateDefinitionSysId(sysId: string, label: string): DefinitionFailure | undefined {
+        if (sysId.length === 0) {
+            return {
+                failureReason: 'invalid_identifier',
+                errorMessage: `A ${label} sys_id is required.`
+            };
+        }
+        if (!SYS_ID_PATTERN.test(sysId)) {
+            return {
+                failureReason: 'invalid_identifier',
+                errorMessage: `Invalid ${label} sys_id "${sysId.substring(0, MAX_ECHOED_ID_LENGTH)}". Expected a 32-character hex sys_id.`
+            };
+        }
+        return undefined;
+    }
+
+    /** Build a consistent malformed-wrapper failure. @internal */
+    private _malformedResponse(label: string, sysId: string, problem: string): DefinitionFailure {
+        return {
+            failureReason: 'malformed_response',
+            errorMessage: `ProcessFlow API response for ${label} "${sysId}" ${problem}.`
+        };
+    }
+
+    /**
+     * Read `result` out of a processflow response, tolerating both the
+     * Axios-style (`data.result`) and RequestHandler-style (`bodyObject.result`)
+     * shapes. Returns undefined instead of throwing so a malformed wrapper can
+     * be reported as a typed failure.
+     * @internal
+     */
+    private _readProcessFlowResult(response: IHttpResponse<unknown> | null | undefined): Record<string, unknown> | undefined {
+        if (!response) {
+            return undefined;
+        }
+        const fromData = this._asRecord(response.data)?.['result'];
+        const fromBody = this._asRecord(response.bodyObject)?.['result'];
+        return this._asRecord(fromData ?? fromBody);
+    }
+
+    /**
+     * Detect an error reported inside a processflow result envelope. Mirrors the
+     * semantics the existing definition/test/copy calls already use: a non-zero
+     * errorCode is an error, and so is a message with no code at all.
+     * @internal
+     */
+    private _readApiError(result: Record<string, unknown>): DefinitionFailure | undefined {
+        const rawCode = result['errorCode'];
+        const errorCode = typeof rawCode === 'number' ? rawCode : undefined;
+        const errorMessage = this._stringField(result, 'errorMessage').trim();
+
+        if (errorCode !== undefined && errorCode !== 0) {
+            return {
+                failureReason: 'api_error',
+                errorCode,
+                errorMessage: errorMessage || `ProcessFlow API reported error code ${errorCode}.`
+            };
+        }
+        if (errorCode === undefined && errorMessage.length > 0) {
+            return { failureReason: 'api_error', errorMessage };
+        }
+        return undefined;
+    }
+
+    /**
+     * Turn a thrown request error into a typed failure.
+     *
+     * RequestHandler throws `Error during request. Status: <n> Body: <body>` for
+     * any non-2xx, so the status is recovered from the message. The body is
+     * dropped deliberately — it can carry record data, and it must not travel
+     * back to the caller or into a log line.
+     * @internal
+     */
+    private _classifyRequestFailure(error: unknown, label: string): DefinitionFailure {
+        const message = error instanceof Error ? error.message : '';
+        const statusMatch = /Status:\s*(\d{3})/.exec(message);
+        const status = statusMatch ? Number(statusMatch[1]) : undefined;
+
+        if (status === 401 || status === 403) {
+            return {
+                failureReason: 'permission_denied',
+                errorMessage: `Not permitted to read the ${label} (HTTP ${status}).`
+            };
+        }
+        if (status === 404) {
+            return {
+                failureReason: 'not_found',
+                errorMessage: `ServiceNow has no ${label} for the supplied sys_id (HTTP 404).`
+            };
+        }
+        if (status !== undefined) {
+            return {
+                failureReason: 'request_failed',
+                errorMessage: `ServiceNow returned HTTP ${status} for the ${label} request.`
+            };
+        }
+
+        const detail = message.length > 0 ? `: ${this._summarizeErrorText(message)}` : '.';
+        return {
+            failureReason: 'request_failed',
+            errorMessage: `Failed to fetch the ${label}${detail}`
+        };
+    }
+
+    /** Trim a transport error message down to something safe to surface. @internal */
+    private _summarizeErrorText(message: string): string {
+        const bodyIndex = message.indexOf(' Body:');
+        const withoutBody = bodyIndex >= 0 ? message.substring(0, bodyIndex) : message;
+        return withoutBody.length > 200 ? `${withoutBody.substring(0, 200)}…` : withoutBody;
+    }
+
+    /** Narrow an unknown to a plain object. @internal */
+    private _asRecord(value: unknown): Record<string, unknown> | undefined {
+        return value !== null && typeof value === 'object' && !Array.isArray(value)
+            ? (value as Record<string, unknown>)
+            : undefined;
+    }
+
+    /** Read a string field, defaulting to '' for anything else. @internal */
+    private _stringField(source: Record<string, unknown>, key: string): string {
+        const value = source[key];
+        return typeof value === 'string' ? value : '';
+    }
+
+    /** Read an array field's length, defaulting to 0 for anything else. @internal */
+    private _countField(source: Record<string, unknown>, key: string): number {
+        const value = source[key];
+        return Array.isArray(value) ? value.length : 0;
+    }
+
+    /** Project the commonly used fields of a flow/subflow definition. @internal */
+    private _buildFlowArtifactSummary(sysId: string, definition: Record<string, unknown>): FlowArtifactSummary {
+        return {
+            sysId: this._stringField(definition, 'id') || sysId,
+            name: this._stringField(definition, 'name'),
+            internalName: this._stringField(definition, 'internalName'),
+            description: this._stringField(definition, 'description'),
+            scope: this._stringField(definition, 'scope'),
+            scopeName: this._stringField(definition, 'scopeName'),
+            status: this._stringField(definition, 'status'),
+            active: definition['active'] === true,
+            triggerCount: this._countField(definition, 'triggerInstances'),
+            actionCount: this._countField(definition, 'actionInstances'),
+            subflowCount: this._countField(definition, 'subFlowInstances'),
+            flowLogicCount: this._countField(definition, 'flowLogicInstances'),
+            inputCount: this._countField(definition, 'inputs'),
+            outputCount: this._countField(definition, 'outputs')
+        };
+    }
+
+    /** Project the commonly used fields of an action definition. @internal */
+    private _buildActionSummary(
+        sysId: string,
+        metadata: Record<string, unknown>,
+        steps: Array<Record<string, unknown>>
+    ): ActionDefinitionSummary {
+        const stepSummaries: ActionStepSummary[] = steps.map((step) => ({
+            stepId: this._stringField(step, 'step_id'),
+            order: this._stepOrder(step),
+            label: this._stringField(step, 'label'),
+            stepTypeName: this._stringField(step, 'step_type_name'),
+            stepTypeId: this._stringField(step, 'step_type_id')
+        }));
+
+        return {
+            sysId: this._stringField(metadata, 'id') || sysId,
+            name: this._stringField(metadata, 'name'),
+            internalName: this._stringField(metadata, 'internal_name'),
+            description: this._stringField(metadata, 'description'),
+            scope: this._stringField(metadata, 'scope'),
+            scopeName: this._stringField(metadata, 'scopename'),
+            state: this._stringField(metadata, 'state'),
+            active: metadata['active'] === true,
+            inputCount: this._countField(metadata, 'inputs'),
+            outputCount: this._countField(metadata, 'outputs'),
+            stepCount: steps.length,
+            steps: stepSummaries
+        };
+    }
+
+    /**
+     * Sort step instances ascending by `order`, keeping the API's own ordering
+     * as the tie-break so a missing or non-numeric order never reshuffles steps.
+     * @internal
+     */
+    private _sortActionSteps(steps: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+        return steps
+            .map((step, index) => ({ step, index, order: this._stepOrder(step) }))
+            .sort((a, b) => a.order - b.order || a.index - b.index)
+            .map((entry) => entry.step);
+    }
+
+    /** Read a step's execution order; unusable values sort last. @internal */
+    private _stepOrder(step: Record<string, unknown>): number {
+        const raw = step['order'];
+        if (typeof raw === 'number' && Number.isFinite(raw)) {
+            return raw;
+        }
+        if (typeof raw === 'string' && raw.trim().length > 0) {
+            const parsed = Number(raw);
+            if (Number.isFinite(parsed)) {
+                return parsed;
+            }
+        }
+        return Number.MAX_SAFE_INTEGER;
     }
 
     /**

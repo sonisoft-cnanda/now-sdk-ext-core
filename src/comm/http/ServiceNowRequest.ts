@@ -101,6 +101,7 @@ export class ServiceNowRequest{
     }
 
     public async getUserSession() {
+        if (this.auth.ensureSession) return this.auth.ensureSession();
         if(this.isLoggedIn()){
             return this.auth.getSession();
         }else{

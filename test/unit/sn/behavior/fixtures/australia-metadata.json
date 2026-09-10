@@ -1,0 +1,2286 @@
+{
+  "release": "Australia",
+  "captured": "2026-09-05",
+  "records": [
+    {
+      "reference": "",
+      "name": "sys_state_transition",
+      "internal_type": "conditions",
+      "element": "exit_condition"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_model",
+      "internal_type": "user_roles",
+      "element": "read_roles"
+    },
+    {
+      "reference": "",
+      "name": "sys_state_transition",
+      "internal_type": "choice",
+      "element": "state"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_model",
+      "internal_type": "choice",
+      "element": "state_field"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_model",
+      "internal_type": "collection",
+      "element": ""
+    },
+    {
+      "reference": "",
+      "name": "sys_state_model",
+      "internal_type": "conditions",
+      "element": "condition"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_model",
+      "internal_type": "boolean",
+      "element": "active"
+    },
+    {
+      "reference": "",
+      "name": "sys_flow_trigger",
+      "internal_type": "string",
+      "element": "published_version"
+    },
+    {
+      "reference": "",
+      "name": "sys_flow_record_trigger",
+      "internal_type": "boolean",
+      "element": "on_update"
+    },
+    {
+      "reference": "",
+      "name": "sys_flow_trigger",
+      "internal_type": "boolean",
+      "element": "active"
+    },
+    {
+      "reference": "",
+      "name": "sys_flow_trigger",
+      "internal_type": "GUID",
+      "element": "sys_id"
+    },
+    {
+      "reference": "",
+      "name": "sys_flow_trigger",
+      "internal_type": "sys_class_name",
+      "element": "sys_class_name"
+    },
+    {
+      "reference": "",
+      "name": "sys_flow_trigger",
+      "internal_type": "glide_date_time",
+      "element": "sys_updated_on"
+    },
+    {
+      "reference": "",
+      "name": "sys_flow_record_trigger",
+      "internal_type": "table_name",
+      "element": "table"
+    },
+    {
+      "reference": "",
+      "name": "sys_flow_trigger",
+      "internal_type": "domain_id",
+      "element": "sys_domain"
+    },
+    {
+      "reference": "",
+      "name": "sys_flow_trigger",
+      "internal_type": "glide_date_time",
+      "element": "sys_created_on"
+    },
+    {
+      "reference": "sys_user",
+      "name": "sys_flow_record_trigger",
+      "internal_type": "glide_list",
+      "element": "run_when_user_list"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_trigger_instance_v2",
+      "internal_type": "string",
+      "element": "trigger_type"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_trigger_instance_v2",
+      "internal_type": "string",
+      "element": "display_text"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_trigger_instance_v2",
+      "internal_type": "GUID",
+      "element": "sys_id"
+    },
+    {
+      "reference": "sys_hub_trigger_definition",
+      "name": "sys_hub_trigger_instance_v2",
+      "internal_type": "reference",
+      "element": "trigger_definition"
+    },
+    {
+      "reference": "sys_scope",
+      "name": "sys_hub_trigger_instance_v2",
+      "internal_type": "reference",
+      "element": "sys_scope"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_trigger_instance_v2",
+      "internal_type": "glide_date_time",
+      "element": "sys_updated_on"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_trigger_instance_v2",
+      "internal_type": "string",
+      "element": "trigger_inputs"
+    },
+    {
+      "reference": "",
+      "name": "sys_data_policy2",
+      "internal_type": "domain_path",
+      "element": "sys_domain_path"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_trigger_instance_v2",
+      "internal_type": "string",
+      "element": "updation_source"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_trigger_instance_v2",
+      "internal_type": "glide_date_time",
+      "element": "sys_created_on"
+    },
+    {
+      "reference": "sys_hub_flow_base",
+      "name": "sys_hub_trigger_instance_v2",
+      "internal_type": "reference",
+      "element": "flow"
+    },
+    {
+      "reference": "",
+      "name": "sys_data_policy2",
+      "internal_type": "document_id",
+      "element": "model_id"
+    },
+    {
+      "reference": "",
+      "name": "sys_data_policy2",
+      "internal_type": "conditions",
+      "element": "conditions"
+    },
+    {
+      "reference": "",
+      "name": "sys_data_policy2",
+      "internal_type": "boolean",
+      "element": "apply_import_set"
+    },
+    {
+      "reference": "",
+      "name": "sys_data_policy2",
+      "internal_type": "boolean",
+      "element": "apply_soap"
+    },
+    {
+      "reference": "",
+      "name": "sys_data_policy2",
+      "internal_type": "boolean",
+      "element": "enforce_ui"
+    },
+    {
+      "reference": "",
+      "name": "sys_data_policy2",
+      "internal_type": "string",
+      "element": "short_description"
+    },
+    {
+      "reference": "",
+      "name": "sys_data_policy2",
+      "internal_type": "string",
+      "element": "description"
+    },
+    {
+      "reference": "",
+      "name": "sys_data_policy2",
+      "internal_type": "boolean",
+      "element": "inherit"
+    },
+    {
+      "reference": "",
+      "name": "sys_data_policy2",
+      "internal_type": "boolean",
+      "element": "reverse_if_false"
+    },
+    {
+      "reference": "",
+      "name": "sys_data_policy2",
+      "internal_type": "boolean",
+      "element": "active"
+    },
+    {
+      "reference": "",
+      "name": "sys_data_policy2",
+      "internal_type": "domain_id",
+      "element": "sys_domain"
+    },
+    {
+      "reference": "sys_data_policy2",
+      "name": "sys_data_policy2",
+      "internal_type": "reference",
+      "element": "sys_overrides"
+    },
+    {
+      "reference": "",
+      "name": "sys_state_model",
+      "internal_type": "boolean",
+      "element": "active"
+    },
+    {
+      "reference": "",
+      "name": "sys_state_transition",
+      "internal_type": "boolean",
+      "element": "terminal_state"
+    },
+    {
+      "reference": "",
+      "name": "sys_state_model",
+      "internal_type": "collection",
+      "element": ""
+    },
+    {
+      "reference": "sys_user_group",
+      "name": "sttrm_model",
+      "internal_type": "glide_list",
+      "element": "template_approval_groups"
+    },
+    {
+      "reference": "",
+      "name": "sys_state_model",
+      "internal_type": "string",
+      "element": "name"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_model",
+      "internal_type": "table_name",
+      "element": "table_name"
+    },
+    {
+      "reference": "",
+      "name": "sys_flow_record_trigger",
+      "internal_type": "choice",
+      "element": "run_when_user_setting"
+    },
+    {
+      "reference": "",
+      "name": "sys_flow_trigger",
+      "internal_type": "collection",
+      "element": ""
+    },
+    {
+      "reference": "",
+      "name": "sys_flow_record_trigger",
+      "internal_type": "boolean",
+      "element": "on_insert"
+    },
+    {
+      "reference": "",
+      "name": "sys_state_model",
+      "internal_type": "order_index",
+      "element": "order"
+    },
+    {
+      "reference": "sys_state_model",
+      "name": "sys_state_transition",
+      "internal_type": "reference",
+      "element": "state_model"
+    },
+    {
+      "reference": "",
+      "name": "sys_state_transition",
+      "internal_type": "string",
+      "element": "state_label"
+    },
+    {
+      "reference": "",
+      "name": "sys_state_model",
+      "internal_type": "table_name",
+      "element": "table"
+    },
+    {
+      "reference": "",
+      "name": "sys_data_policy2",
+      "internal_type": "table_name",
+      "element": "model_table"
+    },
+    {
+      "reference": "",
+      "name": "sys_state_transition",
+      "internal_type": "conditions",
+      "element": "enter_condition"
+    },
+    {
+      "reference": "",
+      "name": "sys_state_model",
+      "internal_type": "GUID",
+      "element": "sys_id"
+    },
+    {
+      "reference": "sys_user",
+      "name": "sttrm_model",
+      "internal_type": "glide_list",
+      "element": "template_approval_users"
+    },
+    {
+      "reference": "",
+      "name": "sys_data_policy2",
+      "internal_type": "GUID",
+      "element": "sys_id"
+    },
+    {
+      "reference": "",
+      "name": "sys_state_transition",
+      "internal_type": "GUID",
+      "element": "sys_id"
+    },
+    {
+      "reference": "",
+      "name": "sys_state_transition",
+      "internal_type": "collection",
+      "element": ""
+    },
+    {
+      "reference": "",
+      "name": "sttrm_model",
+      "internal_type": "translated_text",
+      "element": "name"
+    },
+    {
+      "reference": "sys_flow_trigger",
+      "name": "sys_flow_trigger",
+      "internal_type": "reference",
+      "element": "sys_overrides"
+    },
+    {
+      "reference": "",
+      "name": "sys_flow_trigger",
+      "internal_type": "string",
+      "element": "sys_created_by"
+    },
+    {
+      "reference": "",
+      "name": "sys_flow_record_trigger",
+      "internal_type": "choice",
+      "element": "run_on_extended"
+    },
+    {
+      "reference": "sys_hub_trigger_definition",
+      "name": "sys_flow_trigger",
+      "internal_type": "reference",
+      "element": "trigger_definition"
+    },
+    {
+      "reference": "",
+      "name": "sys_flow_trigger",
+      "internal_type": "integer",
+      "element": "sys_mod_count"
+    },
+    {
+      "reference": "",
+      "name": "sys_flow_record_trigger",
+      "internal_type": "collection",
+      "element": ""
+    },
+    {
+      "reference": "",
+      "name": "sys_flow_record_trigger",
+      "internal_type": "choice",
+      "element": "run_when_setting"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_model",
+      "internal_type": "boolean",
+      "element": "advanced_security"
+    },
+    {
+      "reference": "",
+      "name": "sys_flow_trigger",
+      "internal_type": "string",
+      "element": "name"
+    },
+    {
+      "reference": "",
+      "name": "sys_flow_record_trigger",
+      "internal_type": "conditions",
+      "element": "condition"
+    },
+    {
+      "reference": "",
+      "name": "sys_flow_record_trigger",
+      "internal_type": "GUID",
+      "element": "sys_id"
+    },
+    {
+      "reference": "sys_scope",
+      "name": "sys_flow_trigger",
+      "internal_type": "reference",
+      "element": "sys_scope"
+    },
+    {
+      "reference": "",
+      "name": "sys_flow_trigger",
+      "internal_type": "string",
+      "element": "sys_updated_by"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_model",
+      "internal_type": "GUID",
+      "element": "sys_id"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_trigger_instance_v2",
+      "internal_type": "string",
+      "element": "generation_source"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_trigger_instance_v2",
+      "internal_type": "string",
+      "element": "sys_created_by"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_trigger_instance_v2",
+      "internal_type": "string",
+      "element": "trigger_outputs"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_trigger_instance_v2",
+      "internal_type": "integer",
+      "element": "sys_mod_count"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_trigger_instance_v2",
+      "internal_type": "string",
+      "element": "name"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_trigger_instance_v2",
+      "internal_type": "string",
+      "element": "remote_sys_id"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_trigger_instance_v2",
+      "internal_type": "string",
+      "element": "comment"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_trigger_instance_v2",
+      "internal_type": "string",
+      "element": "sys_updated_by"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_trigger_instance_v2",
+      "internal_type": "string",
+      "element": "published_version"
+    },
+    {
+      "reference": "",
+      "name": "sys_data_policy2",
+      "internal_type": "collection",
+      "element": ""
+    },
+    {
+      "reference": "",
+      "name": "sys_state_model",
+      "internal_type": "conditions",
+      "element": "global_exit_condition"
+    },
+    {
+      "reference": "",
+      "name": "sys_state_transition",
+      "internal_type": "order_index",
+      "element": "order"
+    },
+    {
+      "reference": "",
+      "name": "sys_state_model",
+      "internal_type": "string",
+      "element": "description"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_model",
+      "internal_type": "user_roles",
+      "element": "write_roles"
+    },
+    {
+      "reference": "",
+      "name": "sys_state_transition",
+      "internal_type": "string",
+      "element": "description"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_model",
+      "internal_type": "choice",
+      "element": "template_proposal_access"
+    },
+    {
+      "reference": "",
+      "name": "sys_flow_trigger",
+      "internal_type": "domain_path",
+      "element": "sys_domain_path"
+    },
+    {
+      "reference": "",
+      "name": "sys_flow_record_trigger",
+      "internal_type": "choice",
+      "element": "run_flow_in"
+    },
+    {
+      "reference": "",
+      "name": "sys_flow_record_trigger",
+      "internal_type": "boolean",
+      "element": "on_delete"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_trigger_instance_v2",
+      "internal_type": "collection",
+      "element": ""
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "boolean",
+      "element": "ui16_compatible"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_transition_condition",
+      "internal_type": "conditions",
+      "element": "condition"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_transition_condition",
+      "internal_type": "translated_text",
+      "element": "name"
+    },
+    {
+      "reference": "",
+      "name": "sys_variable_value",
+      "internal_type": "decimal",
+      "element": "order"
+    },
+    {
+      "reference": "",
+      "name": "sys_variable_value",
+      "internal_type": "string",
+      "element": "sys_created_by"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "conditions",
+      "element": "filter_condition"
+    },
+    {
+      "reference": "",
+      "name": "sys_script_client",
+      "internal_type": "string",
+      "element": "condition"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy",
+      "internal_type": "integer",
+      "element": "ui_type"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_flow_base",
+      "internal_type": "integer",
+      "element": "authored_on_release_version"
+    },
+    {
+      "reference": "sys_hub_category",
+      "name": "sys_hub_flow_base",
+      "internal_type": "reference",
+      "element": "category"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "GUID",
+      "element": "sys_id"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "collection",
+      "element": ""
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "string",
+      "element": "form_button_icon"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "boolean",
+      "element": "list_banner_button"
+    },
+    {
+      "reference": "",
+      "name": "sys_variable_value",
+      "internal_type": "collection",
+      "element": ""
+    },
+    {
+      "reference": "",
+      "name": "sys_variable_value",
+      "internal_type": "integer",
+      "element": "sys_mod_count"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "domain_id",
+      "element": "sys_domain"
+    },
+    {
+      "reference": "",
+      "name": "sys_script_client",
+      "internal_type": "boolean",
+      "element": "global"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_flow_base",
+      "internal_type": "boolean",
+      "element": "callable_by_client_api"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_flow_base",
+      "internal_type": "string",
+      "element": "description"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "boolean",
+      "element": "isolate_script"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "boolean",
+      "element": "active"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "boolean",
+      "element": "form_context_menu"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "condition_string",
+      "element": "condition"
+    },
+    {
+      "reference": "",
+      "name": "sys_script_client",
+      "internal_type": "table_name",
+      "element": "table"
+    },
+    {
+      "reference": "sys_ui_policy",
+      "name": "sys_ui_policy_action",
+      "internal_type": "reference",
+      "element": "ui_policy"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_flow_base",
+      "internal_type": "string",
+      "element": "type"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "integer",
+      "element": "order"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "boolean",
+      "element": "list_action"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "string",
+      "element": "messages"
+    },
+    {
+      "reference": "",
+      "name": "sys_variable_value",
+      "internal_type": "string",
+      "element": "sys_updated_by"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "boolean",
+      "element": "action_update"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "boolean",
+      "element": "add_message"
+    },
+    {
+      "reference": "",
+      "name": "sys_script_client",
+      "internal_type": "integer",
+      "element": "ui_type"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy_action",
+      "internal_type": "GUID",
+      "element": "sys_id"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_flow_base",
+      "internal_type": "string",
+      "element": "copied_from"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "script",
+      "element": "client_script_v2"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "boolean",
+      "element": "show_insert"
+    },
+    {
+      "reference": "wf_element_definition",
+      "name": "wf_activity",
+      "internal_type": "reference",
+      "element": "activity_definition"
+    },
+    {
+      "reference": "",
+      "name": "wf_activity",
+      "internal_type": "integer",
+      "element": "databus_lookup_id"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_state",
+      "internal_type": "collection",
+      "element": ""
+    },
+    {
+      "reference": "wf_stage",
+      "name": "wf_activity",
+      "internal_type": "reference",
+      "element": "stage"
+    },
+    {
+      "reference": "",
+      "name": "wf_activity",
+      "internal_type": "integer",
+      "element": "x"
+    },
+    {
+      "reference": "sttrm_model",
+      "name": "sttrm_state",
+      "internal_type": "reference",
+      "element": "sttrm_model"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_state_transition",
+      "internal_type": "boolean",
+      "element": "automatic"
+    },
+    {
+      "reference": "wf_versionable",
+      "name": "wf_activity",
+      "internal_type": "reference",
+      "element": "pinned_version"
+    },
+    {
+      "reference": "",
+      "name": "wf_activity",
+      "internal_type": "integer",
+      "element": "height"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_state_transition",
+      "internal_type": "collection",
+      "element": ""
+    },
+    {
+      "reference": "wf_element_definition",
+      "name": "wf_activity",
+      "internal_type": "reference",
+      "element": "new_activity_definition"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_state",
+      "internal_type": "translated_text",
+      "element": "state_label"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_state_transition",
+      "internal_type": "translated_text",
+      "element": "name"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "domain_path",
+      "element": "sys_domain_path"
+    },
+    {
+      "reference": "wf_activity_variable",
+      "name": "wf_activity",
+      "internal_type": "glide_var",
+      "element": "vars"
+    },
+    {
+      "reference": "",
+      "name": "wf_activity",
+      "internal_type": "glide_date_time",
+      "element": "sys_updated_on"
+    },
+    {
+      "reference": "",
+      "name": "wf_activity",
+      "internal_type": "glide_duration",
+      "element": "timeout"
+    },
+    {
+      "reference": "",
+      "name": "wf_activity",
+      "internal_type": "glide_date_time",
+      "element": "sys_created_on"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "collection",
+      "element": ""
+    },
+    {
+      "reference": "wf_activity",
+      "name": "wf_activity",
+      "internal_type": "reference",
+      "element": "parent"
+    },
+    {
+      "reference": "",
+      "name": "wf_activity",
+      "internal_type": "GUID",
+      "element": "sys_id"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_state_transition",
+      "internal_type": "GUID",
+      "element": "sys_id"
+    },
+    {
+      "reference": "",
+      "name": "sys_data_policy_rule",
+      "internal_type": "table_name",
+      "element": "table"
+    },
+    {
+      "reference": "",
+      "name": "sys_data_policy_rule",
+      "internal_type": "field_name",
+      "element": "field"
+    },
+    {
+      "reference": "",
+      "name": "sys_data_policy_rule",
+      "internal_type": "string",
+      "element": "mandatory"
+    },
+    {
+      "reference": "",
+      "name": "sys_data_policy_rule",
+      "internal_type": "string",
+      "element": "disabled"
+    },
+    {
+      "reference": "sttrm_condition_type",
+      "name": "sttrm_transition_condition",
+      "internal_type": "reference",
+      "element": "condition_type"
+    },
+    {
+      "reference": "",
+      "name": "sys_script_client",
+      "internal_type": "domain_path",
+      "element": "sys_domain_path"
+    },
+    {
+      "reference": "var_dictionary",
+      "name": "sys_variable_value",
+      "internal_type": "reference",
+      "element": "variable"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "string",
+      "element": "access"
+    },
+    {
+      "reference": "",
+      "name": "sys_script_client",
+      "internal_type": "integer",
+      "element": "order"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_flow_base",
+      "internal_type": "string",
+      "element": "internal_name"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_flow_base",
+      "internal_type": "boolean",
+      "element": "sc_callable"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "string",
+      "element": "list_style"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "boolean",
+      "element": "list_button"
+    },
+    {
+      "reference": "",
+      "name": "sys_variable_value",
+      "internal_type": "table_name",
+      "element": "document"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "boolean",
+      "element": "active"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "GUID",
+      "element": "sys_id"
+    },
+    {
+      "reference": "",
+      "name": "sys_script_client",
+      "internal_type": "string",
+      "element": "view"
+    },
+    {
+      "reference": "",
+      "name": "sys_script_client",
+      "internal_type": "GUID",
+      "element": "sys_id"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy_action",
+      "internal_type": "collection",
+      "element": ""
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_flow_base",
+      "internal_type": "string",
+      "element": "flow_priority"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_flow_base",
+      "internal_type": "string",
+      "element": "natlang"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "script",
+      "element": "script"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "boolean",
+      "element": "form_link"
+    },
+    {
+      "reference": "sys_ui_action",
+      "name": "sys_ui_action",
+      "internal_type": "reference",
+      "element": "sys_overrides"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "string",
+      "element": "name"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "string",
+      "element": "when"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "boolean",
+      "element": "execute_function"
+    },
+    {
+      "reference": "",
+      "name": "sys_script_client",
+      "internal_type": "boolean",
+      "element": "isolate_script"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_flow_base",
+      "internal_type": "boolean",
+      "element": "allow_high_security_roles"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "table_name",
+      "element": "table"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "boolean",
+      "element": "format_for_configurable_workspace"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "boolean",
+      "element": "show_multiple_update"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "boolean",
+      "element": "action_insert"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "boolean",
+      "element": "abort_action"
+    },
+    {
+      "reference": "",
+      "name": "sys_script_client",
+      "internal_type": "script_plain",
+      "element": "script"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy",
+      "internal_type": "string",
+      "element": "description"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy",
+      "internal_type": "table_name",
+      "element": "model_table"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy",
+      "internal_type": "document_id",
+      "element": "model_id"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy",
+      "internal_type": "string",
+      "element": "short_description"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy",
+      "internal_type": "conditions",
+      "element": "conditions"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_flow_base",
+      "internal_type": "collection",
+      "element": ""
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_flow_base",
+      "internal_type": "string",
+      "element": "status"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "boolean",
+      "element": "show_list_icon_only"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "boolean",
+      "element": "list_link"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_state",
+      "internal_type": "integer",
+      "element": "state_sequence"
+    },
+    {
+      "reference": "",
+      "name": "wf_activity",
+      "internal_type": "collection",
+      "element": ""
+    },
+    {
+      "reference": "sttrm_state",
+      "name": "sttrm_state_transition",
+      "internal_type": "reference",
+      "element": "to_state"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "table_name",
+      "element": "table"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "boolean",
+      "element": "not_cacheable"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "compressed",
+      "element": "activity_stages"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "journal",
+      "element": "journal"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "string",
+      "element": "sys_created_by"
+    },
+    {
+      "reference": "",
+      "name": "wf_transition",
+      "internal_type": "integer",
+      "element": "sys_mod_count"
+    },
+    {
+      "reference": "sttrm_transition_condition",
+      "name": "sttrm_transition_condition_field",
+      "internal_type": "reference",
+      "element": "transition_condition"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "string",
+      "element": "name"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "conditions",
+      "element": "condition"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "glide_date_time",
+      "element": "checked_out"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "glide_duration",
+      "element": "expected_time"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "integer",
+      "element": "sys_mod_count"
+    },
+    {
+      "reference": "sys_rest_message_fn",
+      "name": "sys_script",
+      "internal_type": "reference",
+      "element": "rest_method"
+    },
+    {
+      "reference": "wf_workflow",
+      "name": "wf_workflow_version",
+      "internal_type": "reference",
+      "element": "workflow"
+    },
+    {
+      "reference": "wf_activity",
+      "name": "wf_workflow_version",
+      "internal_type": "reference",
+      "element": "start"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "boolean",
+      "element": "active"
+    },
+    {
+      "reference": "cmn_schedule",
+      "name": "wf_workflow_version",
+      "internal_type": "reference",
+      "element": "schedule"
+    },
+    {
+      "reference": "",
+      "name": "wf_transition",
+      "internal_type": "string",
+      "element": "sys_updated_by"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_transition_condition_field",
+      "internal_type": "GUID",
+      "element": "sys_id"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "string",
+      "element": "stage_order"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "string",
+      "element": "description"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "compressed",
+      "element": "full_sequences"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "script",
+      "element": "on_cancel"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "string",
+      "element": "sys_updated_by"
+    },
+    {
+      "reference": "wf_activity",
+      "name": "wf_transition",
+      "internal_type": "reference",
+      "element": "from"
+    },
+    {
+      "reference": "",
+      "name": "wf_transition",
+      "internal_type": "string",
+      "element": "sys_created_by"
+    },
+    {
+      "reference": "sttrm_state_transition",
+      "name": "sttrm_transition_condition",
+      "internal_type": "reference",
+      "element": "sttrm_state_transition"
+    },
+    {
+      "reference": "sys_data_policy2",
+      "name": "sys_data_policy_rule",
+      "internal_type": "reference",
+      "element": "sys_data_policy"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_transition_condition",
+      "internal_type": "collection",
+      "element": ""
+    },
+    {
+      "reference": "",
+      "name": "sttrm_transition_condition",
+      "internal_type": "GUID",
+      "element": "sys_id"
+    },
+    {
+      "reference": "",
+      "name": "sys_data_policy_rule",
+      "internal_type": "GUID",
+      "element": "sys_id"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_transition_condition",
+      "internal_type": "boolean",
+      "element": "active"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_transition_condition",
+      "internal_type": "integer",
+      "element": "order"
+    },
+    {
+      "reference": "",
+      "name": "sys_variable_value",
+      "internal_type": "GUID",
+      "element": "sys_id"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "boolean",
+      "element": "client_callable"
+    },
+    {
+      "reference": "",
+      "name": "sys_script_client",
+      "internal_type": "string",
+      "element": "name"
+    },
+    {
+      "reference": "",
+      "name": "sys_script_client",
+      "internal_type": "string",
+      "element": "type"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_flow_base",
+      "internal_type": "string",
+      "element": "run_as"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "string",
+      "element": "form_style"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "string",
+      "element": "onclick"
+    },
+    {
+      "reference": "",
+      "name": "sys_variable_value",
+      "internal_type": "document_id",
+      "element": "document_key"
+    },
+    {
+      "reference": "",
+      "name": "sys_variable_value",
+      "internal_type": "glide_date_time",
+      "element": "sys_updated_on"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "collection",
+      "element": ""
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "script",
+      "element": "script"
+    },
+    {
+      "reference": "",
+      "name": "sys_script_client",
+      "internal_type": "boolean",
+      "element": "active"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy",
+      "internal_type": "table_name",
+      "element": "table"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_flow_base",
+      "internal_type": "string",
+      "element": "remote_trigger_id"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "translated_field",
+      "element": "hint"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "boolean",
+      "element": "form_button"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "domain_id",
+      "element": "sys_domain"
+    },
+    {
+      "reference": "",
+      "name": "sys_variable_value",
+      "internal_type": "string",
+      "element": "value"
+    },
+    {
+      "reference": "",
+      "name": "sys_variable_value",
+      "internal_type": "glide_date_time",
+      "element": "sys_created_on"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "boolean",
+      "element": "action_query"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "boolean",
+      "element": "change_fields"
+    },
+    {
+      "reference": "sys_script_client",
+      "name": "sys_script_client",
+      "internal_type": "reference",
+      "element": "sys_overrides"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy",
+      "internal_type": "boolean",
+      "element": "on_load"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy",
+      "internal_type": "boolean",
+      "element": "reverse_if_false"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy",
+      "internal_type": "boolean",
+      "element": "run_scripts"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy",
+      "internal_type": "integer",
+      "element": "order"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy",
+      "internal_type": "script_plain",
+      "element": "script_true"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy",
+      "internal_type": "script_plain",
+      "element": "script_false"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy",
+      "internal_type": "template_value",
+      "element": "set_values"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy",
+      "internal_type": "domain_id",
+      "element": "sys_domain"
+    },
+    {
+      "reference": "sys_ui_policy",
+      "name": "sys_ui_policy",
+      "internal_type": "reference",
+      "element": "sys_overrides"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy",
+      "internal_type": "boolean",
+      "element": "inherit"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy",
+      "internal_type": "boolean",
+      "element": "active"
+    },
+    {
+      "reference": "sys_ui_view",
+      "name": "sys_ui_policy",
+      "internal_type": "reference",
+      "element": "view"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy",
+      "internal_type": "boolean",
+      "element": "global"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy",
+      "internal_type": "boolean",
+      "element": "isolate_script"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_flow_base",
+      "internal_type": "string",
+      "element": "attributes"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_flow_base",
+      "internal_type": "translated_text",
+      "element": "annotation"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "boolean",
+      "element": "form_menu_button_v2"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "boolean",
+      "element": "show_query"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "integer",
+      "element": "order"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "template_value",
+      "element": "template"
+    },
+    {
+      "reference": "",
+      "name": "sys_script_client",
+      "internal_type": "string",
+      "element": "messages"
+    },
+    {
+      "reference": "sys_user_role",
+      "name": "sys_hub_flow_base",
+      "internal_type": "glide_list",
+      "element": "run_with_roles"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "boolean",
+      "element": "show_form_icon_only"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "boolean",
+      "element": "list_choice"
+    },
+    {
+      "reference": "",
+      "name": "wf_activity",
+      "internal_type": "boolean",
+      "element": "out_of_date"
+    },
+    {
+      "reference": "",
+      "name": "wf_activity",
+      "internal_type": "integer",
+      "element": "width"
+    },
+    {
+      "reference": "",
+      "name": "wf_activity",
+      "internal_type": "string",
+      "element": "name"
+    },
+    {
+      "reference": "",
+      "name": "wf_activity",
+      "internal_type": "boolean",
+      "element": "activity_definition_updated"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_state",
+      "internal_type": "string",
+      "element": "state_value"
+    },
+    {
+      "reference": "wf_workflow_version",
+      "name": "wf_activity",
+      "internal_type": "reference",
+      "element": "workflow_version"
+    },
+    {
+      "reference": "",
+      "name": "wf_activity",
+      "internal_type": "string",
+      "element": "notes"
+    },
+    {
+      "reference": "",
+      "name": "wf_activity",
+      "internal_type": "boolean",
+      "element": "pinned"
+    },
+    {
+      "reference": "",
+      "name": "wf_activity",
+      "internal_type": "integer",
+      "element": "y"
+    },
+    {
+      "reference": "sttrm_state",
+      "name": "sttrm_state_transition",
+      "internal_type": "reference",
+      "element": "from_state"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "string",
+      "element": "rest_method_text"
+    },
+    {
+      "reference": "",
+      "name": "wf_transition",
+      "internal_type": "collection",
+      "element": ""
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "boolean",
+      "element": "is_rest"
+    },
+    {
+      "reference": "sys_rest_message",
+      "name": "sys_script",
+      "internal_type": "reference",
+      "element": "rest_service"
+    },
+    {
+      "reference": "",
+      "name": "wf_activity",
+      "internal_type": "boolean",
+      "element": "is_parent"
+    },
+    {
+      "reference": "",
+      "name": "wf_activity",
+      "internal_type": "string",
+      "element": "sys_updated_by"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_transition_condition_field",
+      "internal_type": "field_name",
+      "element": "name"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "string",
+      "element": "rest_variables"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "boolean",
+      "element": "advanced"
+    },
+    {
+      "reference": "",
+      "name": "wf_activity",
+      "internal_type": "data_object",
+      "element": "input"
+    },
+    {
+      "reference": "",
+      "name": "wf_activity",
+      "internal_type": "string",
+      "element": "sys_created_by"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy",
+      "internal_type": "domain_path",
+      "element": "sys_domain_path"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "string",
+      "element": "rest_service_text"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "user_roles",
+      "element": "role_conditions"
+    },
+    {
+      "reference": "",
+      "name": "wf_activity",
+      "internal_type": "integer",
+      "element": "sys_mod_count"
+    },
+    {
+      "reference": "",
+      "name": "sys_data_policy_rule",
+      "internal_type": "collection",
+      "element": ""
+    },
+    {
+      "reference": "",
+      "name": "sttrm_transition_condition",
+      "internal_type": "script",
+      "element": "condition_script"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_transition_condition",
+      "internal_type": "translated_text",
+      "element": "description"
+    },
+    {
+      "reference": "sys_script",
+      "name": "sys_script",
+      "internal_type": "reference",
+      "element": "sys_overrides"
+    },
+    {
+      "reference": "",
+      "name": "sys_script_client",
+      "internal_type": "boolean",
+      "element": "applies_extended"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy",
+      "internal_type": "collection",
+      "element": ""
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_flow_base",
+      "internal_type": "GUID",
+      "element": "sys_id"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_flow_base",
+      "internal_type": "string",
+      "element": "access"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "translated_field",
+      "element": "name"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "string",
+      "element": "action_name"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "boolean",
+      "element": "client"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "string",
+      "element": "description"
+    },
+    {
+      "reference": "",
+      "name": "sys_script_client",
+      "internal_type": "field_name",
+      "element": "field"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy",
+      "internal_type": "GUID",
+      "element": "sys_id"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_flow_base",
+      "internal_type": "string",
+      "element": "copied_from_name"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "condition_string",
+      "element": "condition"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "boolean",
+      "element": "form_action"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "string",
+      "element": "comments"
+    },
+    {
+      "reference": "",
+      "name": "sys_variable_value",
+      "internal_type": "sys_class_name",
+      "element": "sys_class_name"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "boolean",
+      "element": "action_delete"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "translated_html",
+      "element": "message"
+    },
+    {
+      "reference": "",
+      "name": "sys_script_client",
+      "internal_type": "domain_id",
+      "element": "sys_domain"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_flow_base",
+      "internal_type": "string",
+      "element": "version"
+    },
+    {
+      "reference": "sys_hub_flow_output",
+      "name": "sys_hub_flow_base",
+      "internal_type": "glide_var",
+      "element": "outputs"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "domain_path",
+      "element": "sys_domain_path"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "boolean",
+      "element": "form_button_v2"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "boolean",
+      "element": "show_update"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "table_name",
+      "element": "collection"
+    },
+    {
+      "reference": "",
+      "name": "sys_script",
+      "internal_type": "integer",
+      "element": "priority"
+    },
+    {
+      "reference": "",
+      "name": "sys_script_client",
+      "internal_type": "collection",
+      "element": ""
+    },
+    {
+      "reference": "",
+      "name": "sys_script_client",
+      "internal_type": "string",
+      "element": "description"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy_action",
+      "internal_type": "table_name",
+      "element": "table"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy_action",
+      "internal_type": "field_name",
+      "element": "field"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy_action",
+      "internal_type": "string",
+      "element": "visible"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy_action",
+      "internal_type": "string",
+      "element": "mandatory"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy_action",
+      "internal_type": "string",
+      "element": "disabled"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy_action",
+      "internal_type": "boolean",
+      "element": "cleared"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy_action",
+      "internal_type": "string",
+      "element": "value_action"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy_action",
+      "internal_type": "string",
+      "element": "value"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy_action",
+      "internal_type": "string",
+      "element": "field_message_type"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_policy_action",
+      "internal_type": "translated_text",
+      "element": "field_message"
+    },
+    {
+      "reference": "sys_security_acl",
+      "name": "sys_hub_flow_base",
+      "internal_type": "glide_list",
+      "element": "acls"
+    },
+    {
+      "reference": "",
+      "name": "sys_hub_flow_base",
+      "internal_type": "boolean",
+      "element": "active"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "string",
+      "element": "list_button_icon"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "boolean",
+      "element": "list_context_menu"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "boolean",
+      "element": "list_save_with_form_button"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_state",
+      "internal_type": "boolean",
+      "element": "initial_state"
+    },
+    {
+      "reference": "",
+      "name": "sys_ui_action",
+      "internal_type": "boolean",
+      "element": "ui11_compatible"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_state",
+      "internal_type": "GUID",
+      "element": "sys_id"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "field_name",
+      "element": "stage_field"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "integer",
+      "element": "max_activity_count"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "boolean",
+      "element": "after_business_rules"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "string",
+      "element": "timezone"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "GUID",
+      "element": "sys_id"
+    },
+    {
+      "reference": "wf_condition",
+      "name": "wf_transition",
+      "internal_type": "reference",
+      "element": "condition"
+    },
+    {
+      "reference": "",
+      "name": "wf_transition",
+      "internal_type": "glide_date_time",
+      "element": "sys_updated_on"
+    },
+    {
+      "reference": "column_renderer",
+      "name": "wf_workflow_version",
+      "internal_type": "reference",
+      "element": "column_renderer"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "boolean",
+      "element": "run_multiple"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "compressed",
+      "element": "expected_sequences"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "boolean",
+      "element": "requires_ert"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "glide_date_time",
+      "element": "sys_updated_on"
+    },
+    {
+      "reference": "wf_activity",
+      "name": "wf_transition",
+      "internal_type": "reference",
+      "element": "to"
+    },
+    {
+      "reference": "",
+      "name": "wf_transition",
+      "internal_type": "glide_date_time",
+      "element": "sys_created_on"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "string",
+      "element": "condition_type"
+    },
+    {
+      "reference": "sys_user",
+      "name": "wf_workflow_version",
+      "internal_type": "reference",
+      "element": "checked_out_by"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "string",
+      "element": "expected_time_type"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "string",
+      "element": "pin_type"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "glide_date_time",
+      "element": "sys_created_on"
+    },
+    {
+      "reference": "",
+      "name": "sttrm_transition_condition_field",
+      "internal_type": "collection",
+      "element": ""
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "boolean",
+      "element": "validated"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "integer",
+      "element": "order"
+    },
+    {
+      "reference": "",
+      "name": "wf_workflow_version",
+      "internal_type": "boolean",
+      "element": "published"
+    },
+    {
+      "reference": "cmn_relative_duration",
+      "name": "wf_workflow_version",
+      "internal_type": "reference",
+      "element": "relative_duration"
+    },
+    {
+      "reference": "",
+      "name": "wf_transition",
+      "internal_type": "GUID",
+      "element": "sys_id"
+    }
+  ]
+}
