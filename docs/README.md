@@ -12,6 +12,7 @@ The ServiceNow SDK Extension Core provides a powerful, type-safe interface for a
 - ✅ **Batch Operations** - Install multiple applications in a single operation
 - 📊 **Progress Monitoring** - Track long-running operations with built-in progress tracking
 - 🔄 **Version Management** - Compare and validate application versions
+- **Table Behavior Discovery** - Inspect table automation, policy requirements and state-transition gates before debugging or building ATF tests
 
 ## Installation
 
@@ -28,7 +29,7 @@ import {
     AppRepoApplication,
     ATFTestExecutor 
 } from '@sonisoft/now-sdk-ext-core';
-import { getCredentials } from '@servicenow/sdk-cli/dist/auth';
+import { getCredentials } from '@servicenow/sdk-cli/dist/auth/index.js';
 
 // Setup instance connection
 const credential = await getCredentials('my-instance-alias');
@@ -109,6 +110,26 @@ console.log(`Tests: ${suiteResult.total_tests}, Passed: ${suiteResult.passed_tes
 
 [→ Full ATFTestExecutor Documentation](./ATFTestExecutor.md)
 
+### 4. Table Behavior Discovery
+
+`TableBehaviorDiscovery` complements field/schema discovery with business rules, UI actions, client scripts, UI/data policies, legacy workflows, record-triggered flows and generic state models.
+
+```typescript
+import { TableBehaviorDiscovery } from '@sonisoft/now-sdk-ext-core';
+
+const behavior = new TableBehaviorDiscovery(instance);
+const result = await behavior.discoverTableBehavior('change_request', {
+    categories: ['business_rules', 'flows', 'state_models'],
+    details: ['scripts', 'definitions', 'dependencies'],
+    dependencyDepth: 1,
+    maxBytes: 262144,
+});
+```
+
+Active configuration and applicable ancestors are included by default. Summaries include conditions and field requirements; scripts, definitions and dependencies are optional. `getBehaviorDetails()` retrieves 1–50 known references without rediscovery. Follow category cursors and inspect warnings, omitted details and remaining references before treating a result as complete. These are read-only configuration reads, not execution predictions.
+
+[→ Table Behavior guide](./TableBehaviorDiscovery.md) · [→ README examples and ATF workflow](../README.md#inspect-table-behavior)
+
 ## Key Features
 
 ### Type Safety
@@ -164,6 +185,7 @@ try {
 - [App Repository](./AppRepoApplication.md) - Repository install and publish operations
 - [ATF Test Executor](./ATFTestExecutor.md) - Automated test execution
 - [Flow Definitions](./FlowDefinitions.md) - Read flow, subflow and action definitions as JSON
+- [Table Behavior Discovery](./TableBehaviorDiscovery.md) - Table automation, field requirements, batched details and bounded dependencies
 - [Script Tracer](./script_tracer/README.md) - Real-time server-side script tracing
 - [ActiveSessionRegistry](./ActiveSessionRegistry.md) - Stateful workflow sessions for MCP and CLI
 - [API Reference](./APIReference.md) - Complete API documentation
@@ -171,7 +193,7 @@ try {
 
 ## Requirements
 
-- Node.js 18+ or Node.js 20+
+- Node.js 26+
 - TypeScript 5.0+
 - ServiceNow instance with CI/CD API enabled
 - Valid ServiceNow credentials configured via `@servicenow/sdk-cli`
@@ -182,9 +204,12 @@ This SDK uses the ServiceNow CLI authentication system. Set up your credentials:
 
 ```bash
 # Add instance credentials
-npx @servicenow/sdk auth --add my-instance
+npx @servicenow/sdk auth --add https://dev12345.service-now.com --alias my-instance --type oauth
+```
 
-# Use in your code
+Use the configured alias in your code:
+
+```typescript
 const credential = await getCredentials('my-instance');
 ```
 
@@ -234,4 +259,3 @@ Contributions are welcome! Please see our contributing guidelines.
 ---
 
 **Built with ❤️ for the ServiceNow Developer Community**
-
