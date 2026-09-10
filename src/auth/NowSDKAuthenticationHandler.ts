@@ -3,8 +3,8 @@ import { Logger } from '../util/Logger';
 import { IAuthenticationHandler } from './IAuthenticationHandler';
 import { ICookieStore } from '../comm/http/ICookieStore';
 import { ServiceNowInstance } from '../sn/ServiceNowInstance';
-import { getUserSession } from '@servicenow/sdk-cli/dist/auth/index.js';
-import type { UserSession } from '@servicenow/sdk-cli/dist/auth/index.js';
+import { getUserSession } from '@servicenow/sdk-cli-core/dist/auth/index.js';
+import type { UserSession } from '@servicenow/sdk-cli-core/dist/auth/index.js';
 import { sessionCredentials, SessionCredentials } from './CredentialProvider';
 import { SessionAuthError } from './SessionAuthError';
 

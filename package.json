@@ -35,6 +35,9 @@
     "semantic-release": "semantic-release",
     "test": "node --experimental-vm-modules node_modules/.bin/jest --forceExit --coverage --collectCoverage --coverageDirectory=\"./coverage\" --ci --reporters=default --reporters=jest-junit --watchAll=false --testPathIgnorePatterns=\"/integration/\"",
     "test:unit": "node --experimental-vm-modules node_modules/.bin/jest --forceExit --coverage --collectCoverage --coverageDirectory=\"./coverage\" --ci --reporters=default --reporters=jest-junit --watchAll=false --testPathIgnorePatterns=\"/integration/\"",
+    "test:eval": "node --experimental-vm-modules node_modules/.bin/jest --forceExit --runInBand --runTestsByPath test/unit/auth/CredentialProvider.test.ts test/unit/auth/BrowserSessionCsrf.test.ts test/unit/auth/SessionRenewal.test.ts test/unit/comm/http/sdkDeepImports.test.ts test/unit/BackgroundScriptExecutor.test.ts test/unit/sn/xml/XMLRecordManager.test.ts test/unit/sn/updateset/UpdateSetManager.test.ts test/unit/util/CSRFTokenHelper.test.ts test/unit/policy/RequestHandlerGate.test.ts test/unit/policy/ScriptEvasion.test.ts test/unit/util/LoggerRedaction.test.ts test/unit/util/NoStdoutWrites.test.ts",
+    "test:consumer": "node scripts/sdk-compat-consumer.mjs",
+    "test:eval:live": "node scripts/sdk-compat-live.mjs",
     "test:integration": "node --experimental-vm-modules node_modules/.bin/jest --forceExit --testPathPatterns=\"/integration/\" --watchAll=false --testTimeout=120000",
     "test:all": "node --experimental-vm-modules node_modules/.bin/jest --forceExit --coverage --collectCoverage --coverageDirectory=\"./coverage\" --ci --reporters=default --reporters=jest-junit --watchAll=false",
     "watch-test": "npm run test:unit -- --watchAll",
@@ -54,11 +57,11 @@
   "types": "./dist/index.d.ts",
   "dependencies": {
     "@servicenow/glide": "^27.0.5",
-    "@servicenow/sdk": "4.9.2",
-    "@servicenow/sdk-build-core": "4.9.2",
-    "@servicenow/sdk-cli": "4.9.2",
+    "@servicenow/sdk": "4.12.0",
+    "@servicenow/sdk-build-core": "4.12.0",
+    "@servicenow/sdk-cli": "4.12.0",
     "@servicenow/sdk-cli-core": "3.0.3",
-    "@servicenow/sdk-core": "4.9.2",
+    "@servicenow/sdk-core": "4.12.0",
     "@ts-morph/common": "^0.24.0",
     "@xmldom/xmldom": "^0.9.12",
     "acorn": "^8.18.0",
@@ -147,6 +150,6 @@
     "node": ">=26.0.0"
   },
   "optionalDependencies": {
-    "@sonisoft/sn-credstore": "^1.1.1"
+    "@sonisoft/sn-credstore": "^1.2.0"
   }
 }

@@ -884,7 +884,8 @@ try {
 
 ## 📦 Dependencies
 
-- `@servicenow/sdk` 4.3.0 / `@servicenow/sdk-cli` 4.3.0 / `@servicenow/sdk-core` 4.3.0 - ServiceNow SDK and CLI tools
+- `@servicenow/sdk` 4.12.0 / `@servicenow/sdk-cli` 4.12.0 / `@servicenow/sdk-core` 4.12.0 - ServiceNow SDK and CLI tools
+- `@servicenow/sdk-cli-core` 3.0.3 - separately versioned HTTP/session compatibility layer
 - `axios` - HTTP client
 - `cometd` / `cometd-nodejs-client` - WebSocket support for AMB
 - `winston` - Logging
@@ -977,7 +978,7 @@ backend. Imports alone never install the shim. Keep session state out of logs an
 source control. A saved state file does not renew itself.
 
 When upgrading a shared store, stop all clients first, upgrade every client
-(including standalone `now-sdk-x`) to sn-credstore 1.1.1 or later, then restart.
+(including standalone `now-sdk-x`) to sn-credstore 1.2.0 or later, then restart.
 The new lock protocol cannot safely run alongside older clients.
 
 Long-running embedders can supply a `credentialProvider` in
