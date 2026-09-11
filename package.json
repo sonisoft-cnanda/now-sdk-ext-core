@@ -37,6 +37,7 @@
     "test:unit": "node --experimental-vm-modules node_modules/.bin/jest --forceExit --coverage --collectCoverage --coverageDirectory=\"./coverage\" --ci --reporters=default --reporters=jest-junit --watchAll=false --testPathIgnorePatterns=\"/integration/\"",
     "test:eval": "node --experimental-vm-modules node_modules/.bin/jest --forceExit --runInBand --runTestsByPath test/unit/auth/CredentialProvider.test.ts test/unit/auth/BrowserSessionCsrf.test.ts test/unit/auth/SessionRenewal.test.ts test/unit/comm/http/sdkDeepImports.test.ts test/unit/BackgroundScriptExecutor.test.ts test/unit/sn/xml/XMLRecordManager.test.ts test/unit/sn/updateset/UpdateSetManager.test.ts test/unit/util/CSRFTokenHelper.test.ts test/unit/policy/RequestHandlerGate.test.ts test/unit/policy/ScriptEvasion.test.ts test/unit/util/LoggerRedaction.test.ts test/unit/util/NoStdoutWrites.test.ts",
     "test:consumer": "node scripts/sdk-compat-consumer.mjs",
+    "test:consumer:cleanup": "node scripts/sdk-compat-consumer-cleanup.test.mjs",
     "test:eval:live": "node scripts/sdk-compat-live.mjs",
     "test:integration": "node --experimental-vm-modules node_modules/.bin/jest --forceExit --testPathPatterns=\"/integration/\" --watchAll=false --testTimeout=120000",
     "test:all": "node --experimental-vm-modules node_modules/.bin/jest --forceExit --coverage --collectCoverage --coverageDirectory=\"./coverage\" --ci --reporters=default --reporters=jest-junit --watchAll=false",

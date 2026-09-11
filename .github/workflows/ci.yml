@@ -31,3 +31,6 @@ jobs:
 
       - name: Unit tests
         run: npm run test:unit
+
+      - name: Consumer fixture cleanup
+        run: npm run test:consumer:cleanup
