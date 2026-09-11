@@ -6,7 +6,7 @@ import {join, resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
 
 const root = resolve(new URL('..', import.meta.url).pathname);
-const output = mkdtemp(join(process.env.PAPERCLIP_RUN_SCRATCH_DIR || tmpdir(), 'sdk-compat-'));
+const output = mkdtemp(join(tmpdir(), 'sdk-compat-'));
 
 function run(command, args, cwd, env = {}) {
     const result = spawnSync(command, args, {
