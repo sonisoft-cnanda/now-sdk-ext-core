@@ -38,7 +38,6 @@ describe('ServiceNow SDK deep imports', () => {
         const auth = await import('@servicenow/sdk-cli/dist/auth/index.js');
         const sessions = await import('@servicenow/sdk-cli-core/dist/auth/index.js');
         expect(typeof auth.getCredentials).toBe('function');
-        expect(typeof auth.getUserSession).toBe('function');
         expect(typeof sessions.getUserSession).toBe('function');
     });
     it('dist/http/index.js exposes makeRequest and parseResponseBody', async () => {
@@ -83,9 +82,9 @@ describe('ServiceNow SDK deep imports', () => {
 //    its exports map — these deep imports can be replaced with root imports and
 //    this whole file becomes unnecessary. Worth re-checking on each SDK bump.
 //
-// 2. `@servicenow/sdk-cli/dist/auth/index.js` (getCredentials). That import
-//    belongs to now-sdk-ext-cli and now-sdk-ext-mcp, not to this package —
-//    src/ does not reference @servicenow/sdk-cli at all.
+// 2. `@servicenow/sdk-cli/dist/auth/index.js` deliberately guards only
+//    getCredentials. SDK 4.12 removed getUserSession from that module; cookie
+//    bootstrap remains supplied by sdk-cli-core and is asserted separately.
 //
 // 3. `dist/command/login` and `dist/util/UISession`. Both appear in
 //    src/auth/NowSDKAuthenticationHandler.ts but are commented out, and

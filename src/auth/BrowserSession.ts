@@ -1,5 +1,5 @@
-import { getUserSession } from '@servicenow/sdk-cli/dist/auth/index.js';
-import type { UserSession } from '@servicenow/sdk-cli/dist/auth/index.js';
+import { getUserSession } from '@servicenow/sdk-cli-core/dist/auth/index.js';
+import type { UserSession } from '@servicenow/sdk-cli-core/dist/auth/index.js';
 import { resolveSessionCredentials, SessionCredentials } from './CredentialProvider';
 import { SessionAuthError } from './SessionAuthError';
 import { Cookie } from 'tough-cookie';
