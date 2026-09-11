@@ -150,6 +150,6 @@
     "node": ">=26.0.0"
   },
   "optionalDependencies": {
-    "@sonisoft/sn-credstore": "^1.2.0"
+    "@sonisoft/sn-credstore": "^1.2.1"
   }
 }

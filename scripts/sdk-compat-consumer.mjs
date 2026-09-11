@@ -13,7 +13,7 @@ function run(command, args, cwd, env = {}) {
         cwd,
         env: {...process.env, ...env},
         encoding: 'utf8',
-        timeout: 180_000,
+        timeout: 300_000,
     });
     assert.equal(result.status, 0, `${command} failed (${result.status}): ${result.stderr}`);
     return result;
@@ -41,21 +41,27 @@ await writeFile(join(bare, 'check.mjs'), `
 import assert from 'node:assert/strict';
 const before = process.env.SN_CREDSTORE_PATCHED;
 const core = await import('@sonisoft/now-sdk-ext-core');
+const sdkAuth = await import('@servicenow/sdk-cli/dist/auth/index.js');
 assert.equal(process.env.SN_CREDSTORE_PATCHED, before);
 assert.equal((await core.initCredentialStore()).reason, 'not-installed');
 assert.equal(typeof core.ServiceNowRequest, 'function');
+assert.equal(typeof sdkAuth.getCredentials, 'function');
 `);
 run('node', ['check.mjs'], bare);
 
 const optIn = await fixture('opt-in');
-run('npm', ['install', '--ignore-scripts', tarball, '@sonisoft/sn-credstore@1.2.0'], optIn);
+run('npm', ['install', '--ignore-scripts', tarball, '@sonisoft/sn-credstore@1.2.1'], optIn);
 const storePath = join(optIn, 'state', 'credentials.json');
 await writeFile(join(optIn, 'check.mjs'), `
 import assert from 'node:assert/strict';
+import '@sonisoft/sn-credstore/register';
 import {loadConfig} from '@sonisoft/sn-credstore';
 import {initCredentialStore} from '@sonisoft/now-sdk-ext-core';
+import {getCredentials, storeCredentials} from '@servicenow/sdk-cli/dist/auth/index.js';
 assert.equal(loadConfig().blobPath, process.env.SN_CRED_STORE_PATH);
 assert.deepEqual(await initCredentialStore(), {active: true});
+assert.equal(typeof getCredentials, 'function');
+assert.equal(typeof storeCredentials, 'function');
 `);
 run('node', ['check.mjs'], optIn, {
     SN_CRED_STORE: 'file',
