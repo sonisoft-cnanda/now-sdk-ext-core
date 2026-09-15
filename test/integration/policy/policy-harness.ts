@@ -13,7 +13,7 @@
 import { getCredentials } from "@servicenow/sdk-cli/dist/auth/index.js";
 import { ServiceNowInstance, ServiceNowSettingsInstance } from "../../../src/sn/ServiceNowInstance";
 import { initCredentialStore } from "../../../src/credentials/ensureShim";
-import { SN_INSTANCE_ALIAS } from "../../test_utils/test_config";
+import { DEFAULT_SN_INSTANCE_ALIAS, SN_INSTANCE_ALIAS } from "../../test_utils/test_config";
 
 export { SN_INSTANCE_ALIAS };
 
@@ -35,7 +35,7 @@ export async function resolveLiveInstance(): Promise<LiveInstance | { skip: stri
         return {
             skip:
                 `SN_INSTANCE_ALIAS is not set (currently ${JSON.stringify(alias)}). ` +
-                `Set it in .env or the environment — e.g. SN_INSTANCE_ALIAS=dev206299.`,
+                `Set it in .env or the environment — e.g. SN_INSTANCE_ALIAS=${DEFAULT_SN_INSTANCE_ALIAS}.`,
         };
     }
 

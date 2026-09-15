@@ -1,6 +1,6 @@
 import { getUserSession } from '@servicenow/sdk-cli-core/dist/auth/index.js';
 import type { UserSession } from '@servicenow/sdk-cli-core/dist/auth/index.js';
-import { resolveSessionCredentials, SessionCredentials } from './CredentialProvider';
+import { resolveSessionCredentials, sessionCredentials, SessionCredentials } from './CredentialProvider';
 import { SessionAuthError } from './SessionAuthError';
 import { Cookie } from 'tough-cookie';
 
@@ -70,8 +70,17 @@ export async function verifiedUserSession(credentials: SessionCredentials): Prom
 }
 
 /** Create a fresh, verified Playwright session using an existing SDK alias. */
-export async function createBrowserSession(options: { alias: string }): Promise<BrowserSession> {
-    const credentials = await resolveSessionCredentials(options.alias);
+export async function createBrowserSession(options: {
+    alias: string;
+    /** Pre-resolved credentials. When omitted, the alias is looked up in the SDK store. */
+    credentials?: SessionCredentials;
+}): Promise<BrowserSession> {
+    if (!options.alias.trim()) {
+        throw new SessionAuthError('NEX_AUTH_INVALID', 'An explicit credential alias is required.');
+    }
+    const credentials = options.credentials
+        ? sessionCredentials(options.credentials)
+        : await resolveSessionCredentials(options.alias);
     const session = await verifiedUserSession(credentials);
     const origin = new URL(credentials.instanceUrl);
     const serialized: unknown[] = session.cookie.serializeSync().cookies;

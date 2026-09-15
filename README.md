@@ -973,6 +973,24 @@ const session = await createBrowserSession({alias: 'dev206299'});
 const context = await browser.newContext({storageState: session.storageState});
 ```
 
+`injectBrowserSessionCdp({cdpUrl, session})` applies that same `storageState` to an
+already-running Chromium DevTools endpoint (Edge, Chrome, or Brave started with
+`--remote-debugging-port`) and navigates to `session.instanceUrl`. It does not close
+the browser. Desktop failures use `DesktopBrowserError` (`NEX_BROWSER_UNAVAILABLE` /
+`NEX_BROWSER_PROTOCOL`), not `SessionAuthError`. Cookie values are never logged.
+
+Live coverage is `test/integration/auth/DesktopBrowserSession_IT.test.ts`. It mints a
+session for `SN_INSTANCE_ALIAS` (default `dev206299` in `test/test_utils/test_config.ts`)
+and injects it into a loopback DevTools fixture. Override the alias in `.env` or the
+environment — do not embed an instance name in the test.
+
+```ts
+await injectBrowserSessionCdp({
+    cdpUrl: 'http://127.0.0.1:9222',
+    session,
+});
+```
+
 Check `initCredentialStore().active` when the application requires the headless
 backend. Imports alone never install the shim. Keep session state out of logs and
 source control. A saved state file does not renew itself.

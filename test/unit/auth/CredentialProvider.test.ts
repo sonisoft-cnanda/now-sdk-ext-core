@@ -8,7 +8,12 @@ const fresh = {
     access_token: 'synthetic-access', refresh_token: 'synthetic-refresh', token_type: 'Bearer',
     expires_at: Math.floor(Date.now() / 1000) + 3600,
 };
-afterEach(() => { lookup.mockReset(); delete process.env.SN_SDK_SESSION_BEARER_TOKEN; });
+afterEach(() => {
+    lookup.mockReset();
+    delete process.env.SN_SDK_SESSION_BEARER_TOKEN;
+    delete process.env.SN_SDK_SESSION_TOKEN;
+    delete process.env.SN_SDK_NODE_ENV;
+});
 
 describe('SDK credential provider', () => {
     it('coalesces concurrent lookup and returns fresh SDK credentials', async () => {
@@ -37,5 +42,23 @@ describe('SDK credential provider', () => {
         process.env.SN_SDK_SESSION_BEARER_TOKEN = 'synthetic-override';
         await expect(resolveSessionCredentials('fixture')).rejects.toMatchObject({code: 'NEX_AUTH_INVALID'});
         expect(lookup).not.toHaveBeenCalled();
+    });
+    it('rejects a blank alias and other SDK session overrides', async () => {
+        await expect(resolveSessionCredentials('')).rejects.toMatchObject({code: 'NEX_AUTH_INVALID'});
+        await expect(resolveSessionCredentials('  ')).rejects.toMatchObject({code: 'NEX_AUTH_INVALID'});
+        expect(lookup).not.toHaveBeenCalled();
+        process.env.SN_SDK_SESSION_TOKEN = 'synthetic-override';
+        await expect(resolveSessionCredentials('fixture')).rejects.toMatchObject({code: 'NEX_AUTH_INVALID'});
+        delete process.env.SN_SDK_SESSION_TOKEN;
+        process.env.SN_SDK_NODE_ENV = 'SN_SDK_CI_INSTALL';
+        await expect(resolveSessionCredentials('fixture')).rejects.toMatchObject({code: 'NEX_AUTH_INVALID'});
+        expect(lookup).not.toHaveBeenCalled();
+    });
+    it('accepts stored basic credentials', async () => {
+        lookup.mockResolvedValue({
+            type: 'basic', instanceUrl: 'https://example.service-now.com',
+            username: 'tester', password: 'synthetic-password',
+        });
+        await expect(resolveSessionCredentials('fixture')).resolves.toMatchObject({type: 'basic', username: 'tester'});
     });
 });

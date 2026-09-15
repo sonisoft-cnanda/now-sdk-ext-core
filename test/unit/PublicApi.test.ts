@@ -155,7 +155,8 @@ function exportedNames(): string[] {
     it('exports browser sessions and alias-bound credential renewal', () => {
         const names = exportedNames();
         for (const name of ['createBrowserSession', 'BrowserSession', 'CredentialProvider',
-            'resolveSessionCredentials', 'SessionAuthError']) expect(names).toContain(name);
+            'resolveSessionCredentials', 'SessionAuthError', 'injectBrowserSessionCdp',
+            'DesktopBrowserError', 'isDesktopBrowserError']) expect(names).toContain(name);
     });
 
     it('does not leak the CometD transport internals', () => {
