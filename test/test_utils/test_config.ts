@@ -1,7 +1,16 @@
 import 'dotenv/config';
 
 /**
- * ServiceNow instance alias used for integration tests.
- * Configure via .env file or SN_INSTANCE_ALIAS environment variable.
+ * Default live-test alias. Change it here — not in individual tests — or override
+ * with `SN_INSTANCE_ALIAS` in the environment or a local `.env`.
+ *
+ *   SN_INSTANCE_ALIAS=strongtiedev npm run test:integration
  */
-export const SN_INSTANCE_ALIAS: string = process.env.SN_INSTANCE_ALIAS || '<instance_alias>';
+export const DEFAULT_SN_INSTANCE_ALIAS = 'dev206299';
+
+/**
+ * ServiceNow instance alias used for every live test.
+ * Tests must import this constant instead of embedding an instance name.
+ */
+export const SN_INSTANCE_ALIAS: string =
+    process.env.SN_INSTANCE_ALIAS?.trim() || DEFAULT_SN_INSTANCE_ALIAS;

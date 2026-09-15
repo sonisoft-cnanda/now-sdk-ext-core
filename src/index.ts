@@ -1,6 +1,7 @@
 export * from './auth/AuthenticationHandlerFactory.js';
 export * from './auth/BrowserSession.js';
 export * from './auth/CredentialProvider.js';
+export * from './auth/DesktopBrowserSession.js';
 export * from './auth/IAuthenticationHandler.js';
 export * from './auth/NowSDKAuthenticationHandler.js';
 export * from './auth/SessionAuthError.js';
