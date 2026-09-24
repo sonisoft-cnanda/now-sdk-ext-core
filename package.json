@@ -90,7 +90,7 @@
     "@semantic-release/git": "^10.0.1",
     "@semantic-release/github": "^12.0.9",
     "@semantic-release/npm": "^13.0.0",
-    "@types/async": "3.2.25",
+    "@types/async": "3.2.26",
     "@types/bluebird": "3.5.42",
     "@types/chai": "5.2.3",
     "@types/crypto-js": "^4.2.2",
