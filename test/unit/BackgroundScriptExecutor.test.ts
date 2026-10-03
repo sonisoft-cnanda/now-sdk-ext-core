@@ -12,6 +12,8 @@ import { AuthenticationHandlerFactory } from '../../src/auth/AuthenticationHandl
 import { RequestHandlerFactory } from '../../src/comm/http/RequestHandlerFactory';
 import { MockAuthenticationHandler } from './__mocks__/servicenow-sdk-mocks';
 import { SessionManager } from '../../src/comm/http/SessionManager';
+import { ScriptScopeError, isScriptScopeError } from '../../src/exception/ScriptScopeError';
+import { SessionAuthError } from '../../src/auth/SessionAuthError';
 
 // Mock getCredentials
 const mockGetCredentials = createGetCredentialsMock();
@@ -40,6 +42,23 @@ const mockScopeResponse = (scopeName: string, sysId: string = GLOBAL_SCOPE_SYS_I
     headers: {},
     config: {},
     bodyObject: { result: [{ sys_id: sysId, scope: scopeName, name: scopeName === 'global' ? 'Global' : scopeName }] }
+} as IHttpResponse<unknown>);
+
+const csrfResponse = () => ({
+    data: `<input name="sysparm_ck" type="hidden" value="testtoken123">`,
+    status: 200,
+    statusText: 'OK',
+    headers: { 'x-is-logged-in': 'true' },
+    config: {}
+} as IHttpResponse<string>);
+
+const tableResponse = (rows: Array<Record<string, string>>) => ({
+    data: JSON.stringify({ result: rows }),
+    status: 200,
+    statusText: 'OK',
+    headers: {},
+    config: {},
+    bodyObject: { result: rows }
 } as IHttpResponse<unknown>);
 
 describe('BackgroundScriptExecutor - Unit Tests', () => {
@@ -1054,6 +1073,204 @@ System: end
             await expect(
                 executor.executeScriptAuto('gs.info("both fail")')
             ).rejects.toThrow('Failed to create sys_trigger');
+        });
+
+        it('should NOT fall back to sys_trigger when the scope cannot be used', async () => {
+            // sys_trigger takes no scope, so a fallback would run the script in global.
+            mockAuthHandler.isLoggedIn = jest.fn().mockReturnValue(true);
+            mockRequestHandler.get
+                .mockResolvedValueOnce(csrfResponse())
+                .mockResolvedValueOnce(tableResponse([]))
+                .mockResolvedValueOnce(tableResponse([]));
+
+            await expect(
+                executor.executeScriptAuto('gs.info("scoped")', 'x_typo_app')
+            ).rejects.toMatchObject({ code: 'NEX_SCRIPT_SCOPE_UNAVAILABLE', reason: 'SCOPE_NOT_FOUND' });
+            expect(mockRequestHandler.post).not.toHaveBeenCalled();
+        });
+    });
+
+    describe('executeScript - scope resolution', () => {
+        const SCRIPT_RESULT_XML = `<HTML><BODY><PRE class="outputtext">*** Script: ok
+</PRE><div></div></BODY></HTML>`;
+
+        const lookupCall = (n: number) => mockRequestHandler.get.mock.calls[n][0] as any;
+        const postedScope = () => ((mockRequestHandler.post.mock.calls[0][0] as any).body as URLSearchParams).get('sys_scope');
+
+        beforeEach(() => {
+            mockAuthHandler.isLoggedIn = jest.fn().mockReturnValue(true);
+            mockRequestHandler.post.mockResolvedValue({
+                data: SCRIPT_RESULT_XML,
+                status: 200,
+                statusText: 'OK',
+                headers: {},
+                config: {}
+            } as IHttpResponse<string>);
+        });
+
+        it('should resolve "global" through sys_scope source=global, not scope=global alone', async () => {
+            mockRequestHandler.get
+                .mockResolvedValueOnce(csrfResponse())
+                .mockResolvedValueOnce(tableResponse([{ sys_id: 'global', scope: 'global', name: 'Global' }]));
+
+            await executor.executeScript('gs.info("x")', 'global', instance);
+
+            expect(lookupCall(1).path).toBe('/api/now/table/sys_scope');
+            expect(lookupCall(1).query.sysparm_query).toBe('source=global^scope=global');
+            expect(postedScope()).toBe('global');
+        });
+
+        it('should treat "Global" as the Global scope rather than an application lookup', async () => {
+            mockRequestHandler.get
+                .mockResolvedValueOnce(csrfResponse())
+                .mockResolvedValueOnce(tableResponse([{ sys_id: 'global', scope: 'global', name: 'Global' }]));
+
+            await executor.executeScript('gs.info("x")', 'Global', instance);
+
+            expect(lookupCall(1).path).toBe('/api/now/table/sys_scope');
+            expect(lookupCall(1).query.sysparm_query).toBe('source=global^scope=global');
+        });
+
+        it('should resolve any other scope name through sys_app', async () => {
+            const appSysId = 'f1e2d3c4b5a6978801234567abcdef90';
+            mockRequestHandler.get
+                .mockResolvedValueOnce(csrfResponse())
+                .mockResolvedValueOnce(tableResponse([{ sys_id: appSysId, scope: 'x_my_app', name: 'My App' }]));
+
+            await executor.executeScript('gs.info("x")', 'x_my_app', instance);
+
+            expect(lookupCall(1).path).toBe('/api/now/table/sys_app');
+            expect(lookupCall(1).query.sysparm_query).toBe('scope=x_my_app');
+            expect(postedScope()).toBe(appSysId);
+        });
+
+        it('should pass a 32-character sys_id through without a lookup', async () => {
+            const sysId = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6';
+            mockRequestHandler.get.mockResolvedValueOnce(csrfResponse());
+
+            await executor.executeScript('gs.info("x")', sysId, instance);
+
+            expect(mockRequestHandler.get).toHaveBeenCalledTimes(1);
+            expect(postedScope()).toBe(sysId);
+        });
+
+        it('should cache a resolved scope for the life of the executor', async () => {
+            mockRequestHandler.get
+                .mockResolvedValueOnce(csrfResponse())
+                .mockResolvedValueOnce(tableResponse([{ sys_id: GLOBAL_SCOPE_SYS_ID, scope: 'x_my_app', name: 'My App' }]))
+                .mockResolvedValueOnce(csrfResponse());
+
+            await executor.executeScript('gs.info("1")', 'x_my_app', instance);
+            await executor.executeScript('gs.info("2")', 'x_my_app', instance);
+
+            const tablePaths = mockRequestHandler.get.mock.calls
+                .map((c: any) => c[0].path)
+                .filter((p: string) => p.startsWith('/api/now/table/'));
+            expect(tablePaths).toEqual(['/api/now/table/sys_app']);
+        });
+
+        it('should explain that an installed store app cannot be used, naming it', async () => {
+            mockRequestHandler.get
+                .mockResolvedValueOnce(csrfResponse())
+                .mockResolvedValueOnce(tableResponse([]))
+                .mockResolvedValueOnce(tableResponse([{
+                    sys_id: '040813ec1b374ed05048a979b04bcbc5',
+                    scope: 'x_acme_cat_util',
+                    name: 'Catalog Utilities',
+                    sys_class_name: 'sys_store_app',
+                    active: 'true'
+                }]));
+
+            const error = await executor.executeScript('gs.info("x")', 'x_acme_cat_util', instance)
+                .catch((e: unknown) => e);
+
+            expect(isScriptScopeError(error)).toBe(true);
+            expect(error).toBeInstanceOf(ScriptScopeError);
+            const scopeError = error as ScriptScopeError;
+            expect(scopeError.reason).toBe('NOT_A_DEVELOPED_APP');
+            expect(scopeError.scope).toBe('x_acme_cat_util');
+            expect(scopeError.foundAs).toEqual({
+                sysId: '040813ec1b374ed05048a979b04bcbc5',
+                name: 'Catalog Utilities',
+                className: 'sys_store_app',
+                active: true
+            });
+            // Self-contained: the MCP and the CLI print only the message.
+            expect(scopeError.message).toContain('Catalog Utilities');
+            expect(scopeError.message).toContain('sys_store_app');
+            expect(scopeError.message).toContain('"global"');
+            expect(scopeError.message).toContain('sys_app');
+            expect(scopeError.message).toContain(scopeError.remediation);
+            expect(scopeError.message).not.toContain('Error executing script');
+
+            // The diagnostic lookup prefers the live row over an App Customization leftover.
+            expect(lookupCall(2).path).toBe('/api/now/table/sys_scope');
+            expect(lookupCall(2).query.sysparm_query).toBe('scope=x_acme_cat_util^ORDERBYDESCactive');
+            expect(mockRequestHandler.post).not.toHaveBeenCalled();
+        });
+
+        it('should report a scope that matches nothing as not found', async () => {
+            mockRequestHandler.get
+                .mockResolvedValueOnce(csrfResponse())
+                .mockResolvedValueOnce(tableResponse([]))
+                .mockResolvedValueOnce(tableResponse([]));
+
+            await expect(
+                executor.executeScript('gs.info("x")', 'x_does_not_exist', instance)
+            ).rejects.toMatchObject({
+                code: 'NEX_SCRIPT_SCOPE_UNAVAILABLE',
+                reason: 'SCOPE_NOT_FOUND',
+                scope: 'x_does_not_exist'
+            });
+            expect(mockRequestHandler.post).not.toHaveBeenCalled();
+        });
+
+        it('should refuse a name that would rewrite the encoded query, without looking it up', async () => {
+            mockRequestHandler.get.mockResolvedValueOnce(csrfResponse());
+
+            await expect(
+                executor.executeScript('gs.info("x")', 'x_app^ORscope=global', instance)
+            ).rejects.toMatchObject({ reason: 'INVALID_SCOPE_NAME' });
+            expect(mockRequestHandler.get).toHaveBeenCalledTimes(1);
+            expect(mockRequestHandler.post).not.toHaveBeenCalled();
+        });
+
+        it('should report a missing Global record distinctly', async () => {
+            mockRequestHandler.get
+                .mockResolvedValueOnce(csrfResponse())
+                .mockResolvedValueOnce(tableResponse([]));
+
+            await expect(
+                executor.executeScript('gs.info("x")', 'global', instance)
+            ).rejects.toMatchObject({ reason: 'GLOBAL_NOT_FOUND' });
+        });
+
+        it('should report a failed lookup as LOOKUP_FAILED, keeping the HTTP error as cause', async () => {
+            const httpError = new Error('Error during request. Status: 403 Body: {"error":"ACL"}');
+            mockRequestHandler.get
+                .mockResolvedValueOnce(csrfResponse())
+                .mockRejectedValueOnce(httpError);
+
+            const error = await executor.executeScript('gs.info("x")', 'x_my_app', instance)
+                .catch((e: unknown) => e) as ScriptScopeError;
+
+            expect(error.reason).toBe('LOOKUP_FAILED');
+            expect(error.message).toContain('sys_app');
+            expect(error.message).toContain('Status: 403');
+            expect(error.cause).toBe(httpError);
+        });
+
+        it('should let errors that already identify themselves pass through the lookup untouched', async () => {
+            const sessionError = new SessionAuthError('NEX_SESSION_EXPIRED', 'Session authentication failed.');
+            mockRequestHandler.get
+                .mockResolvedValueOnce(csrfResponse())
+                .mockRejectedValueOnce(sessionError);
+
+            const error = await executor.executeScript('gs.info("x")', 'x_my_app', instance)
+                .catch((e: unknown) => e) as Error;
+
+            expect(isScriptScopeError(error)).toBe(false);
+            expect(error.cause).toBe(sessionError);
         });
     });
 });
