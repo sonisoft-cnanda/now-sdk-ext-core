@@ -999,6 +999,10 @@ When upgrading a shared store, stop all clients first, upgrade every client
 (including standalone `now-sdk-x`) to sn-credstore 1.2.0 or later, then restart.
 The new lock protocol cannot safely run alongside older clients.
 
+sn-credstore also refuses `@servicenow/sdk-cli` versions it has not reviewed, including
+the copy behind a globally installed `now-sdk`. ServiceNow SDK 4.13.x needs sn-credstore
+1.4.0 or later, which this package requires.
+
 Long-running embedders can supply a `credentialProvider` in
 `ServiceNowSettingsInstance`:
 
