@@ -46,7 +46,9 @@ export interface ExecuteFlowOptions {
 
     /**
      * Scope context for BackgroundScriptExecutor.
-     * Can be a scope name ("global", "x_myapp_custom") or a 32-character sys_id.
+     * Can be "global", the scope of an application developed on the instance
+     * (a sys_app, e.g. "x_myapp_custom"), or a 32-character sys_id. Installed store
+     * apps cannot be used — Scripts - Background does not run in them.
      * Default: uses the FlowManager's default scope.
      */
     scope?: string;

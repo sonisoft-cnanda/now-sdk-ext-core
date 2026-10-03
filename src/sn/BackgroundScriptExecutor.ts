@@ -21,6 +21,7 @@ import { isNil } from "../util/utils";
 import { CSRFTokenHelper } from "../util/CSRFTokenHelper";
 import { TableAPIRequest } from "../comm/http/TableAPIRequest";
 import { SessionManager } from "../comm/http/SessionManager";
+import { ScriptScopeError, ScriptScopeMatch, isScriptScopeError } from "../exception/ScriptScopeError";
 
 
 export class BackgroundScriptExecutor {
@@ -124,6 +125,14 @@ export class BackgroundScriptExecutor {
             if (response.status == 200) {
                 const bodyXml:string = response?.data;
                 if(bodyXml){
+                    // The instance's refusal arrives as HTTP 200 with this bare body.
+                    // Parsed, it would look like a script that ran and printed nothing.
+                    if (typeof bodyXml === "string" && bodyXml.trim().toLowerCase() === "not authorized") {
+                        throw new Error(
+                            `The instance answered "not authorized" and did not run the script (scope '${scope}'). ` +
+                            `Scripts - Background refuses scopes it cannot run in, and users without the rights to use it.`
+                        );
+                    }
                     const resultObj:BackgroundScriptExecutionResult = this.parseScriptResult(bodyXml);
                     return resultObj;
                 }else{
@@ -134,6 +143,11 @@ export class BackgroundScriptExecutor {
                 throw new Error(`Script Execution Request resulted in ${response.status}`);
             }
         } catch (error) {
+            // Unwrapped, so consumers can recognise it and show its remediation; its
+            // message already says what went wrong and what to do.
+            if (isScriptScopeError(error)) {
+                throw error;
+            }
             const err:Error = error as Error;
             throw new Error(`Error executing script: ${err.message}`, { cause: error });
         }
@@ -297,8 +311,10 @@ export class BackgroundScriptExecutor {
 
     /**
      * Execute a script using the best available method.
-     * First tries the standard executeScript() (background script page),
-     * and on failure falls back to executeScriptViaTrigger().
+     * First tries the standard executeScript() (background script page). If that
+     * fails and the script targets global, falls back to executeScriptViaTrigger().
+     * A script for any other scope is never moved to sys_trigger, which has no scope
+     * and would run it in global; its original error is rethrown instead.
      *
      * @param script The script to execute
      * @param scope Optional scope for the background script execution
@@ -310,14 +326,26 @@ export class BackgroundScriptExecutor {
         // the refused script would run anyway — later, on a schedule, silently.
         this.assertScriptPermitted(script);
 
+        const targetScope = scope || this.scope;
         try {
             this._logger.info("Attempting script execution via background script page...");
-            const result = await this.executeScript(script, scope || this.scope);
+            const result = await this.executeScript(script, targetScope);
             return result;
         } catch (error) {
             // Second layer: even if the check above is ever refactored away, a refusal
             // must never be treated as "the page failed, try the other route".
             if (isPolicyRefusal(error)) {
+                throw error;
+            }
+            // Nor is an unusable scope.
+            if (isScriptScopeError(error)) {
+                throw error;
+            }
+            // sys_trigger takes no scope, so it can only stand in for a script meant for
+            // global. For any other scope — a page failure, or the instance answering
+            // "not authorized" for a scope that passed the lookup — falling back would
+            // run a script meant for one application in global instead.
+            if (typeof targetScope !== "string" || targetScope.toLowerCase() !== "global") {
                 throw error;
             }
             const err: Error = error as Error;
@@ -343,44 +371,164 @@ export class BackgroundScriptExecutor {
     /**
      * Resolve a scope value to a sys_id for use with /sys.scripts.do.
      * ServiceNow's background script form expects a sys_id in the sys_scope field,
-     * not a scope name. This method handles:
-     * - 32-char hex strings: passed through as-is (already a sys_id)
-     * - Scope names (e.g., "global", "x_myapp_custom"): looked up in sys_scope table
+     * not a scope name, and only runs in Global or in an application developed on
+     * the instance (sys_app). This method handles:
+     * - 32-char hex strings: checked against sys_app and sent unchanged
+     * - "global": the sys_scope record with source=global. scope=global alone is NOT
+     *   unique — every global-scoped application also carries scope=global.
+     * - Any other name: looked up in sys_app.
+     * A sys_id or name that is not a sys_app (an installed store app, or nothing at
+     * all) throws a ScriptScopeError explaining which.
      * Results are cached per executor instance to avoid repeated lookups.
      */
     private async _resolveScopeToSysId(scope: string): Promise<string> {
-        const hexPattern = /^[0-9a-fA-F]{32}$/;
-        if (hexPattern.test(scope)) {
-            return scope;
+        if (this._scopeCache.has(scope)) {
+            return this._scopeCache.get(scope);
         }
 
-        if (this._scopeCache.has(scope)) {
-            return this._scopeCache.get(scope)!;
+        // A sys_id is checked too, not trusted: /sys.scripts.do answers a store app's
+        // sys_id with a bare "not authorized" and HTTP 200, which otherwise reads as a
+        // run that printed nothing.
+        if (/^[0-9a-fA-F]{32}$/.test(scope)) {
+            this._logger.info(`Validating scope sys_id '${scope}'...`);
+            const [app] = await this._lookupScope(scope, 'sys_app', {
+                sysparm_query: `sys_id=${scope}`,
+                sysparm_limit: 1,
+                sysparm_fields: 'sys_id,scope,name'
+            });
+            if (app) {
+                this._logger.info(`Scope sys_id '${scope}' is ${app.name} (${app.scope})`);
+                this._scopeCache.set(scope, scope);
+                return scope;
+            }
+            throw await this._explainUnrunnableScope(scope, 'sys_id');
+        }
+
+        // The name goes into an encoded query, so `^` or `=` would rewrite the query
+        // itself — `x^ORscope=global` must not quietly resolve to something else.
+        if (!/^[A-Za-z0-9_.-]+$/.test(scope)) {
+            throw new ScriptScopeError({
+                scope,
+                reason: 'INVALID_SCOPE_NAME',
+                problem: `'${scope}' is not a valid application scope name.`,
+                remediation: `Pass "global", the scope of an application developed on this instance (e.g. "x_acme_myapp"), or a 32-character sys_id.`
+            });
         }
 
         this._logger.info(`Resolving scope name '${scope}' to sys_id...`);
-        const query: Record<string, string | number> = {
-            sysparm_query: `scope=${scope}`,
+
+        // Case-insensitive on purpose: "Global" sent to sys_app would match the
+        // global-scoped applications, because the instance compares case-insensitively.
+        const isGlobal = scope.toLowerCase() === 'global';
+        const table = isGlobal ? 'sys_scope' : 'sys_app';
+        const results = await this._lookupScope(scope, table, {
+            sysparm_query: isGlobal ? 'source=global^scope=global' : `scope=${scope}`,
             sysparm_limit: 1,
             sysparm_fields: 'sys_id,scope,name'
-        };
-
-        const response = await this._tableAPI.get<ScopeTableResult>('sys_scope', query);
-
-        if (response.status === 200 && response.bodyObject?.result) {
-            const results = response.bodyObject.result;
-            if (results.length > 0) {
-                const sysId = results[0].sys_id;
-                this._logger.info(`Resolved scope '${scope}' → sys_id '${sysId}' (${results[0].name})`);
-                this._scopeCache.set(scope, sysId);
-                return sysId;
-            }
+        });
+        if (results.length > 0) {
+            const sysId = results[0].sys_id;
+            this._logger.info(`Resolved scope '${scope}' → sys_id '${sysId}' (${results[0].name})`);
+            this._scopeCache.set(scope, sysId);
+            return sysId;
         }
 
-        throw new Error(
-            `Scope '${scope}' not found in sys_scope table. ` +
-            `Use a valid scope name (e.g., "global", "x_myapp_custom") or a 32-character sys_id.`
-        );
+        if (isGlobal) {
+            throw new ScriptScopeError({
+                scope,
+                reason: 'GLOBAL_NOT_FOUND',
+                problem: `Could not find the Global scope record (sys_scope where source=global) on this instance.`,
+                remediation: `Check that the authenticated user can read the sys_scope table.`
+            });
+        }
+
+        throw await this._explainUnrunnableScope(scope);
+    }
+
+    /**
+     * Builds the error for a scope name or sys_id that is not a sys_app, after finding
+     * out what — if anything — it IS. "Not found" and "exists but is a store app" need
+     * different advice, and only one extra lookup on the failure path tells them apart.
+     */
+    private async _explainUnrunnableScope(scope: string, by: 'scope' | 'sys_id' = 'scope'): Promise<ScriptScopeError> {
+        const [match] = await this._lookupScope(scope, 'sys_scope', {
+            // An App Customization leaves a second, inactive row with the same scope;
+            // describe the live application, not that leftover.
+            sysparm_query: `${by}=${scope}^ORDERBYDESCactive`,
+            sysparm_limit: 1,
+            sysparm_fields: 'sys_id,scope,name,sys_class_name,active'
+        });
+        if (!match) {
+            return new ScriptScopeError({
+                scope,
+                reason: 'SCOPE_NOT_FOUND',
+                problem: `No application with ${by} '${scope}' exists on this instance.`,
+                remediation: by === 'sys_id'
+                    ? `Check the sys_id. Scripts can run in "global" or in an application developed on this instance; ` +
+                      `those applications are listed in the sys_app table.`
+                    : `Check the spelling. Scripts can run in "global" or in an application developed on this instance; ` +
+                      `the scopes of those applications are listed in the sys_app table.`
+            });
+        }
+
+        const foundAs: ScriptScopeMatch = {
+            sysId: match.sys_id,
+            scope: match.scope,
+            name: match.name,
+            className: match.sys_class_name,
+            active: String(match.active) === 'true'
+        };
+        const kind = foundAs.className === 'sys_store_app'
+            ? 'an installed store/repository application (sys_store_app)'
+            : `a ${foundAs.className || 'sys_scope'} record, not an application developed on this instance (sys_app)`;
+        const subject = by === 'sys_id'
+            ? `Scope sys_id '${scope}' (${foundAs.name}, scope '${foundAs.scope}')`
+            : `Scope '${scope}' (${foundAs.name})`;
+        return new ScriptScopeError({
+            scope,
+            reason: 'NOT_A_DEVELOPED_APP',
+            foundAs,
+            problem:
+                `${subject} is ${kind}. Scripts - Background can only run in "global" ` +
+                `or in an application developed on this instance (sys_app).`,
+            remediation:
+                `Run the script in "global" and call the application's API fully qualified ` +
+                `(e.g. ${foundAs.scope || scope}.MyScriptInclude), or use an application developed on this instance.`
+        });
+    }
+
+    /**
+     * One Table API read for scope resolution. A plain HTTP failure becomes a
+     * LOOKUP_FAILED ScriptScopeError naming the table, keeping the original text so
+     * transient-failure detection on the message still works. Errors that already
+     * identify themselves — a policy refusal, or anything with a `code` (session,
+     * stale instance, network) — pass through untouched.
+     */
+    private async _lookupScope(scope: string, table: string, query: Record<string, string | number>): Promise<ScopeTableResult["result"]> {
+        let response: IHttpResponse<ScopeTableResult>;
+        try {
+            response = await this._tableAPI.get<ScopeTableResult>(table, query);
+        } catch (error) {
+            if (isPolicyRefusal(error) || (error as { code?: unknown })?.code !== undefined) {
+                throw error;
+            }
+            throw new ScriptScopeError({
+                scope,
+                reason: 'LOOKUP_FAILED',
+                problem: `Could not look up scope '${scope}' in ${table}: ${(error as Error)?.message ?? String(error)}`,
+                remediation: `Check that the authenticated user can read the ${table} table, then retry.`
+            }, { cause: error });
+        }
+
+        if (response?.status === 200 && Array.isArray(response.bodyObject?.result)) {
+            return response.bodyObject.result;
+        }
+        throw new ScriptScopeError({
+            scope,
+            reason: 'LOOKUP_FAILED',
+            problem: `Could not look up scope '${scope}': the ${table} query returned HTTP ${response?.status ?? 'no response'}.`,
+            remediation: `Check that the authenticated user can read the ${table} table, then retry.`
+        });
     }
 
     /**
@@ -545,5 +693,5 @@ interface TriggerRecordResponse {
 }
 
 interface ScopeTableResult {
-    result: Array<{ sys_id: string; scope: string; name: string }>;
+    result: Array<{ sys_id: string; scope: string; name: string; sys_class_name?: string; active?: string | boolean }>;
 }
