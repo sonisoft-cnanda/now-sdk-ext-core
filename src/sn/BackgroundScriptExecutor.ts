@@ -125,6 +125,14 @@ export class BackgroundScriptExecutor {
             if (response.status == 200) {
                 const bodyXml:string = response?.data;
                 if(bodyXml){
+                    // The instance's refusal arrives as HTTP 200 with this bare body.
+                    // Parsed, it would look like a script that ran and printed nothing.
+                    if (typeof bodyXml === "string" && bodyXml.trim().toLowerCase() === "not authorized") {
+                        throw new Error(
+                            `The instance answered "not authorized" and did not run the script (scope '${scope}'). ` +
+                            `Scripts - Background refuses scopes it cannot run in, and users without the rights to use it.`
+                        );
+                    }
                     const resultObj:BackgroundScriptExecutionResult = this.parseScriptResult(bodyXml);
                     return resultObj;
                 }else{
@@ -356,21 +364,35 @@ export class BackgroundScriptExecutor {
      * ServiceNow's background script form expects a sys_id in the sys_scope field,
      * not a scope name, and only runs in Global or in an application developed on
      * the instance (sys_app). This method handles:
-     * - 32-char hex strings: passed through as-is (already a sys_id)
+     * - 32-char hex strings: checked against sys_app and sent unchanged
      * - "global": the sys_scope record with source=global. scope=global alone is NOT
      *   unique — every global-scoped application also carries scope=global.
-     * - Any other name: looked up in sys_app. A name that is not a sys_app (an installed
-     *   store app, or nothing at all) throws a ScriptScopeError explaining which.
+     * - Any other name: looked up in sys_app.
+     * A sys_id or name that is not a sys_app (an installed store app, or nothing at
+     * all) throws a ScriptScopeError explaining which.
      * Results are cached per executor instance to avoid repeated lookups.
      */
     private async _resolveScopeToSysId(scope: string): Promise<string> {
-        const hexPattern = /^[0-9a-fA-F]{32}$/;
-        if (hexPattern.test(scope)) {
-            return scope;
-        }
-
         if (this._scopeCache.has(scope)) {
             return this._scopeCache.get(scope);
+        }
+
+        // A sys_id is checked too, not trusted: /sys.scripts.do answers a store app's
+        // sys_id with a bare "not authorized" and HTTP 200, which otherwise reads as a
+        // run that printed nothing.
+        if (/^[0-9a-fA-F]{32}$/.test(scope)) {
+            this._logger.info(`Validating scope sys_id '${scope}'...`);
+            const [app] = await this._lookupScope(scope, 'sys_app', {
+                sysparm_query: `sys_id=${scope}`,
+                sysparm_limit: 1,
+                sysparm_fields: 'sys_id,scope,name'
+            });
+            if (app) {
+                this._logger.info(`Scope sys_id '${scope}' is ${app.name} (${app.scope})`);
+                this._scopeCache.set(scope, scope);
+                return scope;
+            }
+            throw await this._explainUnrunnableScope(scope, 'sys_id');
         }
 
         // The name goes into an encoded query, so `^` or `=` would rewrite the query
@@ -415,15 +437,15 @@ export class BackgroundScriptExecutor {
     }
 
     /**
-     * Builds the error for a name that is not a sys_app, after finding out what — if
-     * anything — it IS. "Not found" and "exists but is a store app" need different
-     * advice, and only one extra lookup on the failure path tells them apart.
+     * Builds the error for a scope name or sys_id that is not a sys_app, after finding
+     * out what — if anything — it IS. "Not found" and "exists but is a store app" need
+     * different advice, and only one extra lookup on the failure path tells them apart.
      */
-    private async _explainUnrunnableScope(scope: string): Promise<ScriptScopeError> {
+    private async _explainUnrunnableScope(scope: string, by: 'scope' | 'sys_id' = 'scope'): Promise<ScriptScopeError> {
         const [match] = await this._lookupScope(scope, 'sys_scope', {
             // An App Customization leaves a second, inactive row with the same scope;
             // describe the live application, not that leftover.
-            sysparm_query: `scope=${scope}^ORDERBYDESCactive`,
+            sysparm_query: `${by}=${scope}^ORDERBYDESCactive`,
             sysparm_limit: 1,
             sysparm_fields: 'sys_id,scope,name,sys_class_name,active'
         });
@@ -431,15 +453,18 @@ export class BackgroundScriptExecutor {
             return new ScriptScopeError({
                 scope,
                 reason: 'SCOPE_NOT_FOUND',
-                problem: `No application with scope '${scope}' exists on this instance.`,
-                remediation:
-                    `Check the spelling. Scripts can run in "global" or in an application developed on this instance; ` +
-                    `the scopes of those applications are listed in the sys_app table.`
+                problem: `No application with ${by} '${scope}' exists on this instance.`,
+                remediation: by === 'sys_id'
+                    ? `Check the sys_id. Scripts can run in "global" or in an application developed on this instance; ` +
+                      `those applications are listed in the sys_app table.`
+                    : `Check the spelling. Scripts can run in "global" or in an application developed on this instance; ` +
+                      `the scopes of those applications are listed in the sys_app table.`
             });
         }
 
         const foundAs: ScriptScopeMatch = {
             sysId: match.sys_id,
+            scope: match.scope,
             name: match.name,
             className: match.sys_class_name,
             active: String(match.active) === 'true'
@@ -447,16 +472,19 @@ export class BackgroundScriptExecutor {
         const kind = foundAs.className === 'sys_store_app'
             ? 'an installed store/repository application (sys_store_app)'
             : `a ${foundAs.className || 'sys_scope'} record, not an application developed on this instance (sys_app)`;
+        const subject = by === 'sys_id'
+            ? `Scope sys_id '${scope}' (${foundAs.name}, scope '${foundAs.scope}')`
+            : `Scope '${scope}' (${foundAs.name})`;
         return new ScriptScopeError({
             scope,
             reason: 'NOT_A_DEVELOPED_APP',
             foundAs,
             problem:
-                `Scope '${scope}' (${foundAs.name}) is ${kind}. Scripts - Background can only run in "global" ` +
+                `${subject} is ${kind}. Scripts - Background can only run in "global" ` +
                 `or in an application developed on this instance (sys_app).`,
             remediation:
                 `Run the script in "global" and call the application's API fully qualified ` +
-                `(e.g. ${scope}.MyScriptInclude), or use an application developed on this instance.`
+                `(e.g. ${foundAs.scope || scope}.MyScriptInclude), or use an application developed on this instance.`
         });
     }
 

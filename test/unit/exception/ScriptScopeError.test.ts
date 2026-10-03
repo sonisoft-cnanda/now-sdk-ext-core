@@ -13,7 +13,7 @@ const storeAppError = () => new ScriptScopeError({
     reason: "NOT_A_DEVELOPED_APP",
     problem: "Scope 'x_acme_util' (Acme Utilities) is an installed store/repository application (sys_store_app).",
     remediation: "Run the script in \"global\" and call the application's API fully qualified.",
-    foundAs: { sysId: "abc", name: "Acme Utilities", className: "sys_store_app", active: true }
+    foundAs: { sysId: "abc", scope: "x_acme_util", name: "Acme Utilities", className: "sys_store_app", active: true }
 });
 
 describe("ScriptScopeError", () => {
@@ -52,7 +52,7 @@ describe("ScriptScopeError", () => {
             remediation: "Run the script in \"global\" and call the application's API fully qualified.",
             scope: "x_acme_util",
             reason: "NOT_A_DEVELOPED_APP",
-            foundAs: { sysId: "abc", name: "Acme Utilities", className: "sys_store_app", active: true }
+            foundAs: { sysId: "abc", scope: "x_acme_util", name: "Acme Utilities", className: "sys_store_app", active: true }
         });
     });
 });

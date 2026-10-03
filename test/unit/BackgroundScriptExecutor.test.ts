@@ -1144,14 +1144,81 @@ System: end
             expect(postedScope()).toBe(appSysId);
         });
 
-        it('should pass a 32-character sys_id through without a lookup', async () => {
+        it('should check a 32-character sys_id against sys_app and send it unchanged', async () => {
             const sysId = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6';
-            mockRequestHandler.get.mockResolvedValueOnce(csrfResponse());
+            mockRequestHandler.get
+                .mockResolvedValueOnce(csrfResponse())
+                .mockResolvedValueOnce(tableResponse([{ sys_id: sysId, scope: 'x_my_app', name: 'My App' }]));
 
             await executor.executeScript('gs.info("x")', sysId, instance);
 
-            expect(mockRequestHandler.get).toHaveBeenCalledTimes(1);
+            expect(lookupCall(1).path).toBe('/api/now/table/sys_app');
+            expect(lookupCall(1).query.sysparm_query).toBe(`sys_id=${sysId}`);
             expect(postedScope()).toBe(sysId);
+        });
+
+        it('should refuse a store app\'s sys_id before sending, naming the app and its scope', async () => {
+            // Sent unchecked, /sys.scripts.do answers "not authorized" with HTTP 200.
+            const sysId = '040813ec1b374ed05048a979b04bcbc5';
+            mockRequestHandler.get
+                .mockResolvedValueOnce(csrfResponse())
+                .mockResolvedValueOnce(tableResponse([]))
+                .mockResolvedValueOnce(tableResponse([{
+                    sys_id: sysId,
+                    scope: 'x_acme_cat_util',
+                    name: 'Catalog Utilities',
+                    sys_class_name: 'sys_store_app',
+                    active: 'true'
+                }]));
+
+            const error = await executor.executeScript('gs.info("x")', sysId, instance)
+                .catch((e: unknown) => e) as ScriptScopeError;
+
+            expect(isScriptScopeError(error)).toBe(true);
+            expect(error.reason).toBe('NOT_A_DEVELOPED_APP');
+            expect(error.scope).toBe(sysId);
+            expect(error.foundAs?.scope).toBe('x_acme_cat_util');
+            expect(error.message).toContain('Catalog Utilities');
+            expect(error.message).toContain("scope 'x_acme_cat_util'");
+            expect(error.message).toContain('x_acme_cat_util.MyScriptInclude');
+            expect(lookupCall(2).path).toBe('/api/now/table/sys_scope');
+            expect(lookupCall(2).query.sysparm_query).toBe(`sys_id=${sysId}^ORDERBYDESCactive`);
+            expect(mockRequestHandler.post).not.toHaveBeenCalled();
+        });
+
+        it('should report a sys_id that matches nothing as not found', async () => {
+            const sysId = 'ffffffffffffffffffffffffffffffff';
+            mockRequestHandler.get
+                .mockResolvedValueOnce(csrfResponse())
+                .mockResolvedValueOnce(tableResponse([]))
+                .mockResolvedValueOnce(tableResponse([]));
+
+            await expect(
+                executor.executeScript('gs.info("x")', sysId, instance)
+            ).rejects.toMatchObject({ reason: 'SCOPE_NOT_FOUND', scope: sysId });
+            expect(mockRequestHandler.post).not.toHaveBeenCalled();
+        });
+
+        it('should treat a bare "not authorized" response as a failure, not an empty run', async () => {
+            mockRequestHandler.get
+                .mockResolvedValueOnce(csrfResponse())
+                .mockResolvedValueOnce(tableResponse([{ sys_id: 'global', scope: 'global', name: 'Global' }]));
+            mockRequestHandler.post.mockResolvedValue({
+                data: 'not authorized',
+                status: 200,
+                statusText: 'OK',
+                headers: {},
+                config: {}
+            } as IHttpResponse<string>);
+
+            const error = await executor.executeScript('gs.info("x")', 'global', instance)
+                .catch((e: unknown) => e) as Error;
+
+            expect(error).toBeInstanceOf(Error);
+            expect(error.message).toContain('not authorized');
+            expect(error.message).toContain('did not run the script');
+            // Not a scope error: a user without Scripts - Background rights gets the same body.
+            expect(isScriptScopeError(error)).toBe(false);
         });
 
         it('should cache a resolved scope for the life of the executor', async () => {
@@ -1191,6 +1258,7 @@ System: end
             expect(scopeError.scope).toBe('x_acme_cat_util');
             expect(scopeError.foundAs).toEqual({
                 sysId: '040813ec1b374ed05048a979b04bcbc5',
+                scope: 'x_acme_cat_util',
                 name: 'Catalog Utilities',
                 className: 'sys_store_app',
                 active: true

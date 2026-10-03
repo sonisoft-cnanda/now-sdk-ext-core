@@ -95,6 +95,7 @@ export type ScriptScopeFailureReason =
 /** The sys_scope record a scope name matched, when it is not one scripts can run in. */
 export interface ScriptScopeMatch {
     sysId: string;
+    scope: string;
     name: string;
     className: string;
     active: boolean;
