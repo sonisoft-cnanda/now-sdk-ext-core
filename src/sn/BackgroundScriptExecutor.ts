@@ -311,8 +311,10 @@ export class BackgroundScriptExecutor {
 
     /**
      * Execute a script using the best available method.
-     * First tries the standard executeScript() (background script page),
-     * and on failure falls back to executeScriptViaTrigger().
+     * First tries the standard executeScript() (background script page). If that
+     * fails and the script targets global, falls back to executeScriptViaTrigger().
+     * A script for any other scope is never moved to sys_trigger, which has no scope
+     * and would run it in global; its original error is rethrown instead.
      *
      * @param script The script to execute
      * @param scope Optional scope for the background script execution
@@ -324,9 +326,10 @@ export class BackgroundScriptExecutor {
         // the refused script would run anyway — later, on a schedule, silently.
         this.assertScriptPermitted(script);
 
+        const targetScope = scope || this.scope;
         try {
             this._logger.info("Attempting script execution via background script page...");
-            const result = await this.executeScript(script, scope || this.scope);
+            const result = await this.executeScript(script, targetScope);
             return result;
         } catch (error) {
             // Second layer: even if the check above is ever refactored away, a refusal
@@ -334,9 +337,15 @@ export class BackgroundScriptExecutor {
             if (isPolicyRefusal(error)) {
                 throw error;
             }
-            // Nor is an unusable scope. sys_trigger takes no scope, so falling back
-            // would run a script meant for one application in global instead.
+            // Nor is an unusable scope.
             if (isScriptScopeError(error)) {
+                throw error;
+            }
+            // sys_trigger takes no scope, so it can only stand in for a script meant for
+            // global. For any other scope — a page failure, or the instance answering
+            // "not authorized" for a scope that passed the lookup — falling back would
+            // run a script meant for one application in global instead.
+            if (typeof targetScope !== "string" || targetScope.toLowerCase() !== "global") {
                 throw error;
             }
             const err: Error = error as Error;

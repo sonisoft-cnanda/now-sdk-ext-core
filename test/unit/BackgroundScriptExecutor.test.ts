@@ -1090,6 +1090,44 @@ System: end
         });
     });
 
+    describe('executeScriptAuto - fallback only for global', () => {
+        it('should not move a scoped script to sys_trigger when the instance answers "not authorized"', async () => {
+            mockAuthHandler.isLoggedIn = jest.fn().mockReturnValue(true);
+            mockRequestHandler.get
+                .mockResolvedValueOnce(csrfResponse())
+                .mockResolvedValueOnce(tableResponse([{ sys_id: GLOBAL_SCOPE_SYS_ID, scope: 'x_my_app', name: 'My App' }]));
+            mockRequestHandler.post.mockResolvedValue({
+                data: 'not authorized',
+                status: 200,
+                statusText: 'OK',
+                headers: {},
+                config: {}
+            } as IHttpResponse<string>);
+
+            await expect(
+                executor.executeScriptAuto('gs.info("scoped")', 'x_my_app')
+            ).rejects.toThrow('not authorized');
+            // The one POST is /sys.scripts.do; a fallback would add a sys_trigger insert.
+            expect(mockRequestHandler.post).toHaveBeenCalledTimes(1);
+        });
+
+        it('should not move a scoped script to sys_trigger when the script page is unavailable', async () => {
+            mockAuthHandler.isLoggedIn = jest.fn().mockReturnValue(true);
+            mockRequestHandler.get.mockResolvedValue({
+                data: '<html></html>',
+                status: 200,
+                statusText: 'OK',
+                headers: { 'x-is-logged-in': 'false' },
+                config: {}
+            } as IHttpResponse<string>);
+
+            await expect(
+                executor.executeScriptAuto('gs.info("scoped")', 'x_my_app')
+            ).rejects.toThrow('Failed to obtain CSRF token');
+            expect(mockRequestHandler.post).not.toHaveBeenCalled();
+        });
+    });
+
     describe('executeScript - scope resolution', () => {
         const SCRIPT_RESULT_XML = `<HTML><BODY><PRE class="outputtext">*** Script: ok
 </PRE><div></div></BODY></HTML>`;
