@@ -2,6 +2,7 @@ import { ServiceNowInstance, ServiceNowSettingsInstance } from '../../src/sn/Ser
 import { BackgroundScriptExecutor } from '../../src/sn/BackgroundScriptExecutor';
 import { getCredentials } from "@servicenow/sdk-cli/dist/auth/index.js";
 import { SN_INSTANCE_ALIAS } from '../test_utils/test_config';
+import { isScriptScopeError } from '../../src/exception/ScriptScopeError';
 
 import * as path from 'path';
 import * as fs from 'fs';
@@ -372,4 +373,31 @@ System output here<BR/>
         }, 100000);
     });
 
+    describe('scope resolution', () => {
+        // scope=global alone matches every global-scoped application in sys_scope;
+        // the Global scope itself is the row with source=global.
+        it('should run "global" in the Global scope itself', async () => {
+            const result = await executor?.executeScript(`gs.info('SCOPE_IT=' + gs.getCurrentScopeName());`, 'global', instance);
+
+            expect(result?.raw).toContain('Script completed in scope global');
+            expect(result?.result).toContain('SCOPE_IT=rhino.global');
+        }, 100000);
+
+        it('should refuse a scope that is no application, before sending the script', async () => {
+            const error = await executor?.executeScript(`gs.info('SHOULD_NOT_RUN');`, 'x_nex_it_no_such_scope', instance)
+                .catch((e: unknown) => e);
+
+            expect(isScriptScopeError(error)).toBe(true);
+            expect((error as { reason?: string }).reason).toBe('SCOPE_NOT_FOUND');
+            expect((error as Error).message).toContain('x_nex_it_no_such_scope');
+        }, 100000);
+
+        it('should refuse a sys_id that is no application, before sending the script', async () => {
+            const error = await executor?.executeScript(`gs.info('SHOULD_NOT_RUN');`, '0123456789abcdef0123456789abcdef', instance)
+                .catch((e: unknown) => e);
+
+            expect(isScriptScopeError(error)).toBe(true);
+            expect((error as { reason?: string }).reason).toBe('SCOPE_NOT_FOUND');
+        }, 100000);
+    });
 });
