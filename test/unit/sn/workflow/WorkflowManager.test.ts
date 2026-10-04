@@ -76,6 +76,14 @@ function createErrorResponse(status: number = 500) {
     } as IHttpResponse<any>;
 }
 
+/**
+ * Creates a diagram processor answer carrying a graph with the given published flag.
+ */
+function createProcessorResponse(versionSysId: string, published: boolean) {
+    const data = `<?xml version="1.0" encoding="UTF-8"?><xml sysparm_processor="com.glideapp.workflow.ui.WorkflowDiagramProcessor"><graphml><graph id="${versionSysId}"><data key="published">${published}</data></graph></graphml></xml>`;
+    return { data, status: 200, statusText: 'OK', headers: {}, config: {} } as IHttpResponse<any>;
+}
+
 describe('WorkflowManager - Unit Tests', () => {
     let instance: ServiceNowInstance;
     let wfManager: WorkflowManager;
@@ -422,8 +430,9 @@ describe('WorkflowManager - Unit Tests', () => {
     });
 
     describe('publishWorkflow', () => {
-        it('should publish a workflow version successfully', async () => {
+        it('should set the start activity, then publish through the editor publish', async () => {
             mockRequestHandler.put.mockResolvedValueOnce(createMockPutResponse('ver-123'));
+            mockRequestHandler.post.mockResolvedValueOnce(createProcessorResponse('ver-123', true));
 
             await expect(wfManager.publishWorkflow({
                 versionSysId: 'ver-123',
@@ -431,6 +440,20 @@ describe('WorkflowManager - Unit Tests', () => {
             })).resolves.toBeUndefined();
 
             expect(mockRequestHandler.put).toHaveBeenCalledTimes(1);
+            expect((mockRequestHandler.put.mock.calls[0] as any[])[0].json).toEqual({ start: 'act-1' });
+            const publish = (mockRequestHandler.post.mock.calls[0] as any[])[0];
+            expect(publish.path).toBe('/xmlhttp.do');
+            expect(publish.fields).toMatchObject({ sysparm_type: 'publish_novalidate', sys_id: 'ver-123' });
+        });
+
+        it('should throw if the instance does not publish the version', async () => {
+            mockRequestHandler.put.mockResolvedValueOnce(createMockPutResponse('ver-123'));
+            mockRequestHandler.post.mockResolvedValueOnce(createProcessorResponse('ver-123', false));
+
+            await expect(wfManager.publishWorkflow({
+                versionSysId: 'ver-123',
+                startActivitySysId: 'act-1'
+            })).rejects.toThrow('the instance did not publish it');
         });
 
         it('should throw error if versionSysId is empty', async () => {
@@ -502,8 +525,9 @@ describe('WorkflowManager - Unit Tests', () => {
             mockRequestHandler.post.mockResolvedValueOnce(createMockPostResponse('ver-200', 'Published WF'));
             // Mock: createActivity (Start)
             mockRequestHandler.post.mockResolvedValueOnce(createMockPostResponse('act-start', 'Start'));
-            // Mock: publishWorkflow (PUT)
+            // Mock: publishWorkflow (PUT start, then the editor publish)
             mockRequestHandler.put.mockResolvedValueOnce(createMockPutResponse('ver-200'));
+            mockRequestHandler.post.mockResolvedValueOnce(createProcessorResponse('ver-200', true));
 
             const result = await wfManager.createCompleteWorkflow({
                 name: 'Published WF',
@@ -518,7 +542,7 @@ describe('WorkflowManager - Unit Tests', () => {
             expect(result.workflowSysId).toBe('wf-200');
             expect(result.published).toBe(true);
             expect(result.startActivity).toBe('start');
-            expect(mockRequestHandler.post).toHaveBeenCalledTimes(3);
+            expect(mockRequestHandler.post).toHaveBeenCalledTimes(4);
             expect(mockRequestHandler.put).toHaveBeenCalledTimes(1);
         });
 

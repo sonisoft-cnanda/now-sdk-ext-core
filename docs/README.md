@@ -186,6 +186,9 @@ try {
 - [ATF Test Executor](./ATFTestExecutor.md) - Automated test execution
 - [Flow Definitions](./FlowDefinitions.md) - Read flow, subflow and action definitions as JSON
 - [Table Behavior Discovery](./TableBehaviorDiscovery.md) - Table automation, field requirements, batched details and bounded dependencies
+- [Workflow Manager](./WorkflowManager.md) - Check out, edit, add activities to and publish legacy workflows
+- [Legacy Workflow Internals](./LegacyWorkflowInternals.md) - How legacy workflows and the Workflow Editor work underneath
+- [FormRecordWriter](./FormRecordWriter.md) - Write records (including variables) through their classic form
 - [Script Tracer](./script_tracer/README.md) - Real-time server-side script tracing
 - [ActiveSessionRegistry](./ActiveSessionRegistry.md) - Stateful workflow sessions for MCP and CLI
 - [API Reference](./APIReference.md) - Complete API documentation

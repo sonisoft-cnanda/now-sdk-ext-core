@@ -1,12 +1,26 @@
 # WorkflowManager
 
-The `WorkflowManager` class manages ServiceNow workflow lifecycle operations including creating workflows, versions, activities, transitions, conditions, and publishing.
+`WorkflowManager` works with legacy ServiceNow workflows — the Workflow Editor's `wf_*`
+records, not Flow Designer. It can find and read workflows, check them out, add and edit
+activities (including their variables), wire transitions, validate, and publish, all with
+the same server-side behaviour as the Workflow Editor.
+
+For how legacy workflows work underneath — tables, business rules, the editor's endpoints,
+variable storage, checkout and publish semantics — see
+[Legacy Workflow Internals](./LegacyWorkflowInternals.md).
 
 ## Table of Contents
 
 - [Overview](#overview)
 - [Constructor](#constructor)
-- [Methods](#methods)
+- [Editing workflows like the Workflow Editor](#editing-workflows-like-the-workflow-editor)
+  - [Reading](#reading)
+  - [Lifecycle](#lifecycle)
+  - [Editing a draft](#editing-a-draft)
+  - [Activity variables](#activity-variables)
+  - [Errors](#errors)
+  - [Example: check out, add an approval, publish](#example-check-out-add-an-approval-publish)
+- [Record methods (direct inserts)](#record-methods-direct-inserts)
 - [Interfaces](#interfaces)
 - [Examples](#examples)
 - [Best Practices](#best-practices)
@@ -14,14 +28,17 @@ The `WorkflowManager` class manages ServiceNow workflow lifecycle operations inc
 
 ## Overview
 
-The `WorkflowManager` enables you to:
+There are two families of methods:
 
-- Create workflow records and workflow versions
-- Add activities to a workflow version
-- Define transitions between activities
-- Create conditions on activities for branching logic
-- Publish workflow versions with a designated start activity
-- Orchestrate a complete workflow from a single specification
+| Family | Methods | How they write |
+|---|---|---|
+| **Editor parity** (recommended) | `newWorkflow`, `checkout`, `addActivity`, `updateActivity`, `removeActivity`, `addTransition`, `publish`, … | The Workflow Editor's diagram processor (`/xmlhttp.do`, `WorkflowDiagramProcessor`) for structure and lifecycle, and the `wf_activity` classic form for activity configuration |
+| **Record methods** (original) | `createWorkflow`, `createWorkflowVersion`, `createActivity`, `createTransition`, `createCondition`, `publishWorkflow`, `createCompleteWorkflow` | Direct Table API inserts |
+
+Editor parity matters because much of a legacy workflow's behaviour lives on the server:
+checkout is a deep copy of the published version, publish validates, computes the
+workflow's paths, retires the previous version and records the workflow in the current
+update set, and activity variables are only written correctly through the activity form.
 
 ## Constructor
 
@@ -37,7 +54,150 @@ import { ServiceNowInstance, WorkflowManager } from '@sonisoft/now-sdk-ext-core'
 const workflowManager = new WorkflowManager(instance);
 ```
 
-## Methods
+## Editing workflows like the Workflow Editor
+
+Edits always happen on a **draft**: a version checked out to the current user. Published
+versions are read-only, exactly as in the editor. Every editing method checks this first
+and throws a clear error otherwise.
+
+```
+checkout(workflow)          → draft version (a copy of the published one)
+addActivity / updateActivity / removeActivity / addTransition / …   on the draft
+validateWorkflow(draft)     → optional dry run of publish's validation
+publish(draft)              → draft becomes the published version
+discardCheckout(draft)      → throw the draft away instead
+```
+
+Requirements: the user needs `admin` or `workflow_admin` (the instance's
+`WorkflowAccess` check; `snc_required_script_writer_permission` also satisfies it). Publishing
+writes to the user's **current update set**.
+
+### Reading
+
+| Method | Returns |
+|---|---|
+| `findWorkflows({ name?, table?, query?, limit? })` | `WorkflowSummary[]` — each with `publishedVersionSysId` and `checkedOutVersion` (`byCurrentUser` tells you if it is yours) |
+| `resolveWorkflow(nameOrSysId)` | `WorkflowSummary` — accepts a name, a wf_workflow sys_id or any version sys_id |
+| `getWorkflowVersions(workflowSysId)` | `WorkflowVersionSummary[]`, newest first |
+| `getWorkflowDefinition(versionSysId, { includeVariables?, includeStatus? })` | `WorkflowDefinition` — activities (with `variables` by element name and their exits), transitions, stages, and the current user's permissions |
+| `getWorkflowGraph(versionSysId)` | `WorkflowGraph` — the version exactly as the editor's diagram processor reports it |
+| `listActivityDefinitions({ name?, category?, includeDesigner? })` | Activity types |
+| `getActivityDefinition(nameOrSysId, { includeScript? })` | `ActivityDefinitionDetail` — the type as the instance defines it: its description, attributes, variables (type, default, choices, reference, hint) or Activity Designer inputs/outputs, starting exits, and with `includeScript` its implementation |
+| `getActivityUsage(nameOrSysId, { sampleSize?, examplesPerField?, maxValueLength? })` | `ActivityUsage` — how published workflows on the instance configure the type: per variable/input, how often it is set and its most common values (`isDefault` marks untouched defaults) |
+| `exportWorkflow(workflow, { version? })` | `WorkflowExport` — one complete, self-contained JSON definition of a version: properties, trigger, inputs, stages, activities with labelled variables (defaults marked, choices and references named) and exits, transitions, the activity types used (with whether they wait), subflows called and what uses it. `nex workflow export`; the `legacy-workflow` skill's `workflow-graph.sh` turns it into an outline, analysis or Mermaid graph. |
+| `validateWorkflow(versionSysId)` | `WorkflowValidationReport` — the editor's "Validate Workflow" report |
+| `getDraftVersion(workflow)` | The sys_id of the current user's draft, or a clear error |
+
+### Lifecycle
+
+| Method | Notes |
+|---|---|
+| `newWorkflow({ name, table, description?, condition?, conditionType?, fields? })` | Creates the workflow with Begin → End, checked out to you. Names must be unique. |
+| `checkout(workflow, { force? })` | Creates your draft from the published version. Returns your existing draft if you already have one (`alreadyCheckedOut: true`). Another user's checkout is refused unless `force` (the editor's Force Checkout). |
+| `publish(versionSysId, { allowWarnings? })` | Validates, then publishes. Warnings stop it unless `allowWarnings`; critical findings always do. Returns accepted warnings and `fullSequences`. |
+| `discardCheckout(versionSysId)` | Deletes your draft, keeping the published version. Refuses if the draft is the only version. |
+| `deleteWorkflow(workflow)` | Deletes every version, and with the last one the workflow. |
+| `setWorkflowActive(versionSysId, active)` | The editor's Set Active / Set Inactive. |
+| `updateWorkflowProperties(versionSysId, { name?, description?, condition?, conditionType?, fields? })` | Changes the draft's properties. |
+
+### Editing a draft
+
+| Method | Notes |
+|---|---|
+| `addActivity(versionSysId, options)` | See below. |
+| `updateActivity(activitySysId, { name?, variables?, input?, stage?, x?, y? })` | Variables you omit keep their values. |
+| `removeActivity(activitySysId, { reconnect? })` | Removes the activity with its exits and variables. `reconnect` joins its single incoming and outgoing transitions. Begin and End cannot be removed. |
+| `moveActivities([{ sysId, x, y }])` | Repositions activities. |
+| `addTransition({ from, to, condition? })` | `condition` is the exit's name or sys_id; required when `from` has several exits. Duplicate paths are refused. |
+| `retargetTransition(transitionSysId, toActivitySysId)` | Points a transition at another activity. |
+| `removeTransition(transitionSysId)` | |
+| `addCondition` / `updateCondition` / `removeCondition` | Manage an activity's exits. Removing an exit also removes the transitions leaving from it. |
+
+`addActivity` options:
+
+| Option | Description |
+|---|---|
+| `definition` | Activity type: sys_id or exact name (`"Timer"`, `"Approval - User"`). A core activity wins over same-named Activity Designer ones; true ambiguity is an error listing the candidates. |
+| `name` | The activity's name |
+| `variables` | Variable values by element name — see [Activity variables](#activity-variables) |
+| `input` | Activity Designer input mapping (object or JSON text) |
+| `insertOn` | Transition sys_id to drop the activity onto, like dropping onto a line in the editor: the transition is re-pointed at the new activity and a new one runs from it to the original target |
+| `connectFrom` | `{ activity, condition? }` — add a transition into the new activity |
+| `connectTo` | Activity sys_id — add a transition out of the new activity |
+| `exitCondition` | Which of the new activity's exits feeds `insertOn` / `connectTo` (default: its first exit, as the editor does) |
+| `x`, `y`, `stage` | Position (defaults to the middle of `insertOn`, or right of `connectFrom`) and stage (sys_id, name or value) |
+
+### Activity variables
+
+Activity configuration (a Timer's duration, a Run Script's script, an approval's approvers)
+is stored as variables — `sys_variable_value` rows — not on the activity record. They are
+written by posting the activity form, through [`FormRecordWriter`](./FormRecordWriter.md),
+which is what the editor does.
+
+- Discover what a type accepts with `getActivityDefinition('Timer')`, how it behaves with
+  `{ includeScript: true }`, and how the instance already configures it with
+  `getActivityUsage('Timer')`. Types are instance data — read them rather than hard-coding.
+- Unknown variables are rejected before anything is written, with the list of valid ones.
+- Choice values are checked; a label (`'Script'`) is accepted for its value (`'script'`).
+- Durations accept seconds (`90`), `{ days, hours, minutes, seconds }`, `'D HH:MM:SS'` or the
+  stored `'1970-01-01 HH:MM:SS'`.
+- Booleans accept `true`/`false`; lists accept arrays.
+- On insert, variables you omit get the type's defaults; on update, they keep their values.
+- Values come back from `getWorkflowDefinition` in stored form (durations as
+  `1970-01-01 00:01:30`, booleans as `1`/`0`).
+
+### Errors
+
+| Error | When |
+|---|---|
+| `WorkflowValidationError` | `publish` blocked by validation. `level` is `'warning'` or `'critical'`; `items` holds each finding (with the offending activity in `details`). |
+| `FormSubmitError` | The instance rejected an activity form submit; `messages` holds its error messages. |
+| `InvalidParameterException` | Bad input: unknown variable or choice, ambiguous name, activity from another version, … |
+| `Error` | Not checked out / checked out by someone else, missing records. |
+
+### Example: check out, add an approval, publish
+
+```typescript
+import { ServiceNowInstance, WorkflowManager, WorkflowValidationError } from '@sonisoft/now-sdk-ext-core';
+
+const wm = new WorkflowManager(instance);
+
+const { versionSysId: draft } = await wm.checkout('Laptop Request');
+const definition = await wm.getWorkflowDefinition(draft);
+const begin = definition.activities.find(a => a.definitionName === 'Begin');
+const firstLine = definition.transitions.find(t => t.from === begin.sysId);
+
+// Drop a manager approval onto the first line
+const approval = await wm.addActivity(draft, {
+    definition: 'Approval - User',
+    name: 'Manager approval',
+    insertOn: firstLine.sysId,
+    exitCondition: 'Approved',
+    variables: { approver_script: 'answer = [current.request.requested_for.manager];', advanced: true },
+});
+
+// Send Rejected to End
+const end = definition.activities.find(a => a.definitionName === 'End');
+await wm.addTransition({ from: approval.activitySysId, condition: 'Rejected', to: end.sysId });
+
+try {
+    await wm.publish(draft);
+} catch (error) {
+    if (error instanceof WorkflowValidationError && error.level === 'warning') {
+        console.warn(error.items.map(i => i.message));
+        await wm.publish(draft, { allowWarnings: true });
+    } else {
+        throw error;
+    }
+}
+```
+
+## Record methods (direct inserts)
+
+These insert wf_* records directly through the Table API. They predate the editor-parity
+methods and are kept for compatibility. Prefer `newWorkflow` / `addActivity` for new code:
+a direct `createActivity` without `variables` writes no variables.
+
 
 ### createWorkflow
 
@@ -157,7 +317,8 @@ async createActivity(options: CreateActivityOptions): Promise<CreateActivityResu
 | `width` | `number` | No | Width on the workflow canvas |
 | `height` | `number` | No | Height on the workflow canvas |
 | `script` | `string` | No | Script content for the activity |
-| `vars` | `string` | No | Activity variables (JSON string or comma-separated key=value pairs) |
+| `vars` | `string` | No | Activity variables (JSON string or comma-separated key=value pairs). Not written to `sys_variable_value`; use `variables`. |
+| `variables` | `Record<string, FormValueInput>` | No | Variable values by element name. Creates the activity through the `wf_activity` form so the variables are actually saved; requires `activityDefinitionSysId`. |
 
 #### Returns
 
@@ -269,7 +430,10 @@ console.log(`Condition created: ${condition.conditionSysId}`);
 
 ### publishWorkflow
 
-Publish a workflow version by setting `published=true` and designating the start activity.
+Set a version's start activity and publish it. Publishing goes through the Workflow
+Editor's publish without its validation step (this method never validated), so the
+previous version is retired, paths are computed and the workflow is recorded in the
+current update set. Use [`publish`](#lifecycle) when you want validation.
 
 ```typescript
 async publishWorkflow(options: PublishWorkflowOptions): Promise<void>
@@ -414,6 +578,7 @@ interface CreateActivityOptions {
     height?: number;
     script?: string;
     vars?: string;
+    variables?: Record<string, FormValueInput>;  // saved through the wf_activity form
 }
 ```
 
@@ -489,6 +654,7 @@ interface ActivitySpec {
     width?: number;
     height?: number;
     vars?: string;
+    variables?: Record<string, FormValueInput>;  // saved through the wf_activity form
 }
 ```
 
@@ -695,15 +861,20 @@ async function createBranchingWorkflow() {
 
 ## Best Practices
 
-1. **Use `createCompleteWorkflow` for New Workflows**: The orchestration method handles all steps and provides a cleaner API than building step by step
-2. **Assign Activity IDs**: Always set the `id` field on `ActivitySpec` entries for readable transition references instead of relying on array indices
-3. **Validate Before Publishing**: Ensure all transitions are connected and a valid start activity is specified before calling `publishWorkflow`
-4. **Track Progress**: Pass an `onProgress` callback to `createCompleteWorkflow` for visibility into long-running orchestrations
-5. **Handle Errors Gracefully**: All methods throw on failure; wrap calls in try/catch to handle partial creation scenarios
-6. **Use Conditions for Branching**: Pair `createCondition` with conditional transitions rather than embedding logic in activity scripts
+1. **Edit through a checkout**: `checkout` → edit → `publish` mirrors the editor and keeps the published version intact until you publish
+2. **Discover variables first**: `getActivityDefinition(type)` lists every variable a type accepts, with choices and defaults
+3. **Mind the update set**: `publish` records the whole workflow in the current update set — select the right one first
+4. **Use `createCompleteWorkflow` for New Workflows** (record methods): The orchestration method handles all steps and provides a cleaner API than building step by step
+5. **Assign Activity IDs**: Always set the `id` field on `ActivitySpec` entries for readable transition references instead of relying on array indices
+6. **Validate Before Publishing**: `validateWorkflow` runs the editor's checks without publishing
+7. **Track Progress**: Pass an `onProgress` callback to `createCompleteWorkflow` for visibility into long-running orchestrations
+8. **Handle Errors Gracefully**: All methods throw on failure; wrap calls in try/catch to handle partial creation scenarios
+9. **Use Conditions for Branching**: Pair `createCondition` with conditional transitions rather than embedding logic in activity scripts
 
 ## Related
 
+- [Legacy Workflow Internals](./LegacyWorkflowInternals.md)
+- [FormRecordWriter](./FormRecordWriter.md)
 - [Getting Started Guide](./GettingStarted.md)
 - [ATF Test Executor](./ATFTestExecutor.md)
 - [Application Manager](./ApplicationManager.md)
