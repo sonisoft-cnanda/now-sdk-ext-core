@@ -292,6 +292,7 @@ class WorkflowManager {
     getActivityDefinition(nameOrSysId: string, options?: GetActivityDefinitionOptions): Promise<ActivityDefinitionDetail>
     getActivityUsage(nameOrSysId: string, options?: GetActivityUsageOptions): Promise<ActivityUsage>
     exportWorkflow(workflow: string, options?: ExportWorkflowOptions): Promise<WorkflowExport>
+    convertToFlow(workflow: string, options?: ExportWorkflowOptions & FluentGeneratorOptions): Promise<WorkflowFlowConversion>
     validateWorkflow(versionSysId: string): Promise<WorkflowValidationReport>
     getDraftVersion(workflow: string): Promise<string>
 
@@ -325,6 +326,21 @@ class WorkflowManager {
     publishWorkflow(options: PublishWorkflowOptions): Promise<void>
     createCompleteWorkflow(spec: CompleteWorkflowSpec, onProgress?: (msg: string) => void): Promise<CompleteWorkflowResult>
 }
+```
+
+### Workflow views and Flow Designer conversion
+
+Pure functions of a `WorkflowExport` (no instance needed). See [Legacy Workflow → Flow Designer](./WorkflowToFlowConversion.md).
+
+```typescript
+renderWorkflowOutline(data: WorkflowExport, options?: WorkflowViewOptions): string
+renderWorkflowNodes(data: WorkflowExport, options?: WorkflowViewOptions): string
+analyzeWorkflow(data: WorkflowExport): WorkflowAnalysis
+renderWorkflowAnalysis(data: WorkflowExport): string
+renderWorkflowMermaid(data: WorkflowExport): string
+planFlowConversion(data: WorkflowExport): FlowConversionPlan
+renderFlowPlan(plan: FlowConversionPlan): string
+generateFluentFlow(plan: FlowConversionPlan, options?: FluentGeneratorOptions): FluentSourceFile[]
 ```
 
 ### FormRecordWriter

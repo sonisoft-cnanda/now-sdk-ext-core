@@ -272,6 +272,10 @@ an activity type pauses the workflow (`waits`) is read from its handler script �
 (Catalog Task inherits Create Task's) — not from a list. The `legacy-workflow` skill's
 `workflow-graph.sh` turns the export into a nested outline (decisions, guard clauses, parallel
 blocks closed at their Join, loops, waits), a flat node list, a structural analysis or Mermaid.
+The same views are in this library (`renderWorkflowOutline` and friends, `nex workflow outline`),
+and [Legacy Workflow → Flow Designer](./WorkflowToFlowConversion.md) plans a Flow Designer
+version of a workflow and writes a Fluent skeleton for it — including what the activity
+handlers actually do at runtime (If, Switch, tasks, Set Values), read from the instance.
 
 ## Querying with nex
 

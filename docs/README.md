@@ -188,6 +188,7 @@ try {
 - [Table Behavior Discovery](./TableBehaviorDiscovery.md) - Table automation, field requirements, batched details and bounded dependencies
 - [Workflow Manager](./WorkflowManager.md) - Check out, edit, add activities to and publish legacy workflows
 - [Legacy Workflow Internals](./LegacyWorkflowInternals.md) - How legacy workflows and the Workflow Editor work underneath
+- [Legacy Workflow → Flow Designer](./WorkflowToFlowConversion.md) - Outline and analyse a workflow, plan its Flow Designer version, generate a Fluent skeleton
 - [FormRecordWriter](./FormRecordWriter.md) - Write records (including variables) through their classic form
 - [Script Tracer](./script_tracer/README.md) - Real-time server-side script tracing
 - [ActiveSessionRegistry](./ActiveSessionRegistry.md) - Stateful workflow sessions for MCP and CLI

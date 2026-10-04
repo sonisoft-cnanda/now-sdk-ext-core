@@ -1,0 +1,227 @@
+{
+ "format": "now-sdk-ext/legacy-workflow@1",
+ "exportedAt": "2026-10-04T00:00:00.000Z",
+ "workflow": {
+  "sysId": "wf-merge",
+  "name": "Merge without join",
+  "table": "incident",
+  "description": "Synthetic test workflow.",
+  "scope": "global"
+ },
+ "version": {
+  "sysId": "ver-merge",
+  "name": "Laptop Request",
+  "published": true,
+  "active": true,
+  "checkedOut": "",
+  "checkedOutBy": "",
+  "condition": "priority=1^EQ",
+  "conditionType": "run_match",
+  "order": 100,
+  "runMultiple": false,
+  "afterBusinessRules": false,
+  "stageField": "stage",
+  "onCancel": "",
+  "start": "begin",
+  "fullSequences": []
+ },
+ "inputs": [],
+ "stages": [],
+ "activityTypes": {
+  "t-begin": {
+   "sysId": "t-begin",
+   "name": "Begin",
+   "category": "Utilities",
+   "sysClassName": "wf_activity_definition",
+   "attributes": "begin=true",
+   "description": "",
+   "waits": false
+  },
+  "t-end": {
+   "sysId": "t-end",
+   "name": "End",
+   "category": "Utilities",
+   "sysClassName": "wf_activity_definition",
+   "attributes": "end=true",
+   "description": "",
+   "waits": false
+  },
+  "t-branch": {
+   "sysId": "t-branch",
+   "name": "Branch",
+   "category": "Utilities",
+   "sysClassName": "wf_activity_definition",
+   "attributes": "branch=true",
+   "description": "",
+   "waits": false
+  },
+  "t-run": {
+   "sysId": "t-run",
+   "name": "Run Script",
+   "category": "Utilities",
+   "sysClassName": "wf_activity_definition",
+   "attributes": "",
+   "description": "",
+   "waits": false
+  },
+  "t-note": {
+   "sysId": "t-note",
+   "name": "Notification",
+   "category": "Notifications",
+   "sysClassName": "wf_activity_definition",
+   "attributes": "",
+   "description": "",
+   "waits": false
+  }
+ },
+ "activities": [
+  {
+   "sysId": "begin",
+   "name": "Begin",
+   "typeSysId": "t-begin",
+   "type": "Begin",
+   "x": 0,
+   "y": 0,
+   "variables": [],
+   "exits": [
+    {
+     "sysId": "begin:Always",
+     "name": "Always",
+     "condition": "true",
+     "order": 0,
+     "elseFlag": false,
+     "error": false
+    }
+   ]
+  },
+  {
+   "sysId": "split",
+   "name": "Split",
+   "typeSysId": "t-branch",
+   "type": "Branch",
+   "x": 100,
+   "y": 0,
+   "variables": [],
+   "exits": [
+    {
+     "sysId": "split:Always",
+     "name": "Always",
+     "condition": "true",
+     "order": 0,
+     "elseFlag": false,
+     "error": false
+    }
+   ]
+  },
+  {
+   "sysId": "left",
+   "name": "Left work",
+   "typeSysId": "t-run",
+   "type": "Run Script",
+   "x": 200,
+   "y": 0,
+   "variables": [],
+   "exits": [
+    {
+     "sysId": "left:Always",
+     "name": "Always",
+     "condition": "true",
+     "order": 0,
+     "elseFlag": false,
+     "error": false
+    }
+   ]
+  },
+  {
+   "sysId": "right",
+   "name": "Right work",
+   "typeSysId": "t-run",
+   "type": "Run Script",
+   "x": 200,
+   "y": 0,
+   "variables": [],
+   "exits": [
+    {
+     "sysId": "right:Always",
+     "name": "Always",
+     "condition": "true",
+     "order": 0,
+     "elseFlag": false,
+     "error": false
+    }
+   ]
+  },
+  {
+   "sysId": "notify",
+   "name": "Send summary",
+   "typeSysId": "t-note",
+   "type": "Notification",
+   "x": 300,
+   "y": 0,
+   "variables": [],
+   "exits": [
+    {
+     "sysId": "notify:Always",
+     "name": "Always",
+     "condition": "true",
+     "order": 0,
+     "elseFlag": false,
+     "error": false
+    }
+   ]
+  },
+  {
+   "sysId": "end",
+   "name": "End",
+   "typeSysId": "t-end",
+   "type": "End",
+   "x": 400,
+   "y": 0,
+   "variables": [],
+   "exits": []
+  }
+ ],
+ "transitions": [
+  {
+   "sysId": "tr1",
+   "from": "begin",
+   "exit": "begin:Always",
+   "to": "split"
+  },
+  {
+   "sysId": "tr2",
+   "from": "split",
+   "exit": "split:Always",
+   "to": "left"
+  },
+  {
+   "sysId": "tr3",
+   "from": "split",
+   "exit": "split:Always",
+   "to": "right"
+  },
+  {
+   "sysId": "tr4",
+   "from": "left",
+   "exit": "left:Always",
+   "to": "notify"
+  },
+  {
+   "sysId": "tr5",
+   "from": "right",
+   "exit": "right:Always",
+   "to": "notify"
+  },
+  {
+   "sysId": "tr6",
+   "from": "notify",
+   "exit": "notify:Always",
+   "to": "end"
+  }
+ ],
+ "references": {},
+ "usedBy": {
+  "catalogItems": [],
+  "parentWorkflows": []
+ }
+}

@@ -84,7 +84,8 @@ writes to the user's **current update set**.
 | `listActivityDefinitions({ name?, category?, includeDesigner? })` | Activity types |
 | `getActivityDefinition(nameOrSysId, { includeScript? })` | `ActivityDefinitionDetail` — the type as the instance defines it: its description, attributes, variables (type, default, choices, reference, hint) or Activity Designer inputs/outputs, starting exits, and with `includeScript` its implementation |
 | `getActivityUsage(nameOrSysId, { sampleSize?, examplesPerField?, maxValueLength? })` | `ActivityUsage` — how published workflows on the instance configure the type: per variable/input, how often it is set and its most common values (`isDefault` marks untouched defaults) |
-| `exportWorkflow(workflow, { version? })` | `WorkflowExport` — one complete, self-contained JSON definition of a version: properties, trigger, inputs, stages, activities with labelled variables (defaults marked, choices and references named) and exits, transitions, the activity types used (with whether they wait), subflows called and what uses it. `nex workflow export`; the `legacy-workflow` skill's `workflow-graph.sh` turns it into an outline, analysis or Mermaid graph. |
+| `exportWorkflow(workflow, { version? })` | `WorkflowExport` — one complete, self-contained JSON definition of a version: properties, trigger, inputs, stages, activities with labelled variables (defaults marked, choices and references named) and exits, transitions, the activity types used (with whether they wait), subflows called and what uses it. `nex workflow export`. `renderWorkflowOutline`, `renderWorkflowAnalysis`, `renderWorkflowNodes` and `renderWorkflowMermaid` turn it into views (`nex workflow outline`). |
+| `convertToFlow(workflow, { version?, directory? })` | `WorkflowFlowConversion` — the export, a Flow Designer conversion plan and a Fluent (now-sdk) skeleton for it. Read-only. See [Legacy Workflow → Flow Designer](./WorkflowToFlowConversion.md). |
 | `validateWorkflow(versionSysId)` | `WorkflowValidationReport` — the editor's "Validate Workflow" report |
 | `getDraftVersion(workflow)` | The sys_id of the current user's draft, or a clear error |
 
@@ -874,6 +875,7 @@ async function createBranchingWorkflow() {
 ## Related
 
 - [Legacy Workflow Internals](./LegacyWorkflowInternals.md)
+- [Legacy Workflow → Flow Designer](./WorkflowToFlowConversion.md)
 - [FormRecordWriter](./FormRecordWriter.md)
 - [Getting Started Guide](./GettingStarted.md)
 - [ATF Test Executor](./ATFTestExecutor.md)

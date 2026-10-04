@@ -10,6 +10,7 @@ import { InvalidParameterException } from '../../../../src/exception/InvalidPara
 import { SessionManager } from '../../../../src/comm/http/SessionManager';
 import { READ_ONLY } from '../../../../src/policy/PolicyTypes';
 import { createGetCredentialsMock } from '../../__mocks__/servicenow-sdk-mocks';
+import { buildExport } from './workflowExportBuilder';
 
 const mockGetCredentials = createGetCredentialsMock();
 jest.mock('@servicenow/sdk-cli/dist/auth/index.js', () => ({ getCredentials: mockGetCredentials }));
@@ -544,6 +545,23 @@ describe('WorkflowManager - Workflow Editor parity', () => {
             expect(wm.getWorkflowDefinition).toHaveBeenCalledWith(PUBLISHED, { includeStatus: false });
             routes.unshift(['wf_workflow_version', `sys_id=My WF`, []]);
             await expect(wm.exportWorkflow('My WF', { version: 'draft' })).rejects.toThrow("Workflow 'My WF' has no draft version");
+        });
+    });
+
+    describe('convertToFlow', () => {
+        it('plans and writes the Fluent skeleton from the exported version', async () => {
+            const data = buildExport({
+                name: 'My WF', catalogItems: ['Laptop'],
+                activities: [{ id: 'begin', type: 'Begin' }, { id: 'log', type: 'Log Message', vars: { message: 'hi' } }, { id: 'end', type: 'End' }],
+                edges: [['begin', 'Always', 'log'], ['log', 'Always', 'end']],
+            });
+            const exportWorkflow = jest.spyOn(wm, 'exportWorkflow').mockResolvedValue(data);
+            const result = await wm.convertToFlow('My WF', { version: 'published', directory: 'src/fluent/converted' });
+            expect(exportWorkflow).toHaveBeenCalledWith('My WF', { version: 'published' });
+            expect(result.export).toBe(data);
+            expect(result.plan).toMatchObject({ kind: 'flow', identifier: 'my_wf', coverage: { direct: 1, partial: 0, manual: 0 } });
+            expect(result.files.map(f => f.path)).toEqual(['src/fluent/converted/my-wf.now.ts']);
+            expect(result.files[0].content).toContain('action.core.log');
         });
     });
 

@@ -13,6 +13,9 @@ import { READ_ONLY } from "../../policy/PolicyTypes";
 import { VariableDefinitions } from "../variables/VariableDefinitions";
 import { VariableDefinition } from "../variables/VariableModels";
 import { WorkflowDiagramClient } from "./WorkflowDiagramClient";
+import { planFlowConversion } from "./WorkflowFlowConversion";
+import { FluentGeneratorOptions, generateFluentFlow } from "./WorkflowFluentGenerator";
+import { WorkflowFlowConversion } from "./WorkflowConversionModels";
 import {
     CreateWorkflowOptions,
     CreateWorkflowResult,
@@ -987,6 +990,19 @@ export class WorkflowManager {
                 })),
             },
         };
+    }
+
+    /**
+     * Plan the move of a workflow version to Flow Designer and write a Fluent (now-sdk)
+     * skeleton for it. Read-only: it exports the version and works from the export (see
+     * {@link planFlowConversion} and {@link generateFluentFlow} to work from a saved export).
+     *
+     * @param workflow Workflow name or sys_id, or a version sys_id
+     */
+    public async convertToFlow(workflow: string, options: ExportWorkflowOptions & FluentGeneratorOptions = {}): Promise<WorkflowFlowConversion> {
+        const data = await this.exportWorkflow(workflow, { version: options.version });
+        const plan = planFlowConversion(data);
+        return { export: data, plan, files: generateFluentFlow(plan, { directory: options.directory }) };
     }
 
     /**
