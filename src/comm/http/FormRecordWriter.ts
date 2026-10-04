@@ -210,10 +210,21 @@ export class FormRecordWriter {
     }
 
     private async requireExists(table: string, sysId: string): Promise<void> {
-        const response = await this.request().get<{ result?: Array<{ sys_id: string }> }>({
+        const read = () => this.request().get<{ result?: Array<{ sys_id: string }> }>({
             method: "GET", path: `/api/now/table/${table}`, headers: { Accept: "application/json" }, body: null,
             query: { sysparm_query: `sys_id=${sysId}`, sysparm_fields: "sys_id", sysparm_limit: "1" },
         });
+        let response = await read();
+        // 202: the instance queued the request behind others in this session; ask again.
+        for (let attempt = 1; response?.status === 202 && attempt <= 3; attempt++) {
+            await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+            response = await read();
+        }
+        if (response?.status !== 200) {
+            // The insert was reported; only the check failed. Say so, so nobody inserts again.
+            throw new FormSubmitError(table, `The ${table} form reported inserting record ${sysId}, `
+                + `but checking that it exists failed (status ${response?.status ?? "unknown"})`);
+        }
         if (!response.bodyObject?.result?.length) {
             throw new FormSubmitError(table, `The ${table} form reported an insert, but record ${sysId} does not exist`);
         }

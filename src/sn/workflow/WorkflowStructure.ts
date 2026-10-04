@@ -105,7 +105,11 @@ export class WorkflowStructure {
     public constructor(data: WorkflowExport) {
         this.data = data;
         for (const a of data.activities ?? []) {
-            this.activities.set(a.sysId, { ...a, exits: [...(a.exits ?? [])].sort((x, y) => (x.order - y.order) || x.name.localeCompare(y.name)) });
+            const exits = (a.exits ?? []).map(e => ({ ...e, name: e.name ?? '', condition: e.condition ?? '' }));
+            this.activities.set(a.sysId, {
+                ...a, name: a.name ?? '', type: a.type ?? '', variables: a.variables ?? [],
+                exits: exits.sort((x, y) => ((x.order ?? 0) - (y.order ?? 0)) || x.name.localeCompare(y.name)),
+            });
             this._out.set(a.sysId, new Map());
             this._incoming.set(a.sysId, []);
         }
@@ -231,8 +235,8 @@ export class WorkflowStructure {
 
     /**
      * Where the paths leaving an activity come back together ({@link WORKFLOW_EXIT} if they
-     * never do). Parallel branches rejoin at the Join they all reach, even when a branch
-     * loops first.
+     * never do). Parallel lines rejoin at the Join they all reach, unless they meet before
+     * it (then that meeting point is the merge, and the Join closes a later block).
      */
     public mergeOf(sysId: string): string {
         let merge = this._ipdom.get(sysId) ?? WORKFLOW_EXIT;
@@ -240,7 +244,10 @@ export class WorkflowStructure {
         const parallel = exits.some(e => e.forward.length > 1);
         if (parallel && (merge === WORKFLOW_EXIT || !this.isJoin(merge))) {
             const reaches = exits.flatMap(e => e.forward).map(t => this.reach(t));
-            const joins = [...this.activities.keys()].filter(j => this.isJoin(j) && reaches.every(r => r.has(j)));
+            // A Join after the merge point closes a later block, not this one: the lines
+            // meet first and run what is between once per line.
+            const later = merge === WORKFLOW_EXIT ? new Set<string>() : this.reach(merge);
+            const joins = [...this.activities.keys()].filter(j => this.isJoin(j) && !later.has(j) && reaches.every(r => r.has(j)));
             if (joins.length) {
                 const depth = this.distances(sysId);
                 merge = joins.sort((a, b) => (depth.get(a) ?? 1e6) - (depth.get(b) ?? 1e6))[0];
@@ -286,9 +293,9 @@ export class WorkflowStructure {
 
     private findBackEdges(): void {
         const roots = this.begin ? [this.begin] : [];
-        roots.push(...[...this.activities.keys()]
-            .filter(a => a !== this.begin && !this._incoming.get(a).length)
-            .sort((a, b) => this.compare(a, b)));
+        const rest = [...this.activities.keys()].filter(a => a !== this.begin).sort((a, b) => this.compare(a, b));
+        // Activities nothing leads to first, then any left over: a cycle nothing enters.
+        roots.push(...rest.filter(a => !this._incoming.get(a).length), ...rest.filter(a => this._incoming.get(a).length));
         const state = new Map<string, "open" | "done">();
         for (const root of roots) {
             if (state.has(root)) continue;
@@ -350,7 +357,9 @@ function edgeKey(from: string, exit: string, to: string): string {
 export function buildOutline(s: WorkflowStructure): WorkflowOutline {
     const numbers = new Map<string, number>();
 
-    const sequence = (start: string, stops: Set<string>): OutlineItem[] => {
+    // `ahead`: steps a path further down this level will show; a branch reaching one
+    // continues there instead of claiming it.
+    const sequence = (start: string, stops: Set<string>, ahead: ReadonlySet<string> = new Set()): OutlineItem[] => {
         const items: OutlineItem[] = [];
         let n: string | undefined = start;
         let first = true;
@@ -363,7 +372,7 @@ export function buildOutline(s: WorkflowStructure): WorkflowOutline {
                 items.push({ kind: "end", activity: n });
                 return items;
             }
-            if (numbers.has(n)) {
+            if (numbers.has(n) || ahead.has(n)) {
                 items.push({ kind: "goto", target: n });
                 return items;
             }
@@ -398,12 +407,14 @@ export function buildOutline(s: WorkflowStructure): WorkflowOutline {
                 const single = branching.filter(e => e.forward.length === 1);
                 if (single.length) main = single.reduce((best, e) => (s.forwardReach(e.forward[0]).size > s.forwardReach(best.forward[0]).size ? e : best));
             }
+            // Side branches of a guard layout leave the steps the main path reaches to it.
+            const branchAhead = main ? new Set([...ahead, ...s.forwardReach(main.forward[0])]) : ahead;
             for (const e of branching) {
                 if (e === main) continue;
                 step.branches.push({
                     exit: step.decision ? e.name : undefined,
                     condition: e.condition,
-                    lanes: e.forward.map(t => sequence(t, inner)),
+                    lanes: e.forward.map(t => sequence(t, inner, branchAhead)),
                 });
             }
             step.directExits = direct.map(e => e.name);
@@ -429,7 +440,8 @@ export function buildOutline(s: WorkflowStructure): WorkflowOutline {
     const orphans = [...s.activities.keys()].filter(a => !s.reachable.has(a)).sort((a, b) => s.compare(a, b));
     const roots = orphans.filter(a => !s.incoming(a).some(i => orphans.includes(i.from)));
     const unreachable: OutlineItem[][] = [];
-    for (const root of roots.length ? roots : orphans.slice(0, 1)) {
+    // Activities nothing leads to first, then whatever is left (a cycle nothing enters).
+    for (const root of [...roots, ...orphans]) {
         if (!numbers.has(root)) unreachable.push(sequence(root, new Set()));
     }
     return { main, unreachable, numbers };

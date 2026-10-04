@@ -137,6 +137,8 @@ describe('WorkflowManager - Workflow Editor parity', () => {
             diagram.forceCheckout.mockResolvedValueOnce({ id: DRAFT });
             await expect(wm.checkout('My WF', { force: true })).resolves.toMatchObject({ versionSysId: DRAFT });
             expect(diagram.forceCheckout).toHaveBeenCalledWith(PUBLISHED);
+            diagram.forceCheckout.mockResolvedValueOnce({ id: PUBLISHED, readOnly: true, statusDisplay: 'Checked out by Other' });
+            await expect(wm.checkout('My WF', { force: true })).rejects.toThrow("could not be checked out (Checked out by Other)");
         });
 
         it('finds the current user\'s draft, and explains when there is none to use', async () => {
@@ -241,6 +243,52 @@ describe('WorkflowManager - Workflow Editor parity', () => {
             expect(result.conditions[0]).toMatchObject({ sysId: NEW_EXIT, name: 'Always' });
         });
 
+        it('takes the new activity out again when the exit to wire from does not exist', async () => {
+            let deleted = false;
+            diagram.deleteNode.mockImplementation(async () => { deleted = true; });
+            routes.push(
+                ['wf_activity', `sys_id=${END}`, [{ sys_id: END, name: 'End', workflow_version: DRAFT }]],
+                ['wf_activity', `sys_id=${NEW_ACT}`, () => deleted ? [] : [{ sys_id: NEW_ACT, name: 'Wait', workflow_version: DRAFT,
+                    'activity_definition.name': 'Timer', 'activity_definition.attributes': '' }]],
+                ['wf_transition', `from=${NEW_ACT}^ORto=${NEW_ACT}`, []],
+            );
+            await expect(wm.addActivity(DRAFT, { definition: 'Timer', name: 'Wait', connectTo: END, exitCondition: 'Nope' }))
+                .rejects.toThrow("'Wait' has no exit 'Nope'. Exits: Always");
+            expect(forms.insert).toHaveBeenCalledTimes(1);
+            expect(diagram.deleteNode.mock.calls[0][1]).toBe(NEW_ACT);
+            expect(diagram.newEdge).not.toHaveBeenCalled();
+        });
+
+        it('names the added activity when wiring it fails', async () => {
+            diagram.newEdgeControlNode.mockRejectedValueOnce(new Error('processor said no'));
+            await expect(wm.addActivity(DRAFT, { definition: 'Timer', name: 'Wait', insertOn: TRANSITION }))
+                .rejects.toThrow(`processor said no (activity 'Wait' ${NEW_ACT} was added to the draft; its wiring is incomplete)`);
+        });
+
+        it('refuses an exit name that several exits share', async () => {
+            const IF = id('c');
+            routes.push(
+                ['wf_activity', `sys_id=${IF}`, [{ sys_id: IF, name: 'Check', workflow_version: DRAFT }]],
+                ['wf_condition', `activity=${IF}^ORDERBYorder`, [
+                    { sys_id: id('d'), activity: IF, name: 'Yes', order: '100' }, { sys_id: id('e'), activity: IF, name: 'yes', order: '200' }]],
+            );
+            await expect(wm.addActivity(DRAFT, { definition: 'Timer', name: 'Wait', connectFrom: { activity: IF, condition: 'Yes' } }))
+                .rejects.toThrow(`'Check' has 2 exits named 'Yes'; use a sys_id: ${id('d')}, ${id('e')}`);
+            expect(forms.insert).not.toHaveBeenCalled();
+        });
+
+        it('checks the ids the record API puts into the activity form', async () => {
+            await expect(wm.createActivity({ name: 'Wait', workflowVersionSysId: DRAFT, activityDefinitionSysId: `${TIMER_DEF}^workflow_version=${OTHER}`,
+                variables: { script: 'answer = 1;' } })).rejects.toThrow(InvalidParameterException);
+            expect(forms.insert).not.toHaveBeenCalled();
+        });
+
+        it('refuses a stage name that several stages share', async () => {
+            routes.push(['wf_stage', `workflow_version=${DRAFT}`, [{ sys_id: 's1', name: 'Fulfil', value: 'a' }, { sys_id: 's2', name: 'Fulfil', value: 'b' }]]);
+            await expect(wm.addActivity(DRAFT, { definition: 'Timer', name: 'Wait', stage: 'fulfil' }))
+                .rejects.toThrow(`2 stages match 'fulfil' on workflow version ${DRAFT}; use a sys_id: s1, s2`);
+        });
+
         it('requires an exit choice when connecting from an activity with several', async () => {
             const IF = id('c');
             routes.push(
@@ -250,10 +298,11 @@ describe('WorkflowManager - Workflow Editor parity', () => {
             );
             await expect(wm.addActivity(DRAFT, { definition: 'Timer', name: 'Wait', connectFrom: { activity: IF } }))
                 .rejects.toThrow("'Check' has several exits; specify one of: Yes, No");
+            expect(forms.insert).not.toHaveBeenCalled();
 
             await wm.addActivity(DRAFT, { definition: 'Timer', name: 'Wait', connectFrom: { activity: IF, condition: 'no' } });
             expect(diagram.newEdge.mock.calls[0][1]).toMatchObject({ source: IF, sourcePort: id('e'), target: NEW_ACT });
-            expect(forms.insert.mock.calls[1][1].fields).toEqual({ name: 'Wait', x: 280, y: 100 });
+            expect(forms.insert.mock.calls[0][1].fields).toEqual({ name: 'Wait', x: 280, y: 100 });
         });
 
         it('prefers the core activity when a name is shared with Activity Designer ones, and refuses true ambiguity', async () => {
@@ -474,7 +523,7 @@ describe('WorkflowManager - Workflow Editor parity', () => {
                 stages: [{ sysId: 'st', name: 'Fulfilment', value: 'fulfilment', order: 1 }],
                 activities: [
                     { sysId: BEGIN, name: 'Begin', definitionSysId: IF_DEF, definitionName: 'If', input: '', stage: 'st',
-                        variables: { condition: `variables.${CATVAR}=true^EQ`, advanced: 'false', empty: '' },
+                        variables: { condition: `variables.${CATVAR}=true^EQ`, advanced: '0', empty: '' },
                         conditions: [{ sysId: ALWAYS, activitySysId: BEGIN, name: 'Yes', condition: "activity.result == 'yes'", order: 1,
                             elseFlag: false, error: false, event: false, eventName: '', shortDescription: '', skipDuringGenerate: false }] },
                     { sysId: SUB_ACT, name: 'Fulfil', definitionSysId: CAT_DEF, definitionName: 'Catalog Task', input: '{"UserName":"x"}',
@@ -525,7 +574,7 @@ describe('WorkflowManager - Workflow Editor parity', () => {
             const [begin, task] = exported.activities;
             expect(begin.variables).toEqual([
                 { element: 'condition', label: 'Condition', type: 'conditions', value: `variables.${CATVAR}=true^EQ`, isDefault: false },
-                { element: 'advanced', label: 'Advanced', type: 'boolean', value: 'false', isDefault: true },
+                { element: 'advanced', label: 'Advanced', type: 'boolean', value: '0', isDefault: true },
             ]);
             expect(begin.exits[0]).toMatchObject({ name: 'Yes', condition: "activity.result == 'yes'" });
             expect(task.variables).toEqual([
@@ -565,6 +614,13 @@ describe('WorkflowManager - Workflow Editor parity', () => {
         });
     });
 
+    describe('activity types that wait', () => {
+        it('reads the handler, not its comments', async () => {
+            routes.push(['wf_activity_definition', `sys_id=${TIMER_DEF}`, [{ script: "// executing.state = 'waiting' in the old version\nX.prototype = Object.extendsObject(WFActivityHandler, {});" }]]);
+            await expect((wm as any).typeWaits({ sysId: TIMER_DEF, sysClassName: 'wf_activity_definition' })).resolves.toBe(false);
+        });
+    });
+
     describe('validateWorkflow', () => {
         it('runs the report page, then reads the results', async () => {
             const req = { get: jest.fn<any>().mockResolvedValue({
@@ -578,6 +634,14 @@ describe('WorkflowManager - Workflow Editor parity', () => {
                 items: [{ type: 'ValidateSingleEnd', level: 'Info', message: 'ok', details: '' }],
             });
             expect(req.get.mock.calls[0][0]).toMatchObject({ path: '/validate_workflow.do', query: { sysparm_sys_id: DRAFT }, requires: READ_ONLY });
+        });
+
+        it('does not pass off an earlier run as this one when the report page did not render', async () => {
+            const req = { get: jest.fn<any>().mockResolvedValue({ status: 200, data: '<html>login</html>' }) };
+            jest.spyOn(SessionManager.getInstance(), 'getRequest').mockReturnValue(req as any);
+            routes.push(['v_wf_validation_report', `workflow_version=${DRAFT}`, [{ type: 'Old', level: 'Warn', message: 'old', details: '' }]]);
+            await expect(wm.validateWorkflow(DRAFT)).rejects.toThrow(`Could not run the validation for workflow version ${DRAFT} (status 200)`);
+            expect(read).not.toHaveBeenCalledWith('v_wf_validation_report', expect.anything(), expect.anything(), expect.anything());
         });
     });
 });

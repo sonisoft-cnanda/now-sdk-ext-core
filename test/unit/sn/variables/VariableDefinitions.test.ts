@@ -59,6 +59,17 @@ describe("VariableDefinitions", () => {
         await expect(definitions.list("var__m_x^ORname=y")).rejects.toThrow(InvalidParameterException);
     });
 
+    it("rejects a language that is not a language code", async () => {
+        await expect(definitions.list(MODEL, { language: "en^element=script" })).rejects.toThrow(InvalidParameterException);
+        expect(req.executeRequest).not.toHaveBeenCalled();
+    });
+
+    it("asks again while a read is queued (202)", async () => {
+        req.executeRequest.mockResolvedValueOnce({ status: 202, bodyObject: null }).mockResolvedValueOnce(ok([]));
+        await expect(definitions.list(MODEL)).resolves.toEqual([]);
+        expect(req.executeRequest).toHaveBeenCalledTimes(2);
+    });
+
     it("does not cache failures", async () => {
         req.executeRequest.mockResolvedValueOnce({ status: 500, bodyObject: null }).mockResolvedValueOnce(ok([]));
         await expect(definitions.list(MODEL)).rejects.toThrow(/Failed to read var_dictionary/);

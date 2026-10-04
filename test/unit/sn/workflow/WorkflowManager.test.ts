@@ -449,11 +449,21 @@ describe('WorkflowManager - Unit Tests', () => {
         it('should throw if the instance does not publish the version', async () => {
             mockRequestHandler.put.mockResolvedValueOnce(createMockPutResponse('ver-123'));
             mockRequestHandler.post.mockResolvedValueOnce(createProcessorResponse('ver-123', false));
+            mockRequestHandler.get.mockResolvedValueOnce({ status: 200, bodyObject: { result: [{ published: 'false' }] } } as any);
 
             await expect(wfManager.publishWorkflow({
                 versionSysId: 'ver-123',
                 startActivitySysId: 'act-1'
             })).rejects.toThrow('the instance did not publish it');
+        });
+
+        it('should accept a publish the processor made but could not draw (an activity with no type)', async () => {
+            mockRequestHandler.put.mockResolvedValueOnce(createMockPutResponse('ver-123'));
+            mockRequestHandler.post.mockResolvedValueOnce({ data: undefined, status: 200, statusText: 'OK', headers: {}, config: {} } as any);
+            mockRequestHandler.get.mockResolvedValueOnce({ status: 200, bodyObject: { result: [{ published: 'true' }] } } as any);
+
+            await expect(wfManager.publishWorkflow({ versionSysId: 'ver-123', startActivitySysId: 'act-1' })).resolves.toBeUndefined();
+            expect(mockRequestHandler.get.mock.calls[0][0]).toMatchObject({ query: expect.objectContaining({ sysparm_query: 'sys_id=ver-123' }) });
         });
 
         it('should throw error if versionSysId is empty', async () => {

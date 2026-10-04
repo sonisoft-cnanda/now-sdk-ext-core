@@ -1,4 +1,5 @@
 import { FlowConversionPlan, FlowPlanCondition, FlowPlanConfidence, FlowPlanNode, FlowPlanValue, FluentSourceFile } from "./WorkflowConversionModels";
+import { isReservedIdentifier } from "./WorkflowFlowConversion";
 
 /**
  * Writes a Fluent (now-sdk) skeleton for a {@link FlowConversionPlan}: one `.now.ts` file with
@@ -27,6 +28,8 @@ export function generateFluentFlow(plan: FlowConversionPlan, opts: FluentGenerat
 
 class Generator {
     private readonly _lines: string[] = [];
+    private readonly _keys = new Set<string>();
+    private _usesParams = false;
     private readonly _imports = { automation: new Set<string>(['wfa']), core: new Set<string>() };
 
     public constructor(private readonly plan: FlowConversionPlan) {}
@@ -64,7 +67,8 @@ class Generator {
     private definition(): string[] {
         const p = this.plan;
         const out: string[] = [];
-        const name = camel(p.identifier);
+        const name = exportName(p.identifier);
+        this._keys.add(p.identifier);
         const [i2, i3] = [INDENT.repeat(2), INDENT.repeat(3)];
         const config = [
             `${i2}$id: Now.ID[${str(p.identifier)}],`,
@@ -95,8 +99,7 @@ class Generator {
         if (p.kind === 'flow') out.push(`${INDENT}${this.trigger()},`);
         this.emit(p.steps, 2, 0);
         // the build rejects an unused parameter
-        const usesParams = this._lines.some(l => /\bparams\./.test(l.replace(/^\s*(\/\/|\*).*$/, '')));
-        out.push(`${INDENT}(${usesParams ? 'params' : ''}) => {`);
+        out.push(`${INDENT}(${this._usesParams ? 'params' : ''}) => {`);
         out.push(...this._lines);
         out.push(`${INDENT}}`, ')');
         return out;
@@ -104,7 +107,7 @@ class Generator {
 
     private trigger(): string {
         const t = this.plan.trigger;
-        const id = `{ $id: Now.ID[${str(`${this.plan.identifier}_trigger`)}] }`;
+        const id = `{ $id: ${this.nowId('trigger')} }`;
         if (t.kind === 'serviceCatalog') return `wfa.trigger(trigger.application.serviceCatalog, ${id}, { run_flow_in: 'background' })`;
         const event = t.recordEvent === 'createdOrUpdated' ? 'createdOrUpdated' : 'created';
         return `wfa.trigger(trigger.record.${event}, ${id}, { table: ${str(t.table)}, condition: ${str(t.condition ?? '')}, run_flow_in: 'background' })`;
@@ -123,7 +126,7 @@ class Generator {
         const push = (...lines: string[]): void => {
             this._lines.push(...lines.map(l => (l ? pad + l : l)));
         };
-        const id = (suffix: string): string => `Now.ID[${str(`${this.plan.identifier}_${suffix}`)}]`;
+        const id = (suffix: string): string => this.nowId(suffix);
         const step = (n: FlowPlanNode): string => (n.source.number ? `step ${n.source.number}: ${n.source.name}` : n.source.name);
 
         for (const n of nodes) {
@@ -147,6 +150,7 @@ class Generator {
                     break;
                 case 'setFlowVariables':
                     push(...notesComment(n.notes, 'note'));
+                    this._usesParams = true;
                     push(`wfa.flowLogic.setFlowVariables({ $id: ${id(n.id)}, annotation: ${str(`Legacy ${step(n)}`)} }, params.flowVariables, {`);
                     for (const [k, v] of Object.entries(n.values)) push(`${INDENT}${key(k)}: ${this.value(v, k, depth + 1)},`);
                     push('})');
@@ -155,6 +159,7 @@ class Generator {
                     push(...notesComment(n.notes, 'note'));
                     n.branches.forEach((b, i) => {
                         push(...conditionComment(b.condition));
+                        if (b.condition.derived && /\bparams\./.test(b.condition.expression)) this._usesParams = true;
                         push(`wfa.flowLogic.${i ? 'elseIf' : 'if'}({ $id: ${id(i ? `${n.id}_${i}` : n.id)}, condition: ${condition(b.condition)}, annotation: ${str(`${b.label} (legacy ${step(n)})`)} }, () => {`);
                         this.block(b.body, depth + 1, parallelDepth);
                         push('})');
@@ -201,13 +206,28 @@ class Generator {
         else this._lines.push(`${INDENT.repeat(depth)}// carries on with the steps after this decision`);
     }
 
+    /** One `Now.ID[...]` key per `$id`, never repeated in the file. */
+    private nowId(suffix: string): string {
+        const base = `${this.plan.identifier}_${suffix}`;
+        let key = base;
+        for (let i = 2; this._keys.has(key); i++) key = `${base}_${i}`;
+        this._keys.add(key);
+        return `Now.ID[${str(key)}]`;
+    }
+
+    private noteParams(expr: string): void {
+        if (expr.startsWith('params.')) this._usesParams = true;
+    }
+
     private value(v: FlowPlanValue, inputName: string, depth: number): string {
         switch (v.kind) {
             case 'literal':
                 return typeof v.value === 'string' ? str(v.value) : String(v.value);
             case 'pill':
+                this.noteParams(v.expr);
                 return `wfa.dataPill(${v.expr}, ${str(v.type)})`;
             case 'text':
+                for (const part of v.parts) if (typeof part !== 'string') this.noteParams(part.expr);
                 return `\`${v.parts.map(p => (typeof p === 'string' ? escapeTemplate(p) : `\${wfa.dataPill(${p.expr}, ${str(p.type)})}`)).join('')}\``;
             case 'template': {
                 const fields = Object.entries(v.fields).map(([k, x]) => `${INDENT.repeat(depth + 1)}${key(k)}: ${this.value(x, k, depth + 1)},`);
@@ -264,8 +284,9 @@ function humanize(name: string): string {
     return words.charAt(0).toUpperCase() + words.slice(1);
 }
 
+/** A derived condition is a template literal body with its literal text already escaped. */
 function condition(c: FlowPlanCondition): string {
-    return c.derived ? `\`${c.expression.replace(/`/g, '\\`')}\`` : "''";
+    return c.derived ? `\`${c.expression}\`` : "''";
 }
 
 function conditionComment(c: FlowPlanCondition): string[] {
@@ -333,7 +354,8 @@ function key(name: string): string {
     return /^[A-Za-z_$][\w$]*$/.test(name) ? name : str(name);
 }
 
-function camel(identifier: string): string {
+function exportName(identifier: string): string {
     const name = identifier.replace(/_([a-z0-9])/g, (_m, c: string) => c.toUpperCase());
-    return /^[a-z]/i.test(name) ? name : `flow${name}`;
+    const safe = /^[a-z]/i.test(name) ? name : `flow${name}`;
+    return isReservedIdentifier(safe) ? `${safe}Flow` : safe;
 }

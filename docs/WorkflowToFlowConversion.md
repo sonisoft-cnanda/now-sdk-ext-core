@@ -63,7 +63,7 @@ nex workflow convert --file laptop.json --plan laptop.plan.json --fluent ./my-ap
 | `renderWorkflowNodes(data, opts)` | Every activity with its settings, where it is reached from and where each exit leads. |
 | `analyzeWorkflow(data)` / `renderWorkflowAnalysis(data)` | Paths, waits, decisions, parallel splits and where they rejoin, loops (and the Turnstile capping them), dead exits, unreachable steps, scratchpad values (who sets, who reads), catalog variables read, scripts, template fields, subflows, Activity Designer activities. `analyzeWorkflow` returns it as data, activity references as sys_ids. |
 | `renderWorkflowMermaid(data)` | A Mermaid flowchart: decisions as diamonds, waits marked, loops dashed, dead exits drawn. |
-| `WorkflowStructure` / `buildOutline` | The model under all of it: back edges by depth-first search from Begin, immediate post-dominators for where paths rejoin (parallel splits rejoin at the Join they all reach), and the block tree. |
+| `WorkflowStructure` / `buildOutline` | The model under all of it: back edges by depth-first search from Begin (and from parts nothing leads to), immediate post-dominators for where paths rejoin (parallel lines rejoin at the Join they all reach unless they meet before it), and the block tree. In a guard-clause layout the main path owns the steps it reaches; a side branch that reaches one says "continue at step N" below. |
 
 ## The plan
 
@@ -79,7 +79,8 @@ nex workflow convert --file laptop.json --plan laptop.plan.json --fluent ./my-ap
 | `coverage` | Activities carried over directly, partly, or to design by hand |
 
 Every setting a mapping did not use is listed on its step ("Not carried over: …"), so nothing
-is dropped silently. Values are data pills (`{ kind: 'pill', expr: 'params.trigger.request_item.requested_for.manager' }`),
+is dropped silently. Literal text in derived conditions is escaped for the template literal it
+goes into (`\`, `` ` ``, `${`), and a workflow with no record (`global`) gets no data pills on it. Values are data pills (`{ kind: 'pill', expr: 'params.trigger.request_item.requested_for.manager' }`),
 text with pills, `TemplateValue` field maps or approval rules — the generator writes them as Fluent.
 
 ## What maps to what
@@ -93,9 +94,9 @@ text with pills, `TemplateValue` field maps or approval rules — the generator 
 | Switch | if / else if | On a field: each exit `field=value`; on a catalog variable: left to write. An Else exit becomes `else`; exits comparing `current.<field>` with a literal are read |
 | Set Values | Update Record | `TemplateValue` from the encoded values; `javascript:` and `${…}` values flagged |
 | Catalog Task | Create Catalog Task | Field mode, Values mode (`task_set_values`) or template; priority; advanced script (only when "advanced" is on) and task variables noted. When the workflow branches on how the task closed: **Create Task on `sc_task`** (with `request_item` and `parent`) so the flow can branch on `Record.state` |
-| Create Task | Create Task | `parent` = the record, as the handler sets it |
+| Create Task | Create Task | `parent` = the record, and `request_item` / `change_request` / `problem` for `sc_task` / `change_task` / `problem_task` on those tables, as the handler sets them |
 | Timer | Wait For a Duration | Explicit durations directly; relative, field and script timers flagged |
-| Wait for condition | Wait For Condition | Script conditions flagged |
+| Wait for condition | Wait For Condition | Script conditions (the script field, or `javascript:` in the condition) flagged |
 | Notification | Send Email | Recipients as sys_ids, addresses or pills; `${field}` in the subject as pills; `${…}` in the body flagged |
 | Log Message | Log | `${field}` as pills |
 | Create Event | Fire Event | Scripted parameters flagged |

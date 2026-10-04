@@ -41,6 +41,30 @@ const TIMER_ELEMENTS = new Set([
 const QUERY_TERM = /^([a-z_][\w.]*?)(=|!=|>=|<=|>|<|NOT LIKE|LIKE|STARTSWITH|ENDSWITH|NOT IN|IN|ISNOTEMPTY|ISEMPTY|ANYTHING|SAMEAS|NSAMEAS)(.*)$/i;
 const SCRIPT_LITERAL = /^(true|false|'[^']*'|-?\d+(?:\.\d+)?)$/;
 
+/**
+ * Names generated code cannot use for a step's output: reserved words, and the bindings the
+ * Fluent file itself uses.
+ */
+const RESERVED = new Set([
+    'break', 'case', 'catch', 'class', 'const', 'continue', 'debugger', 'default', 'delete', 'do', 'else', 'enum', 'export',
+    'extends', 'false', 'finally', 'for', 'function', 'if', 'import', 'in', 'instanceof', 'new', 'null', 'return', 'super',
+    'switch', 'this', 'throw', 'true', 'try', 'typeof', 'var', 'void', 'while', 'with', 'yield', 'let', 'static', 'implements',
+    'interface', 'package', 'private', 'protected', 'public', 'await', 'arguments', 'eval', 'undefined',
+    'params', 'wfa', 'action', 'trigger',
+]);
+
+/** Whether generated code cannot use this name as a binding. */
+export function isReservedIdentifier(name: string): boolean {
+    return RESERVED.has(name);
+}
+
+/** Text placed in a template literal as is: backslashes, backticks and `${` escaped. */
+export function templateLiteralText(text: string): string {
+    return String(text ?? '').replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${');
+}
+
+const FIELD_PATH = /^[a-z_]\w*(\.[a-z_]\w*)*$/i;
+
 /** A code-safe lowercase identifier from free text. */
 export function identifierFrom(text: string, max = 48): string {
     const id = String(text ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, max).replace(/_+$/, '');
@@ -128,6 +152,7 @@ export function planFlowConversion(data: WorkflowExport): FlowConversionPlan {
     const outline = buildOutline(s);
     const analysis = analyzeWorkflow(data);
     const trigger = planTrigger(data);
+    if (!data?.workflow || !Array.isArray(data.activities)) throw new Error('Not a workflow export: workflow or activities missing');
     const identifier = identifierFrom(data.workflow.name);
     const ctx: Context = {
         s, numbers: outline.numbers, recordPill: trigger.recordPill, table: data.workflow.table,
@@ -216,7 +241,7 @@ export function planFlowConversion(data: WorkflowExport): FlowConversionPlan {
 
     return {
         format: 'now-sdk-ext/flow-conversion-plan@1',
-        source: { workflowSysId: data.workflow.sysId, versionSysId: data.version.sysId, name: data.workflow.name, table: data.workflow.table },
+        source: { workflowSysId: data.workflow.sysId, versionSysId: data.version?.sysId ?? '', name: data.workflow.name, table: data.workflow.table },
         kind: trigger.kind === 'subflow' ? 'subflow' : 'flow',
         name: data.workflow.name,
         identifier,
@@ -229,7 +254,7 @@ export function planFlowConversion(data: WorkflowExport): FlowConversionPlan {
 }
 
 function planTrigger(data: WorkflowExport): FlowPlanTrigger {
-    const table = data.workflow.table;
+    const table = data.workflow.table ?? '';
     const catalogItems = (data.usedBy?.catalogItems ?? []).map(c => ({ sysId: c.sysId, name: c.name }));
     const inputs = (data.inputs ?? []).map(i => ({ name: i.name, label: i.label, type: i.type, mandatory: i.mandatory }));
     const parents = data.usedBy?.parentWorkflows ?? [];
@@ -254,9 +279,9 @@ function planTrigger(data: WorkflowExport): FlowPlanTrigger {
         };
     }
     return {
-        kind: 'record', table, recordEvent: 'created', condition: data.version.condition, catalogItems, inputs,
+        kind: 'record', table, recordEvent: 'created', condition: data.version?.condition, catalogItems, inputs,
         recordPill: 'params.trigger.current',
-        notes: [`The workflow starts when a ${table} record matching its condition is inserted${data.version.conditionType ? ` (condition type "${data.version.conditionType}")` : ''}. `
+        notes: [`The workflow starts when a ${table} record matching its condition is inserted${data.version?.conditionType ? ` (condition type "${data.version.conditionType}")` : ''}. `
             + 'Check whether it must also start on update before choosing the record trigger.'],
     };
 }
@@ -421,13 +446,13 @@ function exitCondition(ctx: Context, a: WorkflowExportActivity, exitName: string
     const results = [...legacy.matchAll(/activity\.result\s*==\s*['"]([^'"]*)['"]/g)].map(m => m[1]);
     const settings = new Settings(a);
     const output = ctx.outputs.get(a.sysId);
-    const either = (pill: string): string => results.map(r => `${pill}=${r}`).join('^OR');
+    const either = (pill: string): string => results.map(r => `${pill}=${templateLiteralText(r)}`).join('^OR');
 
     if (output && results.length && /^Approval - /.test(a.type)) {
         return { expression: either(`\${wfa.dataPill(${output}.approval_state, "choice")}`), source: legacy, derived: true };
     }
     if (a.type === 'Switch' && results.length) {
-        if (settings.value('type') === 'field' && settings.value('field')) {
+        if (settings.value('type') === 'field' && FIELD_PATH.test(settings.value('field')) && ctx.recordPill) {
             return { expression: either(`\${wfa.dataPill(${ctx.recordPill}.${settings.value('field')}, "string")}`), source: legacy, derived: true };
         }
         return { expression: '', source: `catalog variable ${settings.display('item_variable')} = ${results.join(' or ')}`, derived: false };
@@ -439,7 +464,7 @@ function exitCondition(ctx: Context, a: WorkflowExportActivity, exitName: string
     // a custom exit comparing a field of the record with a literal
     const compare = /^current\.([a-z_][\w.]*)\s*(===?|!==?)\s*(?:'([^']*)'|"([^"]*)"|(-?\d+(?:\.\d+)?|true|false))$/i.exec(legacy.trim());
     if (compare && !compare[1].startsWith('variables.') && ctx.recordPill) {
-        const literal = compare[3] ?? compare[4] ?? compare[5];
+        const literal = templateLiteralText(compare[3] ?? compare[4] ?? compare[5]);
         return { expression: `\${wfa.dataPill(${ctx.recordPill}.${compare[1]}, "string")}${compare[2].startsWith('!') ? '!=' : '='}${literal}`, source: legacy, derived: true };
     }
     if (ctx.s.isJoin(a.sysId) && results.length) {
@@ -457,6 +482,7 @@ function exitCondition(ctx: Context, a: WorkflowExportActivity, exitName: string
  * variables or with `javascript:` values cannot become data pills and leave it underived.
  */
 export function encodedQueryToCondition(query: string, recordPill: string, display = query): FlowPlanCondition {
+    if (!recordPill) return { expression: '', source: display.replace(/\^EQ$/, ''), derived: false };
     const terms = query.replace(/\^EQ$/, '').split(/(\^OR|\^NQ|\^)/).filter(Boolean);
     let derived = true;
     const parts: string[] = [];
@@ -470,7 +496,7 @@ export function encodedQueryToCondition(query: string, recordPill: string, displ
             derived = false;
             continue;
         }
-        parts.push(`\${wfa.dataPill(${recordPill}.${m[1]}, "string")}${m[2]}${m[3]}`);
+        parts.push(`\${wfa.dataPill(${recordPill}.${m[1]}, "string")}${m[2]}${templateLiteralText(m[3])}`);
     }
     return { expression: derived ? parts.join('') : '', source: display.replace(/\^EQ$/, ''), derived };
 }
@@ -498,9 +524,10 @@ function scriptTest(script: string, ctx: Context): FlowPlanCondition | undefined
     if (!test) return undefined;
     const m = /^(workflow\.scratchpad|current)\.([a-z_]\w*)(?:(===?|!==?)(.+))?$/i.exec(test);
     if (!m || (m[4] !== undefined && !SCRIPT_LITERAL.test(m[4]))) return undefined;
-    const literal = m[4] === undefined ? 'true' : m[4].replace(/^'|'$/g, '');
+    const literal = templateLiteralText(m[4] === undefined ? 'true' : m[4].replace(/^'|'$/g, ''));
     const operator = m[3]?.startsWith('!') ? '!=' : '=';
     if (m[1] === 'current') {
+        if (!ctx.recordPill) return undefined;
         return { expression: `\${wfa.dataPill(${ctx.recordPill}.${m[2]}, "string")}${operator}${literal}`, source: test, derived: true };
     }
     const type = typeOfLiteral(m[4] ?? 'true');
@@ -560,6 +587,8 @@ function mapActivity(ctx: Context, a: WorkflowExportActivity, step: OutlineStep,
     const id = newId(ctx, a.name);
     const notes: string[] = [];
     const record: FlowPlanValue = ctx.recordPill ? { kind: 'pill', expr: ctx.recordPill, type: 'reference' } : { kind: 'literal', value: '' };
+    // Inputs that take the record as text (a template literal) rather than a reference.
+    const recordText: FlowPlanValue = ctx.recordPill ? { kind: 'text', parts: [{ expr: ctx.recordPill, type: 'reference' }] } : { kind: 'literal', value: '' };
     if (!ctx.recordPill) notes.push('The workflow has no record (global): set the record this step works on.');
     const stage = s.data.stages?.find(st => st.sysId === a.stage)?.name;
     if (stage) notes.push(`Workflow stage: ${stage}.`);
@@ -684,6 +713,12 @@ function mapActivity(ctx: Context, a: WorkflowExportActivity, step: OutlineStep,
             // Branching on how the task closed needs the task as a data pill: Create Task's Record
             // output dot-walks, Create Catalog Task's "Catalog Task" output cannot be a pill in Fluent.
             const asTask = !catalog || branchesOnExit;
+            const taskTable = catalog ? 'sc_task' : settings.value('task_table') || 'task';
+            // The handler also links these task tables to the record it runs on.
+            const linkField = ({ sc_task: ['sc_req_item', 'request_item'], change_task: ['change_request', 'change_request'],
+                problem_task: ['problem', 'problem'] } as Record<string, [string, string]>)[taskTable];
+            const link: Record<string, FlowPlanValue> = catalog ? { request_item: record }
+                : linkField && ctx.recordPill && ctx.table === linkField[0] ? { [linkField[1]]: record } : {};
             if (branchesOnExit) {
                 ctx.outputs.set(a.sysId, id);
                 if (catalog) notes.push('Created with Create Task on sc_task (not Create Catalog Task) so the flow can branch on the task\'s state.');
@@ -691,8 +726,8 @@ function mapActivity(ctx: Context, a: WorkflowExportActivity, step: OutlineStep,
             const extra = Object.fromEntries(Object.entries(fields).filter(([f]) => f !== 'short_description'));
             const inputs: Record<string, FlowPlanValue> = asTask
                 ? {
-                    task_table: { kind: 'literal', value: catalog ? 'sc_task' : settings.value('task_table') || 'task' },
-                    field_values: { kind: 'template', fields: { ...(catalog ? { request_item: record } : {}), parent: record, ...fields } },
+                    task_table: { kind: 'literal', value: taskTable },
+                    field_values: { kind: 'template', fields: { ...link, parent: record, ...fields } },
                     wait: { kind: 'literal', value: wait },
                 }
                 : {
@@ -735,10 +770,14 @@ function mapActivity(ctx: Context, a: WorkflowExportActivity, step: OutlineStep,
                 notes.push(`It also waited on a script:\n${script}`);
             }
             if (/variables\./.test(conditions)) confidence = 'partial';
+            if (/javascript:/i.test(conditions)) {
+                confidence = 'partial';
+                notes.push('The condition evaluates a script (javascript:); flows do not run it there. Compute the value in a step before this one.');
+            }
             return finish({
                 kind: 'action', id, source: src, action: 'action.core.waitForCondition', label: a.name,
                 inputs: {
-                    record: { kind: 'text', parts: [{ expr: ctx.recordPill, type: 'reference' }] },
+                    record: recordText,
                     conditions: { kind: 'literal', value: nameCatalogVariables(s.data, conditions).replace(/\^EQ$/, '') },
                     table_name: { kind: 'literal', value: ctx.table },
                 },
@@ -786,7 +825,7 @@ function mapActivity(ctx: Context, a: WorkflowExportActivity, step: OutlineStep,
                 kind: 'action', id, source: src, action: 'action.core.fireEvent', label: a.name,
                 inputs: {
                     event_name: { kind: 'literal', value: settings.display('event_name') },
-                    record: { kind: 'text', parts: [{ expr: ctx.recordPill, type: 'reference' }] },
+                    record: recordText,
                 },
                 confidence, notes, stage, waits: false,
             }, confidence);
@@ -848,7 +887,8 @@ function source(ctx: Context, sysId: string): FlowPlanSource {
 }
 
 function newId(ctx: Context, text: string): string {
-    const base = identifierFrom(identifierFrom(text, 120).replace(new RegExp(`(^|_)${ctx.prefix}_`), '$1'), 60);
+    const short = identifierFrom(identifierFrom(text, 120).replace(new RegExp(`(^|_)${ctx.prefix}_`), '$1'), 60);
+    const base = RESERVED.has(short) ? `step_${short}` : short;
     let id = base;
     for (let i = 2; ctx.ids.has(id); i++) id = `${base}_${i}`;
     ctx.ids.add(id);
@@ -862,6 +902,7 @@ function oneLine(text: string, limit = 160): string {
 
 /** `${field}` / `${current.field}` → a data pill on the workflow's record; catalog variables are not pills. */
 function referencePill(expression: string, recordPill: string): FlowPlanValue | undefined {
+    if (!recordPill) return undefined;
     const m = /^\$\{\s*(?:current\.)?([a-z_][\w.]*)\s*\}$/i.exec(expression.trim());
     if (!m || m[1].startsWith('variables.')) return undefined;
     return { kind: 'pill', expr: `${recordPill}.${m[1]}`, type: 'reference' };
@@ -880,7 +921,7 @@ function approvers(value: string, recordPill: string): FlowPlanValue[] {
 
 /** Text with `${field}` substitutions → text with data pills (catalog variables and expressions stay text). */
 function substitute(text: string, recordPill: string): FlowPlanValue {
-    if (!/\$\{/.test(text)) return { kind: 'literal', value: text };
+    if (!/\$\{/.test(text) || !recordPill) return { kind: 'literal', value: text };
     const parts: Array<string | { expr: string; type: string }> = [];
     let last = 0;
     for (const m of text.matchAll(/\$\{\s*(?:current\.)?([a-z_][\w.]*)\s*\}/gi)) {

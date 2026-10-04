@@ -117,7 +117,8 @@ export function parseFormHtml(html: string, table: string): FormSnapshot {
         if (type) control.type = type;
         if (mandatory.has(control.name)) control.mandatory = true;
         const variable = splitVariableName(control.name, table);
-        if (variable) variables[variable.element] = { ...control, ...variable };
+        // Keyed by column and element: a form can show the same element on two glide_var columns.
+        if (variable) variables[`${variable.field}.${variable.element}`] = { ...control, ...variable };
         else fields[control.name] = control;
     }
 

@@ -95,7 +95,8 @@ function label(s: WorkflowStructure, sysId: string, opts: WorkflowViewOptions, n
 }
 
 function header(s: WorkflowStructure): string[] {
-    const { workflow: w, version: v } = s.data;
+    const w = s.data.workflow ?? ({} as Partial<WorkflowExport["workflow"]>);
+    const v = s.data.version ?? ({} as Partial<WorkflowExport["version"]>);
     let state = "retired";
     if (v.published) state = "published";
     else if (v.checkedOut) state = "draft";
@@ -183,10 +184,11 @@ export function renderWorkflowOutline(data: WorkflowExport, opts: WorkflowViewOp
     };
 
     render(outline.main, 0);
-    for (const sequence of outline.unreachable) {
-        out.push("", "UNREACHABLE — nothing transitions here from Begin:");
+    if (outline.unreachable.length) out.push("", "UNREACHABLE — nothing transitions here from Begin:");
+    outline.unreachable.forEach((sequence, i) => {
+        if (i) out.push("");
         render(sequence, 1);
-    }
+    });
     return out.map(line => line.trimEnd()).join("\n");
 }
 

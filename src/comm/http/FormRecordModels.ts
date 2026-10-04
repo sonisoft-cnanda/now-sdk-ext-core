@@ -90,7 +90,10 @@ export interface FormSnapshot {
     /** Ordinary field controls, keyed by posted name */
     fields: Record<string, FormControl>;
 
-    /** Variable controls, keyed by element name */
+    /**
+     * Variable controls, keyed by `<variable column>.<element>` (e.g. `vars.timer_type`): a
+     * form can show the same element on more than one glide_var column.
+     */
     variables: Record<string, FormVariableControl>;
 }
 

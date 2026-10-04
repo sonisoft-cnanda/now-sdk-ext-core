@@ -14,6 +14,7 @@ import {
     trivialCondition,
 } from '../../../../src/sn/workflow/WorkflowViews';
 import { buildOutline, WorkflowStructure } from '../../../../src/sn/workflow/WorkflowStructure';
+import { buildExport } from './workflowExportBuilder';
 
 const fixture = (name: string): WorkflowExport => JSON.parse(readFileSync(new URL(`./fixtures/${name}.json`, import.meta.url), 'utf8')) as WorkflowExport;
 const LAPTOP = fixture('laptop-request');
@@ -33,23 +34,28 @@ describe('renderWorkflowOutline', () => {
         expect(numbers).toEqual(Array.from({ length: 15 }, (_, i) => i + 1));
     });
 
+    it('lets a side branch skip ahead to steps the main path shows', () => {
+        expect(text).toContain('  on No:\n    → continue at step 13 (Close complete)\n  on Yes ↓\n6. Prepare order [Run Script]');
+        expect(text).toContain('13. Close complete [Set Values]  (stage: Completed)\n');
+    });
+
     it('reads short branches as guard clauses and carries on with the main path', () => {
         expect(text).toContain('  on Skipped: (no transition — the workflow stops here)\n  on Rejected:\n    3. Close rejected [Set Values]');
         expect(text).toContain('  on Approved ↓\n4. Provision account [Workflow] [WAIT]');
     });
 
     it('closes parallel branches at their Join and points loops back', () => {
-        expect(text).toContain('9. Order and account [Branch]\n  in parallel:\n    branch 1:');
-        expect(text).toContain('↻ on Continue: back to step 11 (Create the account)');
-        expect(text).toContain('↳ paths rejoin:\n14. All done [Join] [WAIT]');
-        expect(text).toContain('on Incomplete:\n    → continue at step 13 (Notify failure)');
+        expect(text).toContain('7. Order and account [Branch]\n  in parallel:\n    branch 1:');
+        expect(text).toContain('↻ on Continue: back to step 9 (Create the account)');
+        expect(text).toContain('↳ paths rejoin:\n12. All done [Join] [WAIT]');
+        expect(text).toContain('on Incomplete:\n    → continue at step 11 (Notify failure)');
     });
 
     it('marks waits from the activity type, honouring wait_for_completion', () => {
         for (const step of ['Manager approval [Approval - User] [WAIT]', 'Order laptop [Catalog Task] [WAIT]', 'Provision account [Workflow] [WAIT]', 'All done [Join] [WAIT]']) {
             expect(text).toContain(step);
         }
-        expect(text).toContain('7. Heads-up task [Create Task]\n');
+        expect(text).toContain('14. Heads-up task [Create Task]\n');
         expect(text).toContain('[Create AD User] [DESIGNER]');
     });
 
@@ -155,7 +161,7 @@ describe('WorkflowStructure', () => {
         const s = new WorkflowStructure(LAPTOP);
         expect(s.begin).toBe('begin');
         expect([...s.backEdges]).toEqual([expect.stringMatching(/^retry\|.+\|acct$/)]);
-        expect(buildOutline(s).numbers.get('join')).toBe(14);
+        expect(buildOutline(s).numbers.get('join')).toBe(12);
     });
 
     it('rejoins parallel branches at their Join', () => {
@@ -174,5 +180,57 @@ describe('helpers', () => {
         expect(lineCount('a\nb\n')).toBe(2);
         expect(lineCount('a\r\nb')).toBe(2);
         expect(lineCount('')).toBe(1);
+    });
+});
+
+describe('structure edge cases (code review)', () => {
+    it('gives a shared tail to the main path, not to the first side branch', () => {
+        const data = buildExport({
+            activities: [
+                { id: 'begin', type: 'Begin' },
+                { id: 'route', type: 'Switch', vars: { type: 'field', field: 'priority' }, exits: ['Low', 'Mid', 'High'] },
+                { id: 'notify', type: 'Log Message' }, { id: 'done', type: 'Log Message' }, { id: 'other', type: 'Log Message' },
+                { id: 'end', type: 'End' },
+            ],
+            edges: [['begin', 'Always', 'route'], ['route', 'Low', 'notify'], ['route', 'Mid', 'done'], ['route', 'High', 'other'],
+                ['notify', 'Always', 'done'], ['done', 'Always', 'end'], ['other', 'Always', 'end']],
+        });
+        const text = renderWorkflowOutline(data);
+        expect(text).toContain('  on Mid:\n    → continue at step 5 (done)');
+        expect(text).toContain('  on Low ↓\n4. notify [Log Message]\n5. done [Log Message]\n■ End');
+    });
+
+    it('rejoins parallel lines where they meet, not at a later Join', () => {
+        const data = buildExport({
+            activities: [
+                { id: 'begin', type: 'Begin' }, { id: 'split', type: 'Branch' },
+                { id: 'left', type: 'Log Message' }, { id: 'right', type: 'Log Message' }, { id: 'shared', type: 'Log Message' },
+                { id: 'join', type: 'Join' }, { id: 'end', type: 'End' },
+            ],
+            edges: [['begin', 'Always', 'split'], ['split', 'Always', 'left'], ['split', 'Always', 'right'], ['left', 'Always', 'shared'],
+                ['right', 'Always', 'shared'], ['shared', 'Always', 'join'], ['join', 'Complete', 'end'], ['join', 'Incomplete', 'end']],
+        });
+        expect(renderWorkflowOutline(data)).toContain('↳ paths rejoin WITHOUT a Join — what follows runs once per branch:\n5. shared [Log Message]\n6. join [Join] [WAIT]');
+    });
+
+    it('shows a cycle nothing leads to, and reports its loop', () => {
+        const data = buildExport({
+            activities: [{ id: 'begin', type: 'Begin' }, { id: 'end', type: 'End' }, { id: 'a', type: 'Log Message' }, { id: 'b', type: 'Log Message' }, { id: 'stray', type: 'Log Message' }],
+            edges: [['begin', 'Always', 'end'], ['a', 'Always', 'b'], ['b', 'Always', 'a']],
+        });
+        const text = renderWorkflowOutline(data);
+        expect(text).toContain('UNREACHABLE — nothing transitions here from Begin:\n  2. stray [Log Message]');
+        expect(text).toContain('  3. a [Log Message]\n  4. b [Log Message]\n    ↻ on Always: back to step 3 (a)');
+        expect(text.match(/UNREACHABLE/g)).toHaveLength(1);
+        expect(analyzeWorkflow(data).loops).toEqual([{ from: 'b', exit: 'Always', to: 'a' }]);
+    });
+
+    it('reads an export with missing optional parts', () => {
+        const data = buildExport({ activities: [{ id: 'begin', type: 'Begin' }, { id: 'run', type: 'Run Script' }, { id: 'end', type: 'End' }],
+            edges: [['begin', 'Always', 'run'], ['run', 'Always', 'end']] });
+        delete (data.activities[1] as Partial<typeof data.activities[1]>).variables;
+        delete (data as Partial<WorkflowExport>).version;
+        expect(() => renderWorkflowOutline(data)).not.toThrow();
+        expect(() => renderWorkflowAnalysis(data)).not.toThrow();
     });
 });

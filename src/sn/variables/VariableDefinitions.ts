@@ -38,6 +38,9 @@ export class VariableDefinitions {
             throw new InvalidParameterException(`Invalid variable model name '${model}'`);
         }
         const language = options.language ?? "en";
+        if (!/^[a-z]{2}(_[a-z]{2})?$/i.test(language)) {
+            throw new InvalidParameterException(`Invalid language '${language}'`);
+        }
         const key = `${model}|${language}|${options.includeInactive ? 1 : 0}`;
         if (!this._cache.has(key)) {
             const pending = this.load(model, language, !!options.includeInactive);
@@ -70,9 +73,13 @@ export class VariableDefinitions {
     }
 
     private async read(table: string, query: string, fields: string): Promise<Row[]> {
-        const response: IHttpResponse<{ result: Row[] }> = await this._tableAPI.get<{ result: Row[] }>(table, {
-            sysparm_query: query, sysparm_fields: fields, sysparm_limit: "1000", sysparm_exclude_reference_link: "true",
-        });
+        const params = { sysparm_query: query, sysparm_fields: fields, sysparm_limit: "1000", sysparm_exclude_reference_link: "true" };
+        let response: IHttpResponse<{ result: Row[] }> = await this._tableAPI.get<{ result: Row[] }>(table, params);
+        // 202: the instance queued the request behind others in this session; ask again.
+        for (let attempt = 1; response?.status === 202 && attempt <= 3; attempt++) {
+            await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+            response = await this._tableAPI.get<{ result: Row[] }>(table, params);
+        }
         if (response?.status !== 200 || !Array.isArray(response.bodyObject?.result)) {
             throw new Error(`Failed to read ${table}. Status: ${response?.status ?? "unknown"}`);
         }

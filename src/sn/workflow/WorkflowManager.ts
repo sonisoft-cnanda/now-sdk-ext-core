@@ -421,9 +421,19 @@ export class WorkflowManager {
             throw new Error(`Failed to publish workflow version ${options.versionSysId}. Status: ${response?.status ?? 'unknown'}`);
         }
 
-        const published = await this._diagram.publish(options.versionSysId, false);
-        if (!published.graph?.published) {
-            throw new Error(`Failed to publish workflow version ${options.versionSysId}: the instance did not publish it`);
+        let answered = false;
+        try {
+            answered = !!(await this._diagram.publish(options.versionSysId, false)).graph?.published;
+        } catch (error) {
+            // The processor publishes, then fails to draw a diagram holding an activity with no
+            // type (which these record methods can create) and answers with an empty page.
+            this._logger.debug(`publish_novalidate gave no diagram for ${options.versionSysId}: ${(error as Error).message}`);
+        }
+        if (!answered) {
+            const version = await this.read(WorkflowManager.WF_WORKFLOW_VERSION, `sys_id=${options.versionSysId}`, 'published', 1);
+            if (str(version[0]?.published) !== 'true') {
+                throw new Error(`Failed to publish workflow version ${options.versionSysId}: the instance did not publish it`);
+            }
         }
 
         this._logger.info(`Successfully published workflow version ${options.versionSysId}`);
@@ -803,14 +813,13 @@ export class WorkflowManager {
             designer ? 'sys_id,input' : 'sys_id', sampleSize);
         const total = await this.count(WorkflowManager.WF_ACTIVITY, query);
 
-        const normalize = (value: string): string => value.replace(/\s+/g, ' ').trim();
-        const defaults = new Map(definition.variables.map(v => [v.element, normalize(v.defaultValue)]));
+        const defs = new Map(definition.variables.map(v => [v.element, v]));
         const tallies = new Map<string, Map<string, { count: number; isDefault: boolean }>>();
         const add = (field: string, value: string): void => {
             if (value === '') return;
             const kept = value.length > maxLength ? `${value.slice(0, maxLength)}…` : value;
             const counts = tallies.get(field) ?? new Map<string, { count: number; isDefault: boolean }>();
-            const entry = counts.get(kept) ?? { count: 0, isDefault: defaults.get(field) === normalize(value) };
+            const entry = counts.get(kept) ?? { count: 0, isDefault: isDefaultValue(defs.get(field), value) };
             entry.count++;
             counts.set(kept, entry);
             tallies.set(field, counts);
@@ -921,7 +930,7 @@ export class WorkflowManager {
                 const def = defs?.get(element);
                 const exported: WorkflowExportVariable = {
                     element, label: def?.label ?? element, type: def?.internalType ?? '', value,
-                    isDefault: !!def && normalizeSpace(def.defaultValue) === normalizeSpace(value),
+                    isDefault: isDefaultValue(def, value),
                 };
                 const choice = def?.choices?.find(c => c.value === value);
                 const named = value.split(',').map(id => references[id.trim()]?.display).filter(Boolean);
@@ -1017,6 +1026,10 @@ export class WorkflowManager {
             query: { sysparm_sys_id: versionSysId }, requires: READ_ONLY, responseFormat: 'text',
         });
         const html = typeof page.data === 'string' ? page.data : '';
+        if (!html.includes('id="wf_validation_summary_message"')) {
+            // Without the report page the checks did not run; the table may hold an earlier run.
+            throw new Error(`Could not run the validation for workflow version ${versionSysId} (status ${page.status ?? 'unknown'})`);
+        }
         const summaryMatch = /id="wf_validation_summary_message"[^>]*>\s*<h4>([\s\S]*?)<\/h4>/.exec(html);
         const summary = summaryMatch ? decodeEntities(summaryMatch[1]).replace(/\s+/g, ' ').trim() : '';
 
@@ -1102,6 +1115,9 @@ export class WorkflowManager {
                     + `(since ${draft.checkedOutOn}). Pass force to take over the checkout.`);
             }
             const graph = await this._diagram.forceCheckout(summary.publishedVersionSysId ?? draft.sysId);
+            if (graph.id === summary.publishedVersionSysId || graph.readOnly) {
+                throw new Error(`Workflow '${summary.name}' could not be checked out (${graph.statusDisplay || 'no draft was returned'})`);
+            }
             this._logger.info(`Force-checked out workflow '${summary.name}' as version ${graph.id}`);
             return { workflowSysId: summary.sysId, versionSysId: graph.id, alreadyCheckedOut: false };
         }
@@ -1259,6 +1275,11 @@ export class WorkflowManager {
         if (options.stage !== undefined) fields.stage = await this.resolveStage(versionSysId, options.stage);
         if (options.input !== undefined) fields.input = typeof options.input === 'string' ? options.input : JSON.stringify(options.input);
 
+        // Resolve everything that can be checked before anything is written.
+        const fromExit = from
+            ? this.pickExit(await this.readConditions(from.sysId), options.connectFrom.condition, from.name, false)
+            : undefined;
+
         this._logger.info(`Adding ${definition.name} activity '${options.name}' to version ${versionSysId}`);
         const written = await this._forms.insert(WorkflowManager.WF_ACTIVITY, {
             view: WorkflowManager.ACTIVITY_VIEW,
@@ -1269,27 +1290,43 @@ export class WorkflowManager {
         const activitySysId = written.sysId;
         const conditions = await this.readConditions(activitySysId);
 
+        // The new activity's exits exist only now (Switch builds them from its variables).
+        // If the one asked for is not there, take the activity out again rather than
+        // leave a half-wired step on the draft.
+        let ownExit: WorkflowConditionInfo | undefined;
+        try {
+            if (insertOn || options.connectTo) ownExit = this.pickExit(conditions, options.exitCondition, options.name, true);
+        } catch (error) {
+            await this.removeActivity(activitySysId).catch(cleanup => {
+                this._logger.warn(`Could not remove activity ${activitySysId} after a failed add: ${(cleanup as Error).message}`);
+            });
+            throw error;
+        }
+
         const transitionSysIds: string[] = [];
-        if (insertOn) {
-            const exit = this.pickExit(conditions, options.exitCondition, options.name, true);
-            const outgoing: WorkflowGraphEdge = { id: newSysId(), source: activitySysId, sourcePort: exit.sysId, target: insertOn.to };
-            await this._diagram.newEdgeControlNode(versionSysId, { id: activitySysId, x, y },
-                [{ id: insertOn.sysId, source: insertOn.from, sourcePort: insertOn.condition, target: activitySysId }], [outgoing]);
-            transitionSysIds.push(insertOn.sysId, outgoing.id);
+        try {
+            if (insertOn) {
+                const outgoing: WorkflowGraphEdge = { id: newSysId(), source: activitySysId, sourcePort: ownExit.sysId, target: insertOn.to };
+                await this._diagram.newEdgeControlNode(versionSysId, { id: activitySysId, x, y },
+                    [{ id: insertOn.sysId, source: insertOn.from, sourcePort: insertOn.condition, target: activitySysId }], [outgoing]);
+                transitionSysIds.push(insertOn.sysId, outgoing.id);
+            }
+            if (from) {
+                const edge: WorkflowGraphEdge = { id: newSysId(), source: from.sysId, sourcePort: fromExit.sysId, target: activitySysId };
+                await this._diagram.newEdge(versionSysId, edge);
+                transitionSysIds.push(edge.id);
+            }
+            if (options.connectTo) {
+                const edge: WorkflowGraphEdge = { id: newSysId(), source: activitySysId, sourcePort: ownExit.sysId, target: options.connectTo };
+                await this._diagram.newEdge(versionSysId, edge);
+                transitionSysIds.push(edge.id);
+            }
+            await this._diagram.updateStages(versionSysId);
+        } catch (error) {
+            const e = error as Error;
+            e.message = `${e.message} (activity '${options.name}' ${activitySysId} was added to the draft; its wiring is incomplete)`;
+            throw e;
         }
-        if (from) {
-            const exit = this.pickExit(await this.readConditions(from.sysId), options.connectFrom.condition, from.name, false);
-            const edge: WorkflowGraphEdge = { id: newSysId(), source: from.sysId, sourcePort: exit.sysId, target: activitySysId };
-            await this._diagram.newEdge(versionSysId, edge);
-            transitionSysIds.push(edge.id);
-        }
-        if (options.connectTo) {
-            const exit = this.pickExit(conditions, options.exitCondition, options.name, true);
-            const edge: WorkflowGraphEdge = { id: newSysId(), source: activitySysId, sourcePort: exit.sysId, target: options.connectTo };
-            await this._diagram.newEdge(versionSysId, edge);
-            transitionSysIds.push(edge.id);
-        }
-        await this._diagram.updateStages(versionSysId);
 
         return { activitySysId, name: options.name, conditions, transitionSysIds };
     }
@@ -1478,6 +1515,9 @@ export class WorkflowManager {
         if (!options.activityDefinitionSysId) {
             throw new Error('activityDefinitionSysId is required when variables are given');
         }
+        // Both go into the form's initial query, which the signed form state carries.
+        this.requireSysId(options.workflowVersionSysId, 'workflowVersionSysId');
+        this.requireSysId(options.activityDefinitionSysId, 'activityDefinitionSysId');
         const fields: Record<string, FormValueInput> = { name: options.name };
         if (options.x !== undefined) fields.x = options.x;
         if (options.y !== undefined) fields.y = options.y;
@@ -1640,9 +1680,15 @@ export class WorkflowManager {
     private async resolveStage(versionSysId: string, stage: string): Promise<string> {
         if (stage === '') return '';
         const stages = await this.read('wf_stage', `workflow_version=${versionSysId}`, 'sys_id,name,value', 1000);
-        const match = stages.find(s => str(s.sys_id) === stage)
-            ?? stages.find(s => str(s.name).toLowerCase() === stage.toLowerCase())
-            ?? stages.find(s => str(s.value).toLowerCase() === stage.toLowerCase());
+        const byId = stages.find(s => str(s.sys_id) === stage);
+        const byName = stages.filter(s => str(s.name).toLowerCase() === stage.toLowerCase());
+        const byValue = stages.filter(s => str(s.value).toLowerCase() === stage.toLowerCase());
+        const candidates = byId ? [byId] : byName.length ? byName : byValue;
+        if (candidates.length > 1) {
+            throw new InvalidParameterException(`${candidates.length} stages match '${stage}' on workflow version ${versionSysId}; `
+                + `use a sys_id: ${candidates.map(c => str(c.sys_id)).join(', ')}`);
+        }
+        const match = candidates[0];
         if (!match) {
             const known = stages.map(s => str(s.name)).join(', ') || '(this version has no stages)';
             throw new InvalidParameterException(`No stage '${stage}' on workflow version ${versionSysId}. Available: ${known}`);
@@ -1659,9 +1705,15 @@ export class WorkflowManager {
         if (!conditions.length) throw new InvalidParameterException(`'${activityName}' has no exits to connect from`);
         const names = conditions.map(c => c.name).join(', ');
         if (ref) {
-            const match = conditions.find(c => c.sysId === ref) ?? conditions.find(c => c.name.toLowerCase() === ref.toLowerCase());
-            if (!match) throw new InvalidParameterException(`'${activityName}' has no exit '${ref}'. Exits: ${names}`);
-            return match;
+            const byId = conditions.find(c => c.sysId === ref);
+            if (byId) return byId;
+            const byName = conditions.filter(c => c.name.toLowerCase() === ref.toLowerCase());
+            if (byName.length > 1) {
+                throw new InvalidParameterException(`'${activityName}' has ${byName.length} exits named '${ref}'; use a sys_id: `
+                    + byName.map(c => c.sysId).join(', '));
+            }
+            if (!byName.length) throw new InvalidParameterException(`'${activityName}' has no exit '${ref}'. Exits: ${names}`);
+            return byName[0];
         }
         if (conditions.length === 1 || firstWhenAmbiguous) return conditions[0];
         throw new InvalidParameterException(`'${activityName}' has several exits; specify one of: ${names}`);
@@ -1709,7 +1761,7 @@ export class WorkflowManager {
         for (let depth = 0; depth < 5; depth++) {
             const rows = await this.read('wf_activity_definition', query, 'script', 1);
             if (!rows.length) return undefined;
-            const script = str(rows[0].script);
+            const script = str(rows[0].script).replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
             if (/\b(activity|executing)\.state\s*=\s*['"]waiting['"]/.test(script)) return true;
             const parent = /extendsObject\(\s*(\w+)ActivityHandler\b/.exec(script)?.[1];
             if (!parent || parent === 'WF') return false;
@@ -1754,8 +1806,9 @@ export class WorkflowManager {
 
     private async currentUserSysId(): Promise<string> {
         if (this._currentUser === undefined) {
-            this._currentUser = this.read('sys_user', 'sys_id=javascript:gs.getUserID()', 'sys_id', 1).then(rows => {
-                const id = str(rows[0]?.sys_id);
+            this._currentUser = this.read('sys_user', 'sys_id=javascript:gs.getUserID()', 'sys_id', 2).then(rows => {
+                // Anything but exactly one row means the query was not evaluated as written.
+                const id = rows.length === 1 ? str(rows[0].sys_id) : '';
                 if (!id) throw new Error('Could not determine the current user');
                 return id;
             });
@@ -1779,11 +1832,20 @@ export class WorkflowManager {
     }
 
     private async count(table: string, query: string): Promise<number> {
-        const response = await this.request().get<{ result?: { stats?: { count?: string } } }>({
+        const get = () => this.request().get<{ result?: { stats?: { count?: string } } }>({
             method: 'GET', path: `/api/now/stats/${table}`, headers: { Accept: 'application/json' }, body: null,
-            query: { sysparm_query: query, sysparm_count: 'true' },
+            query: { sysparm_query: query, sysparm_count: 'true' }, requires: READ_ONLY,
         });
-        return Number(response.bodyObject?.result?.stats?.count ?? 0) || 0;
+        let response = await get();
+        for (let attempt = 1; response?.status === 202 && attempt <= 3; attempt++) {
+            await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+            response = await get();
+        }
+        const count = response?.bodyObject?.result?.stats?.count;
+        if (response?.status !== 200 || count === undefined) {
+            throw new Error(`Failed to count ${table}. Status: ${response?.status ?? 'unknown'}`);
+        }
+        return Number(count) || 0;
     }
 
     private request(): ServiceNowRequest {
@@ -1821,6 +1883,19 @@ function queryValue(value: string, label: string): string {
 
 function normalizeSpace(value: string): string {
     return value.replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Whether a stored variable value is the variable's default. Booleans are stored as `1`/`0`
+ * but defaulted as `true`/`false` (or empty).
+ */
+function isDefaultValue(def: { defaultValue: string; internalType: string } | undefined, value: string): boolean {
+    if (!def) return false;
+    if (def.internalType === 'boolean') {
+        const truth = (v: string): boolean => ['1', 'true'].includes(String(v ?? '').trim().toLowerCase());
+        return truth(def.defaultValue) === truth(value);
+    }
+    return normalizeSpace(def.defaultValue ?? '') === normalizeSpace(value);
 }
 
 function parseJsonObject(text: string): Record<string, unknown> {

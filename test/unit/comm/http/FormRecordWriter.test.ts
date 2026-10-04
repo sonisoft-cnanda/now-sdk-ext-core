@@ -69,15 +69,15 @@ describe("FormHtmlParser", () => {
         expect(snapshot.encodedRecord).toBe("ENCODED-STATE");
         expect(snapshot.actions).toEqual({ sysverb_insert: INSERT_ACTION, sysverb_update: UPDATE_ACTION });
         expect(snapshot.fields["wf_activity.name"]).toEqual({ name: "wf_activity.name", value: "", type: "string", mandatory: true });
-        expect(Object.keys(snapshot.variables).sort()).toEqual(["duration", "relative_duration", "script", "timer_type"]);
-        expect(snapshot.variables.timer_type).toMatchObject({
+        expect(Object.keys(snapshot.variables).sort()).toEqual(["vars.duration", "vars.relative_duration", "vars.script", "vars.timer_type"]);
+        expect(snapshot.variables["vars.timer_type"]).toMatchObject({
             field: "vars", model: `var__m_${TIMER}`, element: "timer_type", value: "", type: "choice",
             choices: [{ value: "", label: "A user specified duration" }, { value: "relative_duration", label: "A relative duration" }, { value: "script", label: "Script" }],
         });
-        expect(snapshot.variables.script.value).toBe("// Set 'answer' to the number of seconds this timer should wait\r\nanswer = 0;");
-        expect(snapshot.variables.duration.type).toBe("glide_duration");
+        expect(snapshot.variables["vars.script"].value).toBe("// Set 'answer' to the number of seconds this timer should wait\r\nanswer = 0;");
+        expect(snapshot.variables["vars.duration"].type).toBe("glide_duration");
         // UI mirrors and unticked checkboxes are not posted by a browser either.
-        expect(snapshot.variables.relative_duration.value).toBe("");
+        expect(snapshot.variables["vars.relative_duration"].value).toBe("");
         expect(snapshot.fields["wf_activity.unticked"]).toBeUndefined();
         expect(Object.keys(snapshot.fields).some(n => n.includes("ui_policy_sensitive"))).toBe(false);
     });
@@ -151,7 +151,7 @@ describe("FormRecordWriter", () => {
     it("inserts by loading the form, submitting only the given values, and confirming the record", async () => {
         req.get
             .mockResolvedValueOnce({ data: timerForm() })
-            .mockResolvedValueOnce({ bodyObject: { result: [{ sys_id: NEW_ID }] } });
+            .mockResolvedValueOnce({ status: 200, bodyObject: { result: [{ sys_id: NEW_ID }] } });
         req.post.mockResolvedValueOnce({ data: RESPONSE_PAGE("sysverb_insert", NEW_ID) });
 
         const result = await writer.insert("wf_activity", {
@@ -227,9 +227,49 @@ describe("FormRecordWriter", () => {
     it("fails an insert the instance claimed but did not make", async () => {
         req.get
             .mockResolvedValueOnce({ data: timerForm() })
-            .mockResolvedValueOnce({ bodyObject: { result: [] } });
+            .mockResolvedValueOnce({ status: 200, bodyObject: { result: [] } });
         req.post.mockResolvedValueOnce({ data: RESPONSE_PAGE("sysverb_insert", NEW_ID) });
         await expect(writer.insert("wf_activity", { fields: { name: "x" } })).rejects.toThrow(/does not exist/);
+    });
+
+    it("asks again while the existence check is queued, and never calls a failed check a missing record", async () => {
+        req.get
+            .mockResolvedValueOnce({ data: timerForm() })
+            .mockResolvedValueOnce({ status: 202 })
+            .mockResolvedValueOnce({ status: 200, bodyObject: { result: [{ sys_id: NEW_ID }] } });
+        req.post.mockResolvedValueOnce({ data: RESPONSE_PAGE("sysverb_insert", NEW_ID) });
+        await expect(writer.insert("wf_activity", { fields: { name: "x" } })).resolves.toMatchObject({ sysId: NEW_ID });
+
+        req.get
+            .mockResolvedValueOnce({ data: timerForm() })
+            .mockResolvedValueOnce({ status: 500 });
+        req.post.mockResolvedValueOnce({ data: RESPONSE_PAGE("sysverb_insert", NEW_ID) });
+        const error = await writer.insert("wf_activity", { fields: { name: "x" } }).catch(e => e);
+        expect(error).toBeInstanceOf(FormSubmitError);
+        expect(error.message).toContain(`reported inserting record ${NEW_ID}, but checking that it exists failed (status 500)`);
+        expect(error.message).not.toContain("does not exist");
+    });
+
+    it("keeps the same element on two variable columns apart", async () => {
+        const form = `<html><body><form>
+<input type="HIDDEN" name="sys_target" value="sys_atf_step"></input>
+<input type="HIDDEN" name="sys_uniqueValue" value="${NEW_ID}"></input>
+<input type="HIDDEN" name="sys_row" value="-1"></input>
+<input type="HIDDEN" name="sysparm_encoded_record" value="E"></input>
+<button type="submit" data-action-name="sysverb_insert" gsft_id="${INSERT_ACTION}">Submit</button>
+<textarea name="sys_atf_step.inputs.var__m_atf_input_variable_aa.script">in</textarea>
+<textarea name="sys_atf_step.outputs.var__m_atf_output_variable_bb.script">out</textarea>
+</form></body></html>`;
+        const snapshot = parseFormHtml(form, "sys_atf_step");
+        expect(Object.keys(snapshot.variables).sort()).toEqual(["inputs.script", "outputs.script"]);
+
+        req.get
+            .mockResolvedValueOnce({ data: form })
+            .mockResolvedValueOnce({ status: 200, bodyObject: { result: [{ sys_id: NEW_ID }] } });
+        req.post.mockResolvedValueOnce({ data: RESPONSE_PAGE("sysverb_insert", NEW_ID) });
+        await writer.insert("sys_atf_step", { variableField: "inputs", variables: { script: "gs.info(1);" } });
+        expect(req.post.mock.calls[0][0].fields).toMatchObject({ "sys_atf_step.inputs.var__m_atf_input_variable_aa.script": "gs.info(1);" });
+        expect(req.post.mock.calls[0][0].fields["sys_atf_step.outputs.var__m_atf_output_variable_bb.script"]).toBeUndefined();
     });
 
     it("validates table, sys_id and field names", async () => {

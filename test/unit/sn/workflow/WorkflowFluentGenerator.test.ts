@@ -71,7 +71,7 @@ describe('generateFluentFlow: a catalog item workflow', () => {
         expect(code).toContain('         * workflow.scratchpad.ticket = current.number;');
         expect(code).toContain('// TODO(convert): write this condition: variables.needs_laptop=true');
         expect(code).toContain("wfa.flowLogic.if({ $id: Now.ID['laptop_request_if_needs_a_laptop'], condition: '',");
-        expect(code).toContain('// TODO(convert): Continue at step 6 (Close complete), shared with other paths.');
+        expect(code).toContain('// TODO(convert): Continue at step 13 (Close complete), shared with other paths.');
     });
 
     it('gives every step its own id', () => {
@@ -174,6 +174,56 @@ describe('generateFluentFlow: shapes', () => {
         }));
         expect(code).toContain('Custom fields used as data pills: u_hot_fix.');
         expect(code).toContain('run `now-sdk dependencies`.');
+    });
+
+    it('never repeats a Now.ID key, even when names collide with generated suffixes', () => {
+        const code = generate(buildExport({
+            name: 'Laptop Request', catalogItems: ['Laptop'],
+            activities: [
+                { id: 'begin', type: 'Begin' },
+                { id: 't', type: 'Log Message', name: 'Trigger', vars: { message: 't' } },
+                { id: 'r', type: 'Switch', name: 'Route', vars: { type: 'field', field: 'priority' }, exits: ['A', 'B', 'C'] },
+                { id: 'a', type: 'Log Message', name: 'Route 2', vars: { message: 'a' } },
+                { id: 'b', type: 'Log Message', vars: { message: 'b' } }, { id: 'c', type: 'Log Message', vars: { message: 'c' } },
+                { id: 'done', type: 'Log Message', vars: { message: 'done' } },
+                { id: 'end', type: 'End' },
+            ],
+            edges: [['begin', 'Always', 't'], ['t', 'Always', 'r'], ['r', 'A', 'a'], ['r', 'B', 'b'], ['r', 'C', 'c'],
+                ['a', 'Always', 'done'], ['b', 'Always', 'done'], ['c', 'Always', 'done'], ['done', 'Always', 'end']],
+        }));
+        const ids = [...code.matchAll(/Now\.ID\['([^']+)'\]/g)].map(m => m[1]);
+        expect(new Set(ids).size).toBe(ids.length);
+        expect(syntaxErrors(code)).toEqual([]);
+    });
+
+    it('keeps the export name off reserved words', () => {
+        const code = generate(buildExport({ name: 'New', activities: [{ id: 'begin', type: 'Begin' }, { id: 'end', type: 'End' }], edges: [['begin', 'Always', 'end']] }));
+        expect(code).toContain('export const newFlow = Flow(');
+        expect(syntaxErrors(code)).toEqual([]);
+    });
+
+    it('leaves out params when only a label mentions it', () => {
+        const code = generate(buildExport({
+            table: 'global',
+            activities: [{ id: 'begin', type: 'Begin' }, { id: 'run', type: 'Run Script', name: 'params.reset', vars: { script: 'gs.info(1);' } }, { id: 'end', type: 'End' }],
+            edges: [['begin', 'Always', 'run'], ['run', 'Always', 'end']],
+        }));
+        expect(code).toContain('    () => {');
+    });
+
+    it('writes escaped condition values that still parse', () => {
+        const code = generate(buildExport({
+            table: 'incident', condition: 'active=true',
+            activities: [
+                { id: 'begin', type: 'Begin' },
+                { id: 'check', type: 'If', vars: { condition: 'short_description=x${process.exit(1)}`\\' } },
+                { id: 'log', type: 'Log Message', vars: { message: 'm' } }, { id: 'done', type: 'Log Message', vars: { message: 'd' } },
+                { id: 'end', type: 'End' },
+            ],
+            edges: [['begin', 'Always', 'check'], ['check', 'Yes', 'log'], ['check', 'No', 'done'], ['log', 'Always', 'done'], ['done', 'Always', 'end']],
+        }));
+        expect(code).toContain('=x\\${process.exit(1)}\\`\\\\`');
+        expect(syntaxErrors(code)).toEqual([]);
     });
 
     it('builds valid TypeScript from the merge-without-join fixture', () => {

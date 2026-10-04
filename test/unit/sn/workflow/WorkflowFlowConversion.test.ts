@@ -304,6 +304,60 @@ describe('planFlowConversion: activity mappings', () => {
     });
 });
 
+describe('planFlowConversion: code review cases', () => {
+    it('escapes condition values for the template literal they go into', () => {
+        const plan = planFlowConversion(buildExport({
+            table: 'incident', condition: 'active=true',
+            activities: [
+                { id: 'begin', type: 'Begin' },
+                { id: 'check', type: 'If', vars: { condition: 'short_description=C:\\temp ${x} `y`' } },
+                { id: 'log', type: 'Log Message', vars: { message: 'm' } }, { id: 'done', type: 'Log Message', vars: { message: 'd' } },
+                { id: 'end', type: 'End' },
+            ],
+            edges: [['begin', 'Always', 'check'], ['check', 'Yes', 'log'], ['check', 'No', 'done'], ['log', 'Always', 'done'], ['done', 'Always', 'end']],
+        }));
+        expect((plan.steps[0] as Node<'if'>).branches[0].condition.expression)
+            .toBe('${wfa.dataPill(params.trigger.current.short_description, "string")}=C:\\\\temp \\${x} \\`y\\`');
+    });
+
+    it('builds no data pills for a workflow with no record', () => {
+        const plan = planFlowConversion(buildExport({
+            table: 'global',
+            activities: [
+                { id: 'begin', type: 'Begin' },
+                { id: 'check', type: 'If', vars: { condition: 'active=true' } },
+                { id: 'log', type: 'Log Message', vars: { message: 'hi ${number}' } },
+                { id: 'wait', type: 'Wait for condition', vars: { wait_for_condition: 'state=3' } },
+                { id: 'end', type: 'End' },
+            ],
+            edges: [['begin', 'Always', 'check'], ['check', 'Yes', 'log'], ['check', 'No', 'log'], ['log', 'Always', 'wait'], ['wait', 'Always', 'end']],
+        }));
+        expect(JSON.stringify(plan)).not.toMatch(/dataPill\(\./);
+        expect(find(plan, 'action', 'log').inputs.log_message).toEqual({ kind: 'literal', value: 'hi ${number}' });
+        expect(find(plan, 'action', 'wait').inputs.record).toEqual({ kind: 'literal', value: '' });
+    });
+
+    it('links a Create Task to the record the way the handler does', () => {
+        const plan = planFlowConversion(linear([{ id: 'task', type: 'Create Task', vars: { task_table: 'change_task' } }],
+            { table: 'change_request', condition: 'type=normal' }));
+        expect(Object.keys(((plan.steps[0] as Node<'action'>).inputs.field_values as { fields: object }).fields)).toEqual(['change_request', 'parent']);
+    });
+
+    it('does not present a scripted wait condition as finished', () => {
+        const plan = planFlowConversion(linear([{ id: 'wait', type: 'Wait for condition', vars: { wait_for_condition: 'assigned_to=javascript:gs.getUserID()' } }]));
+        expect(plan.steps[0]).toMatchObject({ confidence: 'partial' });
+        expect((plan.steps[0] as Node<'action'>).notes.join('\n')).toContain('evaluates a script (javascript:)');
+    });
+
+    it('keeps step names off reserved words and the bindings of the generated code', () => {
+        const plan = planFlowConversion(linear([
+            { id: 'a', type: 'Log Message', name: 'new', vars: { message: '1' } },
+            { id: 'b', type: 'Log Message', name: 'Params', vars: { message: '2' } },
+        ]));
+        expect(plan.steps.map(n => n.id)).toEqual(['step_new', 'step_params']);
+    });
+});
+
 describe('encodedQueryToCondition', () => {
     it('turns each field into a data pill and keeps operators', () => {
         expect(encodedQueryToCondition('active=true^NQpriority<=2', 'params.trigger.current')).toEqual({

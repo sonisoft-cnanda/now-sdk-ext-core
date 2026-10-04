@@ -52,8 +52,8 @@ await forms.update('wf_activity', sysId, { view: 'diagrammer', variables: { scri
 
 // Inspect a form before writing: field and variable names, types, choices, current values
 const snapshot = await forms.loadForm('wf_activity', sysId, { view: 'diagrammer' });
-console.log(Object.keys(snapshot.variables));       // ['run_during_upgrade', 'timer_type', …]
-console.log(snapshot.variables.timer_type.choices);  // [{ value: '', label: 'A user specified duration' }, …]
+console.log(Object.keys(snapshot.variables));            // ['vars.run_during_upgrade', 'vars.timer_type', …]
+console.log(snapshot.variables['vars.timer_type'].choices);  // [{ value: '', label: 'A user specified duration' }, …]
 ```
 
 ## API
