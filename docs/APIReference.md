@@ -276,12 +276,48 @@ class QueryBatchOperations {
 
 ### WorkflowManager
 
-Create complete workflows programmatically. See [WorkflowManager Guide](./WorkflowManager.md) for full documentation.
+Find, check out, edit and publish legacy workflows with Workflow Editor parity, or create them from a spec. See [WorkflowManager Guide](./WorkflowManager.md) and [Legacy Workflow Internals](./LegacyWorkflowInternals.md).
 
 ```typescript
 class WorkflowManager {
     constructor(instance: ServiceNowInstance)
 
+    // Reading
+    findWorkflows(options?: FindWorkflowsOptions): Promise<WorkflowSummary[]>
+    resolveWorkflow(nameOrSysId: string): Promise<WorkflowSummary>
+    getWorkflowVersions(workflowSysId: string): Promise<WorkflowVersionSummary[]>
+    getWorkflowDefinition(versionSysId: string, options?: GetWorkflowDefinitionOptions): Promise<WorkflowDefinition>
+    getWorkflowGraph(versionSysId: string): Promise<WorkflowGraph>
+    listActivityDefinitions(options?: ListActivityDefinitionsOptions): Promise<ActivityDefinitionSummary[]>
+    getActivityDefinition(nameOrSysId: string, options?: GetActivityDefinitionOptions): Promise<ActivityDefinitionDetail>
+    getActivityUsage(nameOrSysId: string, options?: GetActivityUsageOptions): Promise<ActivityUsage>
+    exportWorkflow(workflow: string, options?: ExportWorkflowOptions): Promise<WorkflowExport>
+    convertToFlow(workflow: string, options?: ExportWorkflowOptions & FluentGeneratorOptions): Promise<WorkflowFlowConversion>
+    validateWorkflow(versionSysId: string): Promise<WorkflowValidationReport>
+    getDraftVersion(workflow: string): Promise<string>
+
+    // Lifecycle (Workflow Editor parity)
+    newWorkflow(options: NewWorkflowOptions): Promise<NewWorkflowResult>
+    checkout(workflow: string, options?: CheckoutOptions): Promise<CheckoutResult>
+    publish(versionSysId: string, options?: PublishOptions): Promise<PublishResult>
+    discardCheckout(versionSysId: string): Promise<void>
+    deleteWorkflow(workflow: string): Promise<void>
+    setWorkflowActive(versionSysId: string, active: boolean): Promise<void>
+    updateWorkflowProperties(versionSysId: string, options: UpdateWorkflowPropertiesOptions): Promise<void>
+
+    // Editing a checked-out draft
+    addActivity(versionSysId: string, options: AddActivityOptions): Promise<AddActivityResult>
+    updateActivity(activitySysId: string, options: UpdateActivityOptions): Promise<void>
+    removeActivity(activitySysId: string, options?: RemoveActivityOptions): Promise<void>
+    moveActivities(positions: ActivityPosition[]): Promise<void>
+    addTransition(options: AddTransitionOptions): Promise<string>
+    retargetTransition(transitionSysId: string, toActivitySysId: string): Promise<void>
+    removeTransition(transitionSysId: string): Promise<void>
+    addCondition(options: AddConditionOptions): Promise<string>
+    updateCondition(conditionSysId: string, options: UpdateConditionOptions): Promise<void>
+    removeCondition(conditionSysId: string): Promise<void>
+
+    // Record methods (direct Table API inserts)
     createWorkflow(options: CreateWorkflowOptions): Promise<CreateWorkflowResult>
     createWorkflowVersion(options: CreateWorkflowVersionOptions): Promise<CreateWorkflowVersionResult>
     createActivity(options: CreateActivityOptions): Promise<CreateActivityResult>
@@ -289,6 +325,50 @@ class WorkflowManager {
     createCondition(options: CreateConditionOptions): Promise<CreateConditionResult>
     publishWorkflow(options: PublishWorkflowOptions): Promise<void>
     createCompleteWorkflow(spec: CompleteWorkflowSpec, onProgress?: (msg: string) => void): Promise<CompleteWorkflowResult>
+}
+```
+
+### Workflow views and Flow Designer conversion
+
+Pure functions of a `WorkflowExport` (no instance needed). See [Legacy Workflow → Flow Designer](./WorkflowToFlowConversion.md).
+
+```typescript
+renderWorkflowOutline(data: WorkflowExport, options?: WorkflowViewOptions): string
+renderWorkflowNodes(data: WorkflowExport, options?: WorkflowViewOptions): string
+analyzeWorkflow(data: WorkflowExport): WorkflowAnalysis
+renderWorkflowAnalysis(data: WorkflowExport): string
+renderWorkflowMermaid(data: WorkflowExport): string
+planFlowConversion(data: WorkflowExport): FlowConversionPlan
+renderFlowPlan(plan: FlowConversionPlan): string
+generateFluentFlow(plan: FlowConversionPlan, options?: FluentGeneratorOptions): FluentSourceFile[]
+```
+
+### FormRecordWriter
+
+Writes a record through its classic UI form, the way a browser does — the path that saves
+variable (`glide_var`) values. A low-level tool for direct instance writes to records not
+authored in a now-sdk app. See [FormRecordWriter Guide](./FormRecordWriter.md).
+
+```typescript
+class FormRecordWriter {
+    constructor(instance: ServiceNowInstance)
+
+    loadForm(table: string, sysId?: string, options?: FormLoadOptions): Promise<FormSnapshot>
+    insert(table: string, options?: FormWriteOptions): Promise<FormWriteResult>
+    update(table: string, sysId: string, options?: FormWriteOptions): Promise<FormWriteResult>
+    submit(snapshot: FormSnapshot, action: 'sysverb_insert' | 'sysverb_update', options?: FormWriteOptions): Promise<FormWriteResult>
+}
+```
+
+### VariableDefinitions
+
+Reads variable definitions (`var_dictionary`) for a variable model such as `var__m_<activity definition sys_id>`.
+
+```typescript
+class VariableDefinitions {
+    constructor(instance: ServiceNowInstance)
+
+    list(model: string, options?: ListVariableDefinitionsOptions): Promise<VariableDefinition[]>
 }
 ```
 
@@ -655,6 +735,8 @@ enum ProgressStatus {
 - [Batch Operations](./BatchOperations.md)
 - [Query Batch Operations](./QueryBatchOperations.md)
 - [Workflow Manager](./WorkflowManager.md)
+- [Legacy Workflow Internals](./LegacyWorkflowInternals.md)
+- [FormRecordWriter](./FormRecordWriter.md)
 - [Task Operations](./TaskOperations.md)
 - [Script Sync](./ScriptSync.md)
 - [Aggregate Query](./AggregateQuery.md)

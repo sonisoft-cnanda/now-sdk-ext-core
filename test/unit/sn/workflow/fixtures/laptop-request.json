@@ -1,0 +1,826 @@
+{
+ "format": "now-sdk-ext/legacy-workflow@1",
+ "exportedAt": "2026-10-04T00:00:00.000Z",
+ "workflow": {
+  "sysId": "wf-laptop",
+  "name": "Laptop Request",
+  "table": "sc_req_item",
+  "description": "Synthetic test workflow.",
+  "scope": "global"
+ },
+ "version": {
+  "sysId": "ver-laptop",
+  "name": "Laptop Request",
+  "published": true,
+  "active": true,
+  "checkedOut": "",
+  "checkedOutBy": "",
+  "condition": "",
+  "conditionType": "",
+  "order": 100,
+  "runMultiple": false,
+  "afterBusinessRules": false,
+  "stageField": "stage",
+  "onCancel": "",
+  "start": "begin",
+  "fullSequences": []
+ },
+ "inputs": [],
+ "stages": [
+  {
+   "sysId": "st-appr",
+   "name": "Waiting for Approval",
+   "value": "waiting_for_approval",
+   "order": 10
+  },
+  {
+   "sysId": "st-done",
+   "name": "Completed",
+   "value": "complete",
+   "order": 20
+  }
+ ],
+ "activityTypes": {
+  "t-begin": {
+   "sysId": "t-begin",
+   "name": "Begin",
+   "category": "Utilities",
+   "sysClassName": "wf_activity_definition",
+   "attributes": "begin=true",
+   "description": "",
+   "waits": false
+  },
+  "t-end": {
+   "sysId": "t-end",
+   "name": "End",
+   "category": "Utilities",
+   "sysClassName": "wf_activity_definition",
+   "attributes": "end=true",
+   "description": "",
+   "waits": false
+  },
+  "t-appr": {
+   "sysId": "t-appr",
+   "name": "Approval - User",
+   "category": "Approvals",
+   "sysClassName": "wf_activity_definition",
+   "attributes": "generate=approval,approval=true",
+   "description": "",
+   "waits": true
+  },
+  "t-wf": {
+   "sysId": "t-wf",
+   "name": "Workflow",
+   "category": "",
+   "sysClassName": "wf_activity_definition",
+   "attributes": "",
+   "description": "",
+   "waits": true
+  },
+  "t-if": {
+   "sysId": "t-if",
+   "name": "If",
+   "category": "Conditions",
+   "sysClassName": "wf_activity_definition",
+   "attributes": "",
+   "description": "",
+   "waits": false
+  },
+  "t-run": {
+   "sysId": "t-run",
+   "name": "Run Script",
+   "category": "Utilities",
+   "sysClassName": "wf_activity_definition",
+   "attributes": "",
+   "description": "",
+   "waits": false
+  },
+  "t-branch": {
+   "sysId": "t-branch",
+   "name": "Branch",
+   "category": "Utilities",
+   "sysClassName": "wf_activity_definition",
+   "attributes": "branch=true",
+   "description": "",
+   "waits": false
+  },
+  "t-cat": {
+   "sysId": "t-cat",
+   "name": "Catalog Task",
+   "category": "Tasks",
+   "sysClassName": "wf_activity_definition",
+   "attributes": "generate=task",
+   "description": "",
+   "waits": true
+  },
+  "t-task": {
+   "sysId": "t-task",
+   "name": "Create Task",
+   "category": "Tasks",
+   "sysClassName": "wf_activity_definition",
+   "attributes": "generate=task",
+   "description": "",
+   "waits": true
+  },
+  "t-ad": {
+   "sysId": "t-ad",
+   "name": "Create AD User",
+   "category": "",
+   "sysClassName": "wf_element_activity",
+   "attributes": "",
+   "description": "",
+   "inputs": [
+    {
+     "name": "UserName",
+     "type": "STRING",
+     "mandatory": true
+    }
+   ],
+   "outputs": [
+    {
+     "name": "result",
+     "type": "STRING",
+     "mandatory": false
+    }
+   ]
+  },
+  "t-turn": {
+   "sysId": "t-turn",
+   "name": "Turnstile",
+   "category": "Utilities",
+   "sysClassName": "wf_activity_definition",
+   "attributes": "",
+   "description": "",
+   "waits": false
+  },
+  "t-join": {
+   "sysId": "t-join",
+   "name": "Join",
+   "category": "Utilities",
+   "sysClassName": "wf_activity_definition",
+   "attributes": "generate=join",
+   "description": "",
+   "waits": true
+  },
+  "t-set": {
+   "sysId": "t-set",
+   "name": "Set Values",
+   "category": "Utilities",
+   "sysClassName": "wf_activity_definition",
+   "attributes": "",
+   "description": "",
+   "waits": false
+  },
+  "t-note": {
+   "sysId": "t-note",
+   "name": "Notification",
+   "category": "Notifications",
+   "sysClassName": "wf_activity_definition",
+   "attributes": "",
+   "description": "",
+   "waits": false
+  },
+  "t-log": {
+   "sysId": "t-log",
+   "name": "Log Message",
+   "category": "Utilities",
+   "sysClassName": "wf_activity_definition",
+   "attributes": "",
+   "description": "",
+   "waits": false
+  }
+ },
+ "activities": [
+  {
+   "sysId": "begin",
+   "name": "Begin",
+   "typeSysId": "t-begin",
+   "type": "Begin",
+   "x": 20,
+   "y": 20,
+   "variables": [],
+   "exits": [
+    {
+     "sysId": "begin:Always",
+     "name": "Always",
+     "condition": "true",
+     "order": 0,
+     "elseFlag": false,
+     "error": false
+    }
+   ]
+  },
+  {
+   "sysId": "appr",
+   "name": "Manager approval",
+   "typeSysId": "t-appr",
+   "type": "Approval - User",
+   "x": 150,
+   "y": 20,
+   "variables": [
+    {
+     "element": "users",
+     "label": "Users",
+     "type": "glide_list",
+     "value": "${requested_for.manager}",
+     "isDefault": false
+    },
+    {
+     "element": "timer_type",
+     "label": "Due date based on",
+     "type": "string",
+     "value": "",
+     "isDefault": true
+    },
+    {
+     "element": "relative_duration",
+     "label": "Relative duration",
+     "type": "reference",
+     "value": "d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9d9",
+     "isDefault": false,
+     "display": "0 Days"
+    },
+    {
+     "element": "approver_script",
+     "label": "Additional approvers script",
+     "type": "script",
+     "value": "// Set the variable 'answer'...",
+     "isDefault": true
+    }
+   ],
+   "exits": [
+    {
+     "sysId": "appr:Approved",
+     "name": "Approved",
+     "condition": "activity.result == 'approved'",
+     "order": 0,
+     "elseFlag": false,
+     "error": false
+    },
+    {
+     "sysId": "appr:Rejected",
+     "name": "Rejected",
+     "condition": "activity.result == 'rejected'",
+     "order": 1,
+     "elseFlag": false,
+     "error": false
+    },
+    {
+     "sysId": "appr:Skipped",
+     "name": "Skipped",
+     "condition": "activity.result == 'skipped'",
+     "order": 2,
+     "elseFlag": false,
+     "error": false
+    }
+   ],
+   "stage": "st-appr"
+  },
+  {
+   "sysId": "rej",
+   "name": "Close rejected",
+   "typeSysId": "t-set",
+   "type": "Set Values",
+   "x": 150,
+   "y": 300,
+   "variables": [
+    {
+     "element": "values",
+     "label": "Set these values",
+     "type": "template_value",
+     "value": "state=4^comments=Rejected ${number}^EQ",
+     "isDefault": false
+    }
+   ],
+   "exits": [
+    {
+     "sysId": "rej:Always",
+     "name": "Always",
+     "condition": "true",
+     "order": 0,
+     "elseFlag": false,
+     "error": false
+    }
+   ]
+  },
+  {
+   "sysId": "sub",
+   "name": "Provision account",
+   "typeSysId": "t-wf",
+   "type": "Workflow",
+   "x": 300,
+   "y": 20,
+   "variables": [],
+   "exits": [
+    {
+     "sysId": "sub:Always",
+     "name": "Always",
+     "condition": "true",
+     "order": 0,
+     "elseFlag": false,
+     "error": false
+    }
+   ],
+   "subflow": {
+    "workflowSysId": "wf-child",
+    "name": "Child provisioning"
+   }
+  },
+  {
+   "sysId": "chk",
+   "name": "Needs a laptop?",
+   "typeSysId": "t-if",
+   "type": "If",
+   "x": 450,
+   "y": 20,
+   "variables": [
+    {
+     "element": "condition",
+     "label": "Condition",
+     "type": "conditions",
+     "value": "variables.b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1=true^EQ",
+     "isDefault": false
+    },
+    {
+     "element": "advanced",
+     "label": "Advanced",
+     "type": "boolean",
+     "value": "0",
+     "isDefault": true
+    }
+   ],
+   "exits": [
+    {
+     "sysId": "chk:Yes",
+     "name": "Yes",
+     "condition": "activity.result == 'yes'",
+     "order": 0,
+     "elseFlag": false,
+     "error": false
+    },
+    {
+     "sysId": "chk:No",
+     "name": "No",
+     "condition": "activity.result == 'no'",
+     "order": 1,
+     "elseFlag": false,
+     "error": false
+    }
+   ]
+  },
+  {
+   "sysId": "prep",
+   "name": "Prepare order",
+   "typeSysId": "t-run",
+   "type": "Run Script",
+   "x": 600,
+   "y": 20,
+   "variables": [
+    {
+     "element": "script",
+     "label": "Script",
+     "type": "script",
+     "value": "workflow.scratchpad.ticket = current.number;\nvar model = current.variables.laptop_model;\ngs.info(model);",
+     "isDefault": false
+    }
+   ],
+   "exits": [
+    {
+     "sysId": "prep:Always",
+     "name": "Always",
+     "condition": "true",
+     "order": 0,
+     "elseFlag": false,
+     "error": false
+    }
+   ]
+  },
+  {
+   "sysId": "fan",
+   "name": "Order and account",
+   "typeSysId": "t-branch",
+   "type": "Branch",
+   "x": 750,
+   "y": 20,
+   "variables": [],
+   "exits": [
+    {
+     "sysId": "fan:Always",
+     "name": "Always",
+     "condition": "true",
+     "order": 0,
+     "elseFlag": false,
+     "error": false
+    }
+   ]
+  },
+  {
+   "sysId": "order",
+   "name": "Order laptop",
+   "typeSysId": "t-cat",
+   "type": "Catalog Task",
+   "x": 900,
+   "y": 0,
+   "variables": [
+    {
+     "element": "wait_for_completion",
+     "label": "Wait for completion",
+     "type": "boolean",
+     "value": "1",
+     "isDefault": true
+    },
+    {
+     "element": "task_fulfillment_group",
+     "label": "Fulfillment group",
+     "type": "reference",
+     "value": "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2",
+     "isDefault": false,
+     "display": "Hardware Desk"
+    },
+    {
+     "element": "advanced_script",
+     "label": "Advanced script",
+     "type": "script_plain",
+     "value": "task.short_description = workflow.scratchpad.ticket;",
+     "isDefault": false
+    }
+   ],
+   "exits": [
+    {
+     "sysId": "order:Always",
+     "name": "Always",
+     "condition": "true",
+     "order": 0,
+     "elseFlag": false,
+     "error": false
+    }
+   ]
+  },
+  {
+   "sysId": "acct",
+   "name": "Create the account",
+   "typeSysId": "t-ad",
+   "type": "Create AD User",
+   "x": 900,
+   "y": 120,
+   "variables": [],
+   "exits": [
+    {
+     "sysId": "acct:Success",
+     "name": "Success",
+     "condition": "activityOutput.result == \"success\"",
+     "order": 0,
+     "elseFlag": false,
+     "error": false
+    },
+    {
+     "sysId": "acct:Failure",
+     "name": "Failure",
+     "condition": "",
+     "order": 1,
+     "elseFlag": false,
+     "error": false
+    }
+   ],
+   "input": {
+    "UserName": "${current.variables.user}"
+   }
+  },
+  {
+   "sysId": "retry",
+   "name": "Retry account?",
+   "typeSysId": "t-turn",
+   "type": "Turnstile",
+   "x": 1050,
+   "y": 200,
+   "variables": [
+    {
+     "element": "iterations",
+     "label": "Allowed iterations",
+     "type": "integer",
+     "value": "3",
+     "isDefault": false
+    }
+   ],
+   "exits": [
+    {
+     "sysId": "retry:Continue",
+     "name": "Continue",
+     "condition": "activity.result == 'continue'",
+     "order": 0,
+     "elseFlag": false,
+     "error": false
+    },
+    {
+     "sysId": "retry:Cancel",
+     "name": "Cancel",
+     "condition": "activity.result == 'cancel'",
+     "order": 1,
+     "elseFlag": false,
+     "error": false
+    }
+   ]
+  },
+  {
+   "sysId": "join",
+   "name": "All done",
+   "typeSysId": "t-join",
+   "type": "Join",
+   "x": 1200,
+   "y": 40,
+   "variables": [],
+   "exits": [
+    {
+     "sysId": "join:Complete",
+     "name": "Complete",
+     "condition": "activity.result == 'complete'",
+     "order": 0,
+     "elseFlag": false,
+     "error": false
+    },
+    {
+     "sysId": "join:Incomplete",
+     "name": "Incomplete",
+     "condition": "activity.result == 'incomplete'",
+     "order": 1,
+     "elseFlag": false,
+     "error": false
+    }
+   ]
+  },
+  {
+   "sysId": "close",
+   "name": "Close complete",
+   "typeSysId": "t-set",
+   "type": "Set Values",
+   "x": 1350,
+   "y": 40,
+   "variables": [
+    {
+     "element": "values",
+     "label": "Set these values",
+     "type": "template_value",
+     "value": "state=3^stage=complete^EQ",
+     "isDefault": false
+    }
+   ],
+   "exits": [
+    {
+     "sysId": "close:Always",
+     "name": "Always",
+     "condition": "true",
+     "order": 0,
+     "elseFlag": false,
+     "error": false
+    }
+   ],
+   "stage": "st-done"
+  },
+  {
+   "sysId": "heads",
+   "name": "Heads-up task",
+   "typeSysId": "t-task",
+   "type": "Create Task",
+   "x": 1500,
+   "y": 40,
+   "variables": [
+    {
+     "element": "wait_for_completion",
+     "label": "Wait for completion",
+     "type": "boolean",
+     "value": "0",
+     "isDefault": false
+    }
+   ],
+   "exits": [
+    {
+     "sysId": "heads:Always",
+     "name": "Always",
+     "condition": "true",
+     "order": 0,
+     "elseFlag": false,
+     "error": false
+    }
+   ]
+  },
+  {
+   "sysId": "fail",
+   "name": "Notify failure",
+   "typeSysId": "t-note",
+   "type": "Notification",
+   "x": 1350,
+   "y": 200,
+   "variables": [
+    {
+     "element": "email_to",
+     "label": "To",
+     "type": "glide_list",
+     "value": "${requested_for}",
+     "isDefault": false
+    },
+    {
+     "element": "subject",
+     "label": "Subject",
+     "type": "string",
+     "value": "Request ${number} failed",
+     "isDefault": false
+    }
+   ],
+   "exits": [
+    {
+     "sysId": "fail:Always",
+     "name": "Always",
+     "condition": "true",
+     "order": 0,
+     "elseFlag": false,
+     "error": false
+    }
+   ]
+  },
+  {
+   "sysId": "end",
+   "name": "End",
+   "typeSysId": "t-end",
+   "type": "End",
+   "x": 1650,
+   "y": 100,
+   "variables": [],
+   "exits": []
+  },
+  {
+   "sysId": "old",
+   "name": "Old log step",
+   "typeSysId": "t-log",
+   "type": "Log Message",
+   "x": 900,
+   "y": 400,
+   "variables": [
+    {
+     "element": "message",
+     "label": "Message",
+     "type": "string",
+     "value": "never runs",
+     "isDefault": false
+    }
+   ],
+   "exits": [
+    {
+     "sysId": "old:Always",
+     "name": "Always",
+     "condition": "true",
+     "order": 0,
+     "elseFlag": false,
+     "error": false
+    }
+   ]
+  }
+ ],
+ "transitions": [
+  {
+   "sysId": "tr1",
+   "from": "begin",
+   "exit": "begin:Always",
+   "to": "appr"
+  },
+  {
+   "sysId": "tr2",
+   "from": "appr",
+   "exit": "appr:Approved",
+   "to": "sub"
+  },
+  {
+   "sysId": "tr3",
+   "from": "appr",
+   "exit": "appr:Rejected",
+   "to": "rej"
+  },
+  {
+   "sysId": "tr4",
+   "from": "rej",
+   "exit": "rej:Always",
+   "to": "end"
+  },
+  {
+   "sysId": "tr5",
+   "from": "sub",
+   "exit": "sub:Always",
+   "to": "chk"
+  },
+  {
+   "sysId": "tr6",
+   "from": "chk",
+   "exit": "chk:Yes",
+   "to": "prep"
+  },
+  {
+   "sysId": "tr7",
+   "from": "chk",
+   "exit": "chk:No",
+   "to": "close"
+  },
+  {
+   "sysId": "tr8",
+   "from": "prep",
+   "exit": "prep:Always",
+   "to": "fan"
+  },
+  {
+   "sysId": "tr9",
+   "from": "fan",
+   "exit": "fan:Always",
+   "to": "order"
+  },
+  {
+   "sysId": "tr10",
+   "from": "fan",
+   "exit": "fan:Always",
+   "to": "acct"
+  },
+  {
+   "sysId": "tr11",
+   "from": "order",
+   "exit": "order:Always",
+   "to": "join"
+  },
+  {
+   "sysId": "tr12",
+   "from": "acct",
+   "exit": "acct:Success",
+   "to": "join"
+  },
+  {
+   "sysId": "tr13",
+   "from": "acct",
+   "exit": "acct:Failure",
+   "to": "retry"
+  },
+  {
+   "sysId": "tr14",
+   "from": "retry",
+   "exit": "retry:Continue",
+   "to": "acct"
+  },
+  {
+   "sysId": "tr15",
+   "from": "retry",
+   "exit": "retry:Cancel",
+   "to": "fail"
+  },
+  {
+   "sysId": "tr16",
+   "from": "join",
+   "exit": "join:Complete",
+   "to": "close"
+  },
+  {
+   "sysId": "tr17",
+   "from": "join",
+   "exit": "join:Incomplete",
+   "to": "fail"
+  },
+  {
+   "sysId": "tr18",
+   "from": "close",
+   "exit": "close:Always",
+   "to": "heads"
+  },
+  {
+   "sysId": "tr19",
+   "from": "heads",
+   "exit": "heads:Always",
+   "to": "end"
+  },
+  {
+   "sysId": "tr20",
+   "from": "fail",
+   "exit": "fail:Always",
+   "to": "end"
+  },
+  {
+   "sysId": "tr21",
+   "from": "old",
+   "exit": "old:Always",
+   "to": "end"
+  }
+ ],
+ "references": {
+  "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1": {
+   "table": "item_option_new",
+   "display": "needs_laptop"
+  },
+  "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2": {
+   "table": "sys_user_group",
+   "display": "Hardware Desk"
+  }
+ },
+ "usedBy": {
+  "catalogItems": [
+   {
+    "sysId": "cat-1",
+    "name": "Laptop",
+    "active": true
+   }
+  ],
+  "parentWorkflows": []
+ }
+}
