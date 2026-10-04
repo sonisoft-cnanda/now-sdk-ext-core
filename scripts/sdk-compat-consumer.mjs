@@ -6,6 +6,13 @@ import {join, resolve} from 'node:path';
 import {spawnSync} from 'node:child_process';
 
 const root = resolve(new URL('..', import.meta.url).pathname);
+// Versions come from this package's own manifest, so an SDK or sn-credstore bump needs
+// no edit here: the opt-in fixture installs the lowest sn-credstore core accepts, and
+// the downstream fixture checks the SDK core actually declares.
+const manifest = JSON.parse(await readFile(join(root, 'package.json'), 'utf8'));
+const credstoreFloor = manifest.optionalDependencies['@sonisoft/sn-credstore'].replace(/^[\^~]/, '');
+const sdkPin = manifest.dependencies['@servicenow/sdk'];
+const cliVersion = process.env.SDK_COMPAT_CLI_VERSION || 'latest';
 const output = await mkdtemp(join(tmpdir(), 'sdk-compat-'));
 
 function run(command, args, cwd, env = {}) {
@@ -60,7 +67,7 @@ assert.equal(typeof sdkAuth.getCredentials, 'function');
     run('node', ['check.mjs'], bare);
 
     const optIn = await fixture('opt-in');
-    run('npm', ['install', '--ignore-scripts', tarball, '@sonisoft/sn-credstore@1.2.1'], optIn);
+    run('npm', ['install', '--ignore-scripts', tarball, `@sonisoft/sn-credstore@${credstoreFloor}`], optIn);
     const storePath = join(optIn, 'state', 'credentials.json');
     await writeFile(join(optIn, 'check.mjs'), `
 import assert from 'node:assert/strict';
@@ -80,9 +87,9 @@ assert.equal(typeof storeCredentials, 'function');
     });
 
     const downstream = await fixture('cli');
-    run('npm', ['install', '--ignore-scripts', '@sonisoft/now-sdk-ext-cli@5.6.0', tarball], downstream);
+    run('npm', ['install', '--ignore-scripts', `@sonisoft/now-sdk-ext-cli@${cliVersion}`, tarball], downstream);
     const installedCore = JSON.parse(await readFile(join(downstream, 'node_modules/@sonisoft/now-sdk-ext-core/package.json')));
-    assert.equal(installedCore.dependencies['@servicenow/sdk'], '4.12.0');
+    assert.equal(installedCore.dependencies['@servicenow/sdk'], sdkPin);
     run('node', ['node_modules/@sonisoft/now-sdk-ext-cli/bin/run.js', '--help'], downstream, {
         SN_CRED_STORE_DISABLE: '1',
     });

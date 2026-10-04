@@ -926,6 +926,12 @@ npm test
 npm pack
 ```
 
+## ServiceNow SDK upgrades
+
+New `@servicenow/sdk` releases are rolled through sn-credstore, core, the CLI and the MCP
+server by a scheduled routine. Its runbook and scripts (`scripts/sdk-watch/`) are described in
+[docs/SDK_UPGRADE_ROUTINE.md](docs/SDK_UPGRADE_ROUTINE.md).
+
 ## 📝 License
 
 MIT License - see LICENSE file for details
