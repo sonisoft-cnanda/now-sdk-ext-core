@@ -374,11 +374,14 @@ System output here<BR/>
     });
 
     describe('scope resolution', () => {
-        // scope=global alone matches every global-scoped application in sys_scope;
-        // the Global scope itself is the row with source=global.
+        // scope=global matches every global-scoped application in sys_scope, and apps
+        // now-sdk deploys into global can carry source=global too. The instance reports
+        // "scope global" / rhino.global for those apps as well, so the output cannot tell
+        // them apart: assert on the sys_id the executor actually sent.
         it('should run "global" in the Global scope itself', async () => {
             const result = await executor?.executeScript(`gs.info('SCOPE_IT=' + gs.getCurrentScopeName());`, 'global', instance);
 
+            expect((executor as unknown as { _scopeCache: Map<string, string> })._scopeCache.get('global')).toBe('global');
             expect(result?.raw).toContain('Script completed in scope global');
             expect(result?.result).toContain('SCOPE_IT=rhino.global');
         }, 100000);

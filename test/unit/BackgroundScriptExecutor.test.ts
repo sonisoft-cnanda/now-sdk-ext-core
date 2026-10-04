@@ -1146,7 +1146,9 @@ System: end
             } as IHttpResponse<string>);
         });
 
-        it('should resolve "global" through sys_scope source=global, not scope=global alone', async () => {
+        it('should resolve "global" to the Global record by its sys_id, not by scope or source', async () => {
+            // scope=global matches every global-scoped app; source=global also matches apps
+            // that now-sdk deployed into global. Only sys_id=global is the Global scope.
             mockRequestHandler.get
                 .mockResolvedValueOnce(csrfResponse())
                 .mockResolvedValueOnce(tableResponse([{ sys_id: 'global', scope: 'global', name: 'Global' }]));
@@ -1154,7 +1156,7 @@ System: end
             await executor.executeScript('gs.info("x")', 'global', instance);
 
             expect(lookupCall(1).path).toBe('/api/now/table/sys_scope');
-            expect(lookupCall(1).query.sysparm_query).toBe('source=global^scope=global');
+            expect(lookupCall(1).query.sysparm_query).toBe('sys_id=global');
             expect(postedScope()).toBe('global');
         });
 
@@ -1166,7 +1168,7 @@ System: end
             await executor.executeScript('gs.info("x")', 'Global', instance);
 
             expect(lookupCall(1).path).toBe('/api/now/table/sys_scope');
-            expect(lookupCall(1).query.sysparm_query).toBe('source=global^scope=global');
+            expect(lookupCall(1).query.sysparm_query).toBe('sys_id=global');
         });
 
         it('should resolve any other scope name through sys_app', async () => {

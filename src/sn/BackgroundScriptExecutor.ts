@@ -374,8 +374,10 @@ export class BackgroundScriptExecutor {
      * not a scope name, and only runs in Global or in an application developed on
      * the instance (sys_app). This method handles:
      * - 32-char hex strings: checked against sys_app and sent unchanged
-     * - "global": the sys_scope record with source=global. scope=global alone is NOT
-     *   unique — every global-scoped application also carries scope=global.
+     * - "global": the Global scope record itself, whose sys_id is literally "global".
+     *   Nothing else identifies it reliably: every global-scoped application also has
+     *   scope=global, and applications that now-sdk deploys into global can also carry
+     *   source=global (seen on a PDI), so either query alone can return an application.
      * - Any other name: looked up in sys_app.
      * A sys_id or name that is not a sys_app (an installed store app, or nothing at
      * all) throws a ScriptScopeError explaining which.
@@ -422,7 +424,7 @@ export class BackgroundScriptExecutor {
         const isGlobal = scope.toLowerCase() === 'global';
         const table = isGlobal ? 'sys_scope' : 'sys_app';
         const results = await this._lookupScope(scope, table, {
-            sysparm_query: isGlobal ? 'source=global^scope=global' : `scope=${scope}`,
+            sysparm_query: isGlobal ? 'sys_id=global' : `scope=${scope}`,
             sysparm_limit: 1,
             sysparm_fields: 'sys_id,scope,name'
         });
@@ -437,7 +439,7 @@ export class BackgroundScriptExecutor {
             throw new ScriptScopeError({
                 scope,
                 reason: 'GLOBAL_NOT_FOUND',
-                problem: `Could not find the Global scope record (sys_scope where source=global) on this instance.`,
+                problem: `Could not find the Global scope record (sys_scope sys_id=global) on this instance.`,
                 remediation: `Check that the authenticated user can read the sys_scope table.`
             });
         }
