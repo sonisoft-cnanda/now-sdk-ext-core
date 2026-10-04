@@ -22,7 +22,8 @@ const INDENT = '    ';
 /** Generate the Fluent source for a conversion plan. */
 export function generateFluentFlow(plan: FlowConversionPlan, opts: FluentGeneratorOptions = {}): FluentSourceFile[] {
     const g = new Generator(plan);
-    const directory = (opts.directory ?? 'src/fluent/flows').replace(/\/+$/, '');
+    let directory = opts.directory ?? 'src/fluent/flows';
+    while (directory.endsWith('/')) directory = directory.slice(0, -1);
     return [{ path: `${directory}/${plan.identifier.replace(/_/g, '-')}.now.ts`, content: g.file() }];
 }
 
@@ -264,7 +265,7 @@ function customFields(plan: FlowConversionPlan): string[] {
     const record = plan.trigger.recordPill;
     const scan = (text: string): void => {
         if (!record) return;
-        for (const m of text.matchAll(new RegExp(`${record.replace(/\./g, '\\.')}\\.([\\w.]+)`, 'g'))) {
+        for (const m of text.matchAll(new RegExp(`${record.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\.([\\w.]+)`, 'g'))) {
             const custom = m[1].split('.').filter(part => part.startsWith('u_'));
             if (custom.length) found.add(m[1]);
         }

@@ -67,7 +67,8 @@ const FIELD_PATH = /^[a-z_]\w*(\.[a-z_]\w*)*$/i;
 
 /** A code-safe lowercase identifier from free text. */
 export function identifierFrom(text: string, max = 48): string {
-    const id = String(text ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, max).replace(/_+$/, '');
+    let id = String(text ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).join('_').slice(0, max);
+    while (id.endsWith('_')) id = id.slice(0, -1);
     return /^[a-z]/.test(id) ? id : `x_${id || 'step'}`;
 }
 
@@ -1000,7 +1001,7 @@ export function renderFlowPlan(plan: FlowConversionPlan): string {
         }
     };
     const condition = (c: FlowPlanCondition): string => (c.derived
-        ? c.expression.replace(/\$\{wfa\.dataPill\(([^,]+), "[^"]+"\)\}/g, (_m, expr: string) => pill(expr))
+        ? c.expression.replace(/\$\{wfa\.dataPill\(([\w.]+), "\w+"\)\}/g, (_m, expr: string) => pill(expr))
         : `TODO(${oneLine(c.source, 120)})`);
     const mark = (c: FlowPlanConfidence): string => (c === 'direct' ? '' : c === 'partial' ? ' [PARTIAL]' : ' [MANUAL]');
     const from = (n: FlowPlanNode): string => `   ← ${n.source.number}. ${n.source.name}`;
