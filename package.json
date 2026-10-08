@@ -72,7 +72,7 @@
     "cometd": "^9.0.0",
     "cometd-nodejs-client": "^2.0.0",
     "crypto-js": "4.2.0",
-    "dotenv": "^17.4.2",
+    "dotenv": "^18.0.5",
     "fast-xml-parser": "^4.5.4",
     "get-installed-path": "^4.0.8",
     "htmlparser2": "^8.0.2",
