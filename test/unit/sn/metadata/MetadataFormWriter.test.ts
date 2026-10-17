@@ -239,3 +239,85 @@ describe('MetadataFormWriter', () => {
     });
 
 });
+
+
+describe('confirmed CSRF rejection at the public metadata boundary', () => {
+    it.each(['insert', 'update', 'delete'] as const)('%s preserves CSRF rejection and partial evidence', async operation => {
+        req.post.mockResolvedValue({status:302,headers:{location:'/security_interceptor.do'},data:''});
+        if (operation === 'insert') stored = undefined;
+        let failure: any;
+        try {
+            if (operation === 'insert') await writer.insert(TABLE, options());
+            else if (operation === 'update') await writer.update(TABLE, R, options());
+            else await writer.delete(TABLE, R, {scope:{sysId:S},confirm:{table:TABLE,sysId:R}});
+        } catch (error) { failure = error; }
+        expect(failure).toBeInstanceOf(MetadataVerificationError);
+        expect(failure).toMatchObject({code:'csrf_rejected',table:TABLE,sysId:R,writeAttempted:true,
+            capture:{predictedUpdateSetSysId:SET,preferencesUnchanged:true,currentUpdateSet:{switched:false}}});
+        if (operation !== 'insert') expect(failure.capture.recordScope).toBe(S);
+        expect(req.post).toHaveBeenCalledTimes(1);
+        expect(req.get.mock.calls.some(([r]) => r.path.endsWith('/sys_update_xml') && r.query.sysparm_query.includes('sys_updated_on>='))).toBe(true);
+        expect(req.get.mock.calls.filter(([r]) => r.path.endsWith('/sys_user_preference'))).toHaveLength(3);
+        expect(JSON.stringify(failure)).not.toMatch(/page-sentinel|session-sentinel|private-script-sentinel/);
+    });
+
+    it.each(['insert', 'update', 'delete'] as const)('%s retains CSRF and obtainable facts when record read-back fails', async operation => {
+        req.post.mockImplementation(async () => {
+            captured = true; state.captureMod++;
+            return {status:302,headers:{location:'/security_interceptor.do'},data:''};
+        });
+        const get = req.get.getMockImplementation()!;
+        req.get.mockImplementation(async (r: any) => {
+            if (req.post.mock.calls.length && r.path.endsWith('/'+TABLE)) throw new Error('private-script-sentinel');
+            return get(r);
+        });
+        let failure: any;
+        try {
+            if (operation === 'insert') await writer.insert(TABLE, options());
+            else if (operation === 'update') await writer.update(TABLE, R, options());
+            else await writer.delete(TABLE, R, {scope:{sysId:S},confirm:{table:TABLE,sysId:R}});
+        } catch (error) { failure = error; }
+        expect(failure).toBeInstanceOf(MetadataVerificationError);
+        expect(failure).toMatchObject({code:'csrf_rejected',sysId:R,writeAttempted:true,
+            capture:{updateSetSysId:SET,action:'INSERT_OR_UPDATE',preferencesUnchanged:true}});
+        expect(req.post).toHaveBeenCalledTimes(1);
+        expect(req.get.mock.calls.filter(([r]) => r.path.endsWith('/sys_user_preference'))).toHaveLength(3);
+        expect(JSON.stringify(failure)).not.toContain('private-script-sentinel');
+    });
+});
+
+
+describe('CSRF evidence reads remain independent', () => {
+    it.each(['sys_update_xml','sys_user_preference','sys_update_set','sys_metadata_delete'])('retains confirmed rejection when %s is unavailable', async table => {
+        req.post.mockImplementation(async () => {
+            captured=true;state.captureMod++;
+            return {status:302,headers:{location:'/security_interceptor.do'},data:''};
+        });
+        const get=req.get.getMockImplementation()!;
+        req.get.mockImplementation(async (r:any) => {
+            if (req.post.mock.calls.length && r.path.endsWith('/'+table)) throw new Error('private-script-sentinel');
+            return get(r);
+        });
+        let failure:any;
+        try { await writer.delete(TABLE,R,{scope:{sysId:S},confirm:{table:TABLE,sysId:R}}); }
+        catch (error) {failure=error;}
+        expect(failure).toBeInstanceOf(MetadataVerificationError);
+        expect(failure).toMatchObject({code:'csrf_rejected',sysId:R,writeAttempted:true,capture:{recordScope:S}});
+        if (table!=='sys_user_preference') expect(failure.capture.preferencesUnchanged).toBe(true);
+        if (!['sys_update_xml','sys_update_set'].includes(table)) expect(failure.capture.updateSetSysId).toBe(SET);
+        expect(req.get.mock.calls.some(([r])=>r.path.endsWith('/sys_metadata_delete'))).toBe(true);
+        expect(req.post).toHaveBeenCalledTimes(1);
+        expect(JSON.stringify(failure)).not.toContain('private-script-sentinel');
+    });
+    it('preserves policy refusal during read-back even after CSRF rejection', async () => {
+        const refusal=policyRefusal({allowed:false,verbs:['read'],decidingLayer:'test',remediation:'Denied'});
+        req.post.mockResolvedValue({status:302,headers:{location:'/security_interceptor.do'},data:''});
+        const get=req.get.getMockImplementation()!;
+        req.get.mockImplementation(async (r:any)=>{
+            if(req.post.mock.calls.length&&r.path.endsWith('/'+TABLE))throw refusal;
+            return get(r);
+        });
+        await expect(writer.insert(TABLE,options())).rejects.toBe(refusal);
+        expect(req.post).toHaveBeenCalledTimes(1);
+    });
+});
