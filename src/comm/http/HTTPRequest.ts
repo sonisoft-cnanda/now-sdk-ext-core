@@ -18,6 +18,12 @@ export interface HTTPRequest {
     /** Keep successful HTML/XML responses as text without attempting JSON parsing. */
     responseFormat?: "json" | "text";
 
+    /** Opt in to returning redirects to the caller. Defaults to fetch's follow behavior. */
+    redirect?: "follow" | "manual";
+
+    /** Exclude payloads, query values and raw errors from request diagnostics. */
+    sensitive?: boolean;
+
     /**
      * What permission this request needs, when the HTTP verb would get it wrong.
      *

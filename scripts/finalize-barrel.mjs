@@ -33,7 +33,9 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const barrelPath = resolve(root, 'src/index.ts');
 
 /** Modules ctix exports that must NOT be public. */
-const DROP = ['./comm/http/SessionManager.js', './policy/internal/Classify.js'];
+const DROP = ['./comm/http/SessionManager.js', './policy/internal/Classify.js',
+    './comm/http/internal/FormTransportModels.js',
+    './sn/metadata/internal/MetadataReader.js', './sn/metadata/internal/MetadataPreferences.js'];
 
 /** Curated exports ctix cannot express, declared in src/PublicApi.ts. */
 const APPEND = './PublicApi.js';
@@ -82,7 +84,11 @@ const header = [
     '',
 ].join('\n');
 
-writeFileSync(barrelPath, `${kept.join('\n').replace(/\n+$/, '\n')}${header}`);
+const formExport = "export * from './comm/http/FormRecordWriter.js';";
+if (!kept.includes(formExport)) throw new Error('Expected FormRecordWriter export for internal factory exclusion');
+const curated = kept.map(line => line === formExport
+    ? "export { FormRecordWriter, encodeDuration, encodeFormValue } from './comm/http/FormRecordWriter.js';" : line);
+writeFileSync(barrelPath, `${curated.join('\n').replace(/\n+$/, '\n')}${header}`);
 
 console.log(
     `finalize-barrel: removed ${dropped.length} internal export(s) [${dropped.join(', ')}], ` +
