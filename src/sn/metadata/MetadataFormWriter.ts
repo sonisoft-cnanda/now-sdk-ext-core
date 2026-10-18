@@ -173,36 +173,38 @@ export class MetadataFormWriter {
             if (comparison) Object.assign(report, { preferencesUnchanged: comparison.unchanged, preferenceRowsReplaced: comparison.replaced,
                 currentUpdateSet: comparison.currentUpdateSet });
             const captures = observedCaptures.filter(row => captureVersions.get(row.sys_id) !== row.sys_mod_count);
-            const sets = new Map<string, MetadataRow>();
-            for (const capture of captures) {
-                if (!ID.test(capture.update_set)) continue;
-                const set = await readBack(() => reader.exact('sys_update_set', capture.update_set, 'name,application'));
-                if (set) {
-                    sets.set(capture.update_set, set);
-                    Object.assign(report, { updateSetSysId: set.sys_id, updateSetName: set.name, updateSetScope: set.application, action: capture.action });
-                }
-            }
-            const deleted = operation === 'delete' ? await readBack(() => reader.rows('sys_metadata_delete',
-                `sys_metadata=${recordId}^sys_created_on>=${started}`, 'sys_id,sys_metadata,sys_scope,sys_created_on')) : undefined;
             const fail = (code: ConstructorParameters<typeof MetadataVerificationError>[0]): never => {
                 throw new MetadataVerificationError(code, table, recordId, report, messages);
             };
-            if (csrfRejected) fail('csrf_rejected');
-            if (operation === 'delete' ? !!record : !record) fail(operation === 'delete' ? 'delete_not_applied' : 'write_not_applied');
-            if (record && record.sys_scope !== scope.sysId) fail('scope_not_applied');
-            if (observedCaptures.some(row => row.name !== `${table}_${recordId}` || row.sys_updated_on < started || !/^\d+$/.test(row.sys_mod_count))) fail('not_captured');
-            if (!captures.length) fail('not_captured');
+            if (!csrfRejected) {
+                if (operation === 'delete' ? !!record : !record) fail(operation === 'delete' ? 'delete_not_applied' : 'write_not_applied');
+                if (record && record.sys_scope !== scope.sysId) fail('scope_not_applied');
+                if (observedCaptures.some(row => row.name !== `${table}_${recordId}` || row.sys_updated_on < started || !/^\d+$/.test(row.sys_mod_count))) fail('not_captured');
+                if (!captures.length) fail('not_captured');
+            }
             for (const capture of captures) {
-                if (!ID.test(capture.update_set)) fail('not_captured');
-                const set = sets.get(capture.update_set);
-                if (!set) fail('not_captured');
-                if (expected && set.sys_id !== expected) fail('captured_elsewhere');
-                if (!options.allowMixedScopeCapture && (set.application !== scope.sysId || capture.application !== scope.sysId)) fail('mixed_scope_capture');
-                if (capture.action !== (operation === 'delete' ? 'DELETE' : 'INSERT_OR_UPDATE')) fail('not_captured');
+                if (!ID.test(capture.update_set)) {
+                    if (!csrfRejected) fail('not_captured');
+                    continue;
+                }
+                const set = await readBack(() => reader.exact('sys_update_set', capture.update_set, 'name,application'));
+                if (!set) {
+                    if (!csrfRejected) fail('not_captured');
+                    continue;
+                }
+                Object.assign(report, { updateSetSysId: set.sys_id, updateSetName: set.name, updateSetScope: set.application, action: capture.action });
+                if (!csrfRejected) {
+                    if (expected && set.sys_id !== expected) fail('captured_elsewhere');
+                    if (!options.allowMixedScopeCapture && (set.application !== scope.sysId || capture.application !== scope.sysId)) fail('mixed_scope_capture');
+                    if (capture.action !== (operation === 'delete' ? 'DELETE' : 'INSERT_OR_UPDATE')) fail('not_captured');
+                }
             }
             if (operation === 'delete') {
-                if (!deleted.length || deleted.some(row => row.sys_metadata !== recordId || row.sys_scope !== scope.sysId || row.sys_created_on < started)) fail('delete_not_captured');
+                const deleted = await readBack(() => reader.rows('sys_metadata_delete', `sys_metadata=${recordId}^sys_created_on>=${started}`,
+                    'sys_id,sys_metadata,sys_scope,sys_created_on'));
+                if (!csrfRejected && (!deleted.length || deleted.some(row => row.sys_metadata !== recordId || row.sys_scope !== scope.sysId || row.sys_created_on < started))) fail('delete_not_captured');
             }
+            if (csrfRejected) fail('csrf_rejected');
             if (!comparison.valid) fail('session_changed');
             if (submitFailure) fail(submitFailure instanceof Error && submitFailure.message === 'csrf_rejected' ? 'csrf_rejected' : 'verification_unavailable');
             return { table, sysId: recordId, action: operation, scope, capture: report as CaptureReport, messages };

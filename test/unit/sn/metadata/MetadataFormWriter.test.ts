@@ -321,3 +321,17 @@ describe('CSRF evidence reads remain independent', () => {
         expect(req.post).toHaveBeenCalledTimes(1);
     });
 });
+
+
+describe('ordinary verification error precedence', () => {
+    it('keeps write_not_applied ahead of later capture-set reads without confirmed CSRF', async () => {
+        state.notSaved=true;
+        const get=req.get.getMockImplementation()!;
+        req.get.mockImplementation(async (r:any)=>{
+            if(req.post.mock.calls.length&&r.path.endsWith('/sys_update_set'))throw new Error('private-script-sentinel');
+            return get(r);
+        });
+        await expect(writer.insert(TABLE,options())).rejects.toMatchObject({code:'write_not_applied',sysId:R,writeAttempted:true});
+        expect(req.post).toHaveBeenCalledTimes(1);
+    });
+});
