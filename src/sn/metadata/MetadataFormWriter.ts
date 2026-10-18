@@ -157,19 +157,20 @@ export class MetadataFormWriter {
             report = { predictedUpdateSetSysId: predicted };
             // A confirmed interceptor rejection takes precedence, but must not omit obtainable evidence.
             const csrfRejected = submitFailure instanceof Error && submitFailure.message === 'csrf_rejected';
-            const readBack = async <T>(read: () => Promise<T>): Promise<T | undefined> => {
-                try { return await read(); }
+            // Guard interpretation as well as reads so ambiguous evidence cannot mask the rejection.
+            const collectEvidence = async <T>(collect: () => T | Promise<T>): Promise<T | undefined> => {
+                try { return await collect(); }
                 catch (error) {
                     if (isPolicyRefusal(error) || !csrfRejected) throw error;
                     return undefined;
                 }
             };
-            const record = await readBack(() => reader.exact(table, recordId, 'sys_scope'));
+            const record = await collectEvidence(() => reader.exact(table, recordId, 'sys_scope'));
             report.recordScope = record?.sys_scope ?? (!csrfRejected && operation === 'delete' ? scope.sysId : undefined);
-            const observedCaptures = await readBack(() => reader.rows('sys_update_xml', `name=${table}_${recordId}^sys_updated_on>=${started}`,
+            const observedCaptures = await collectEvidence(() => reader.rows('sys_update_xml', `name=${table}_${recordId}^sys_updated_on>=${started}`,
                 'sys_id,name,update_set,application,action,sys_updated_on,sys_mod_count')) ?? [];
-            const after = await readBack(preferences);
-            const comparison = after ? comparePreferences(before, after, [predicted, options.updateSet].filter(Boolean)) : undefined;
+            const after = await collectEvidence(preferences);
+            const comparison = after ? await collectEvidence(() => comparePreferences(before, after, [predicted, options.updateSet].filter(Boolean))) : undefined;
             if (comparison) Object.assign(report, { preferencesUnchanged: comparison.unchanged, preferenceRowsReplaced: comparison.replaced,
                 currentUpdateSet: comparison.currentUpdateSet });
             const captures = observedCaptures.filter(row => captureVersions.get(row.sys_id) !== row.sys_mod_count);
@@ -187,7 +188,7 @@ export class MetadataFormWriter {
                     if (!csrfRejected) fail('not_captured');
                     continue;
                 }
-                const set = await readBack(() => reader.exact('sys_update_set', capture.update_set, 'name,application'));
+                const set = await collectEvidence(() => reader.exact('sys_update_set', capture.update_set, 'name,application'));
                 if (!set) {
                     if (!csrfRejected) fail('not_captured');
                     continue;
@@ -200,7 +201,7 @@ export class MetadataFormWriter {
                 }
             }
             if (operation === 'delete') {
-                const deleted = await readBack(() => reader.rows('sys_metadata_delete', `sys_metadata=${recordId}^sys_created_on>=${started}`,
+                const deleted = await collectEvidence(() => reader.rows('sys_metadata_delete', `sys_metadata=${recordId}^sys_created_on>=${started}`,
                     'sys_id,sys_metadata,sys_scope,sys_created_on'));
                 if (!csrfRejected && (!deleted.length || deleted.some(row => row.sys_metadata !== recordId || row.sys_scope !== scope.sysId || row.sys_created_on < started))) fail('delete_not_captured');
             }

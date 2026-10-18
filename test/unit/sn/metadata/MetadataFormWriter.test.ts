@@ -336,3 +336,58 @@ describe('ordinary verification error precedence', () => {
         expect(req.post).toHaveBeenCalledTimes(1);
     });
 });
+
+
+describe('CSRF evidence interpretation remains independent', () => {
+    it.each(['insert', 'update', 'delete'] as const)('%s retains confirmed CSRF and later facts with conflicting preferences', async operation => {
+        req.post.mockImplementation(async () => {
+            captured = true; state.captureMod++;
+            prefs.push({sys_id:'6'.repeat(32),user:U,name:'sys_update_set',value:SET});
+            return {status:302,headers:{location:'/security_interceptor.do'},data:''};
+        });
+        if (operation === 'insert') stored = undefined;
+        let failure: any;
+        try {
+            if (operation === 'insert') await writer.insert(TABLE, options());
+            else if (operation === 'update') await writer.update(TABLE, R, options());
+            else await writer.delete(TABLE, R, {scope:{sysId:S},confirm:{table:TABLE,sysId:R}});
+        } catch (error) { failure = error; }
+        expect(failure).toBeInstanceOf(MetadataVerificationError);
+        expect(failure).toMatchObject({code:'csrf_rejected',table:TABLE,sysId:R,writeAttempted:true,
+            capture:{predictedUpdateSetSysId:SET,updateSetSysId:SET,updateSetName:'Test set',updateSetScope:S,action:'INSERT_OR_UPDATE'}});
+        expect(failure.capture.recordScope).toBe(operation === 'insert' ? undefined : S);
+        for (const field of ['preferencesUnchanged','preferenceRowsReplaced','currentUpdateSet']) {
+            expect(failure.capture).not.toHaveProperty(field);
+        }
+        expect(req.post).toHaveBeenCalledTimes(1);
+        expect(req.get.mock.calls.filter(([r]) => r.path.endsWith('/sys_user_preference'))).toHaveLength(3);
+        expect(req.get.mock.calls.some(([r]) => r.path.endsWith('/sys_update_set'))).toBe(true);
+        expect(req.get.mock.calls.some(([r]) => r.path.endsWith('/sys_metadata_delete'))).toBe(operation === 'delete');
+        expect(JSON.stringify(failure)).not.toMatch(/page-sentinel|session-sentinel|private-name-sentinel|private-script-sentinel/);
+    });
+
+    it('preserves a later policy refusal after an unavailable preference comparison', async () => {
+        const refusal = policyRefusal({allowed:false,verbs:['read'],decidingLayer:'test',remediation:'Denied'});
+        req.post.mockImplementation(async () => {
+            captured = true; state.captureMod++;
+            prefs.push({sys_id:'6'.repeat(32),user:U,name:'sys_update_set',value:SET});
+            return {status:302,headers:{location:'/security_interceptor.do'},data:''};
+        });
+        const get = req.get.getMockImplementation()!;
+        req.get.mockImplementation(async (r: any) => {
+            if (req.post.mock.calls.length && r.path.endsWith('/sys_update_set')) throw refusal;
+            return get(r);
+        });
+        await expect(writer.insert(TABLE, options())).rejects.toBe(refusal);
+        expect(req.post).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['insert', 'update', 'delete'] as const)('%s refuses conflicting preferences without confirmed CSRF', async operation => {
+        state.mutate = () => prefs.push({sys_id:'6'.repeat(32),user:U,name:'sys_update_set',value:SET});
+        const result = operation === 'insert' ? writer.insert(TABLE, options()) : operation === 'update' ?
+            writer.update(TABLE, R, options()) : writer.delete(TABLE, R, {scope:{sysId:S},confirm:{table:TABLE,sysId:R}});
+        await expect(result).rejects.toMatchObject({name:'MetadataVerificationError',code:'verification_unavailable',
+            table:TABLE,sysId:R,writeAttempted:true});
+        expect(req.post).toHaveBeenCalledTimes(1);
+    });
+});
