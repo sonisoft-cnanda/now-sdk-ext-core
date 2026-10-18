@@ -280,6 +280,7 @@ describe('confirmed CSRF rejection at the public metadata boundary', () => {
         expect(failure).toBeInstanceOf(MetadataVerificationError);
         expect(failure).toMatchObject({code:'csrf_rejected',sysId:R,writeAttempted:true,
             capture:{updateSetSysId:SET,action:'INSERT_OR_UPDATE',preferencesUnchanged:true}});
+        expect(failure.capture.recordScope).toBeUndefined();
         expect(req.post).toHaveBeenCalledTimes(1);
         expect(req.get.mock.calls.filter(([r]) => r.path.endsWith('/sys_user_preference'))).toHaveLength(3);
         expect(JSON.stringify(failure)).not.toContain('private-script-sentinel');

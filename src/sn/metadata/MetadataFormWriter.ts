@@ -165,7 +165,7 @@ export class MetadataFormWriter {
                 }
             };
             const record = await readBack(() => reader.exact(table, recordId, 'sys_scope'));
-            report.recordScope = operation === 'delete' ? scope.sysId : record?.sys_scope;
+            report.recordScope = record?.sys_scope ?? (!csrfRejected && operation === 'delete' ? scope.sysId : undefined);
             const observedCaptures = await readBack(() => reader.rows('sys_update_xml', `name=${table}_${recordId}^sys_updated_on>=${started}`,
                 'sys_id,name,update_set,application,action,sys_updated_on,sys_mod_count')) ?? [];
             const after = await readBack(preferences);
