@@ -144,12 +144,12 @@ export class MetadataFormWriter {
             submitted = true;
             let submitFailure: unknown;
             try {
-            const result = await transport.submit(form, action, { ...options, postAllRenderedInputs: true,
-                tokenSource: 'page', actionValue: operation === 'update' ? form.actions[action] : action,
-                extraFields: { sysparm_transaction_scope: scope.sysId, sysparm_transaction_update_set: options.updateSet ?? '',
-                    sysparm_record_scope: '', sysparm_goto_url: '' },
-                redirect: 'manual', landing: 'guarded', sensitive: true });
-            messages = [...result.messages, ...(result.errors ?? [])];
+                const result = await transport.submit(form, action, { ...options, postAllRenderedInputs: true,
+                    tokenSource: 'page', actionValue: operation === 'update' ? form.actions[action] : action,
+                    extraFields: { sysparm_transaction_scope: scope.sysId, sysparm_transaction_update_set: options.updateSet ?? '',
+                        sysparm_record_scope: '', sysparm_goto_url: '' },
+                    redirect: 'manual', landing: 'guarded', sensitive: true });
+                messages = [...result.messages, ...(result.errors ?? [])];
             } catch (error) {
                 if (isPolicyRefusal(error)) throw error;
                 submitFailure = error;

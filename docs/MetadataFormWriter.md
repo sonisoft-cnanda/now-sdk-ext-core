@@ -50,6 +50,11 @@ Avoid concurrent metadata writes and picker changes in one session.
 Each POST runs once. A 401 or uncertain response is never replayed.
 On `MetadataVerificationError`, use `table`, `sysId`, `writeAttempted`, `capture` and sanitized `messages` to inspect the result.
 The record can exist even when verification fails. Read it before any cleanup or retry decision.
+Capture and delete verification use the client's UTC start time and reject unchanged capture versions.
+Keep the client clock synchronized with the instance. A client clock that runs ahead can reject a successful write as unverified.
+A backward time margin is not applied because it could admit older evidence. Do not repeat a write to resolve a clock error.
+Sanitized messages can omit legitimate long identifiers or text that matches submitted values.
+Use the typed error and record/capture read-back when a message lacks detail.
 Delete requires exact confirmation and a global Delete action that calls `confirmAndDeleteFromForm()`.
 The writer checks record absence, a DELETE capture and metadata-delete evidence.
 It never uses a second deletion path.

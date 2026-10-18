@@ -155,15 +155,16 @@ class FormTransport {
         }
     }
 
-    /**
-     * Turn caller values into posted form parameters, validating variables against the
-     * form so a misspelt element fails loudly instead of being silently ignored.
-     */
+    /** Validate caller values without submitting the form. */
     public validate(snapshot: FormSnapshot, options: FormWriteOptions): void {
         try { this.buildFields(snapshot, options); }
         catch { throw new InvalidParameterException("Invalid form field or variable value"); }
     }
 
+    /**
+     * Turn caller values into posted form parameters, validating variables against the
+     * form so a misspelt element fails loudly instead of being silently ignored.
+     */
     private buildFields(snapshot: FormSnapshot, options: FormWriteOptions): Record<string, string> {
         const table = snapshot.table;
         const out: Record<string, string> = {};
@@ -248,11 +249,15 @@ class FormTransport {
             const url = new URL(location, origin);
             if (url.pathname === "/security_interceptor.do") throw new Error("csrf_rejected");
             const allowed = new Set(["sys_id", "sysparm_transaction_scope", "sysparm_isdevstudio", "sysparm_nameofstack", "sysparm_view", "sysparm_referring_url"]);
-            if (url.origin !== origin.origin || url.username || url.password || url.hash ||
-                url.pathname !== `/${snapshot.table}.do` || !url.searchParams.has("sys_id") ||
-                [...url.searchParams.keys()].some(key => url.searchParams.getAll(key).length !== 1) ||
-                (url.searchParams.has("sysparm_transaction_scope") && url.searchParams.get("sysparm_transaction_scope") !== fields.sysparm_transaction_scope) || [...url.searchParams.keys()].some(key => !allowed.has(key)) ||
-                (url.searchParams.has("sys_id") && ![snapshot.sysId, "-1"].includes(url.searchParams.get("sys_id")))) {
+            const unexpectedDestination = url.origin !== origin.origin || url.username || url.password || url.hash ||
+                url.pathname !== `/${snapshot.table}.do`;
+            const parameters = [...url.searchParams.keys()];
+            const unexpectedParameters = parameters.some(key => !allowed.has(key) || url.searchParams.getAll(key).length !== 1);
+            const unexpectedScope = url.searchParams.has("sysparm_transaction_scope") &&
+                url.searchParams.get("sysparm_transaction_scope") !== fields.sysparm_transaction_scope;
+            const unexpectedRecord = !url.searchParams.has("sys_id") ||
+                ![snapshot.sysId, "-1"].includes(url.searchParams.get("sys_id"));
+            if (unexpectedDestination || unexpectedParameters || unexpectedScope || unexpectedRecord) {
                 throw new FormSubmitError(snapshot.table, "Unexpected form redirect");
             }
             const landing = await this.request().get<string>({ path: url.pathname,
