@@ -1,5 +1,6 @@
+import type { FormTransportLoadOptions, FormTransportSnapshot } from "./internal/FormTransportModels";
 import { Parser } from "htmlparser2";
-import { FormControl, FormSnapshot, FormVariableControl } from "./FormRecordModels";
+import { FormControl, FormVariableControl } from "./FormRecordModels";
 
 /**
  * Parses classic UI form pages (`/<table>.do`) into a {@link FormSnapshot}.
@@ -27,7 +28,9 @@ interface PendingSelect {
  * @param table The table the form belongs to
  * @throws Error when the page is not a form for `table` (e.g. a login page or an error page)
  */
-export function parseFormHtml(html: string, table: string): FormSnapshot {
+export function parseFormHtml(html: string, table: string, options: FormTransportLoadOptions = {}): FormTransportSnapshot {
+    const renderedInputs: Record<string, string> = {};
+    const pageTokens: string[] = [];
     const prefix = `${table}.`;
     const tokens: Record<string, string> = {};
     const actions: Record<string, string> = {};
@@ -50,6 +53,8 @@ export function parseFormHtml(html: string, table: string): FormSnapshot {
                     const name = attrs.name;
                     if (name === "sys_target") target = attrs.value;
                     if (TOKENS.has(name)) tokens[name] = attrs.value ?? "";
+                    if (options.captureRenderedInputs && name) renderedInputs[name] = attrs.value ?? "";
+                    if (options.tokenSource === "page" && name === "sysparm_ck") pageTokens.push(attrs.value ?? "");
                     if (!keep(name)) return;
                     const type = (attrs.type || "text").toLowerCase();
                     if (type === "button" || type === "submit" || type === "image") return;
@@ -58,10 +63,10 @@ export function parseFormHtml(html: string, table: string): FormSnapshot {
                     return;
                 }
                 case "textarea":
-                    if (keep(attrs.name)) textarea = { name: attrs.name, text: "" };
+                    if (keep(attrs.name) || (options.captureRenderedInputs && attrs.name)) textarea = { name: attrs.name, text: "" };
                     return;
                 case "select":
-                    if (keep(attrs.name)) select = { name: attrs.name, options: [] };
+                    if (keep(attrs.name) || (options.captureRenderedInputs && attrs.name)) select = { name: attrs.name, options: [] };
                     return;
                 case "option":
                     if (select) option = { value: attrs.value, label: "", selected: attrs.selected !== undefined };
@@ -87,14 +92,16 @@ export function parseFormHtml(html: string, table: string): FormSnapshot {
         },
         onclosetag(tag) {
             if (tag === "textarea" && textarea) {
-                controls.set(textarea.name, { name: textarea.name, value: textarea.text });
+                if (options.captureRenderedInputs) renderedInputs[textarea.name] = textarea.text;
+                if (keep(textarea.name)) controls.set(textarea.name, { name: textarea.name, value: textarea.text });
                 textarea = null;
             } else if (tag === "option" && select && option) {
                 select.options.push({ value: option.value ?? option.label, label: option.label.trim(), selected: option.selected });
                 option = null;
             } else if (tag === "select" && select) {
                 const chosen = select.options.find(o => o.selected) ?? select.options[0];
-                controls.set(select.name, {
+                if (options.captureRenderedInputs) renderedInputs[select.name] = chosen?.value ?? "";
+                if (keep(select.name)) controls.set(select.name, {
                     name: select.name,
                     value: chosen ? chosen.value : "",
                     choices: select.options.map(o => ({ value: o.value, label: o.label })),
@@ -122,6 +129,9 @@ export function parseFormHtml(html: string, table: string): FormSnapshot {
         else fields[control.name] = control;
     }
 
+    if (options.tokenSource === "page" && (!pageTokens.length || pageTokens.some(token => !token || token !== pageTokens[0]))) {
+        throw new Error("csrf_token_unavailable");
+    }
     const sysId = tokens.sys_uniqueValue;
     return {
         table,
@@ -133,6 +143,8 @@ export function parseFormHtml(html: string, table: string): FormSnapshot {
         actions,
         fields,
         variables,
+        ...(options.captureRenderedInputs ? { renderedInputs } : {}),
+        ...(options.tokenSource === "page" ? { pageToken: pageTokens[0] } : {}),
     };
 }
 

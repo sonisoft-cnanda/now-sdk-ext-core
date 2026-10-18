@@ -13,7 +13,7 @@ import { IServiceNowInstance } from '../../sn/IServiceNowInstance';
 import { StaleInstanceError } from '../../exception/StaleInstanceError';
 import { stripSecretsFromError, redactValue } from '../../util/redact';
 import { checkRequirement } from '../../policy/Policy';
-import { policyRefusal } from '../../policy/PolicyRefusal';
+import { isPolicyRefusal, policyRefusal } from '../../policy/PolicyRefusal';
 import { classify } from '../../policy/internal/Classify';
 import { SessionAuthError } from '../../auth/SessionAuthError';
 
@@ -104,7 +104,10 @@ export class RequestHandler implements IRequestHandler{
      * are stripped first, because the consumer's logger has no redaction format of its
      * own.
      */
-    private toThrowable(ex: unknown): Error {
+    private toThrowable(ex: unknown, request?: HTTPRequest): Error {
+        if (request?.sensitive && !isPolicyRefusal(ex) && !(ex instanceof SessionAuthError) && !(ex instanceof StaleInstanceError)) {
+            return new Error("Sensitive request failed; no payload diagnostics retained");
+        }
         if (ex instanceof Error) {
             return stripSecretsFromError(ex);
         }
@@ -227,7 +230,7 @@ export class RequestHandler implements IRequestHandler{
     private async doRequest<T>(request: HTTPRequest, retried = false): Promise<HttpResponse<T>> {
         let response:HttpResponse<T> = null;
        const {config} = await this.getRequestConfig(request);
-       this._logger.debug("Retrieved Configuration", {config:config});
+       this._logger.debug("Retrieved Configuration", this.diagnostic(request, {config:config}));
        //const { auth, path, params, fields, json, headers: baseHeaders, ...rest } = opts;
         // let opts = {
         //     auth: this._session,
@@ -250,17 +253,18 @@ export class RequestHandler implements IRequestHandler{
             this._authHandler.pinSession?.();
         }
         let responseBodyString: string | null = null;
-        if (!resp.ok) {
+        if (!resp.ok && !(request.redirect === "manual" && resp.status >= 300 && resp.status < 400)) {
            
             try {
                 responseBodyString = await resp.text();
             } catch (e) {
                 responseBodyString = null;
                 // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-                this._logger.error("Error parsing response body.", {error:e});
+                this._logger.error("Error parsing response body.", this.diagnostic(request, {error:e}, resp.status));
             }
-            this._logger.error("Error during request.", { error: resp, request: request });
-            this._logger.error("Response Details:", { body: responseBodyString, status: resp.status });
+            this._logger.error("Error during request.", this.diagnostic(request, { error: resp, request: request }, resp.status));
+            this._logger.error("Response Details:", this.diagnostic(request, { body: responseBodyString, status: resp.status }, resp.status));
+            if (request.sensitive) throw new Error(`Request failed with status ${resp.status}`);
             throw new Error("Error during request. Status: " + resp.status + " Body: " + (responseBodyString !== null ? responseBodyString : "[no response body]"));
         }else{
             try{
@@ -268,7 +272,7 @@ export class RequestHandler implements IRequestHandler{
             }catch(e){
                 responseBodyString = null;
                 // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
-                this._logger.error("Error parsing response body.", {error:e});
+                this._logger.error("Error parsing response body.", this.diagnostic(request, {error:e}, resp.status));
             }
         }
         // let responseBodyReader = resp.body.getReader();
@@ -327,7 +331,7 @@ export class RequestHandler implements IRequestHandler{
         const response:IHttpResponse<T> = null;
        try{
         const response = await this.doRequest<T>(request);
-         this._logger.debug("Http SN POST Response Received", response);
+         this._logger.debug("Http SN POST Response Received", this.diagnostic(request, response, response.status));
          
         try{
             if(!((response.data) instanceof String) ){
@@ -335,14 +339,14 @@ export class RequestHandler implements IRequestHandler{
                 response.bodyObject = response.data;
             }
         }catch(ex){
-            this._logger.error("Error setting response.bodyObject.", {error:ex, response: response, request: request});
+            this._logger.error("Error setting response.bodyObject.", this.diagnostic(request, {error:ex, response: response, request: request}));
         }
         
         return response;
        }catch(ex){
 
-        this._logger.error("Error during POST request.", {error:ex, response: response, request: request});
-        throw this.toThrowable(ex);
+        this._logger.error("Error during POST request.", this.diagnostic(request, {error:ex, response: response, request: request}));
+        throw this.toThrowable(ex, request);
        }
     }
 
@@ -351,7 +355,7 @@ export class RequestHandler implements IRequestHandler{
         const response:IHttpResponse<T> = null;
         try{
          const response = await this.doRequest<T>(request);
-            this._logger.debug("Http PUT Response Received", response);
+            this._logger.debug("Http PUT Response Received", this.diagnostic(request, response, response.status));
             try{
                 if(!((response.data) instanceof String) ){
                     const rpObj: T | null = response.data;
@@ -363,8 +367,8 @@ export class RequestHandler implements IRequestHandler{
             
             return response;
        }catch(ex){
-        this._logger.error("Error during PUT request.", {error:ex, response: response, request: request});
-        throw this.toThrowable(ex);
+        this._logger.error("Error during PUT request.", this.diagnostic(request, {error:ex, response: response, request: request}));
+        throw this.toThrowable(ex, request);
        }
     }
 
@@ -373,7 +377,7 @@ export class RequestHandler implements IRequestHandler{
         const response:IHttpResponse<T> = null;
         try{
          const response = await this.doRequest<T>(request);
-          this._logger.debug("Http SN GET Response Received", response);
+          this._logger.debug("Http SN GET Response Received", this.diagnostic(request, response, response.status));
 
         try{
             if(!((response.data) instanceof String) ){
@@ -381,13 +385,13 @@ export class RequestHandler implements IRequestHandler{
                 response.bodyObject = response.data;
             }
         }catch(ex){
-            this._logger.error("Error setting response.bodyObject.", {error:ex, response: response, request: request});
+            this._logger.error("Error setting response.bodyObject.", this.diagnostic(request, {error:ex, response: response, request: request}));
         }
 
         return response;
        }catch(ex){
-            this._logger.error("Error during GET request.", {error:ex, response: response, request: request});
-            throw this.toThrowable(ex);
+            this._logger.error("Error during GET request.", this.diagnostic(request, {error:ex, response: response, request: request}));
+            throw this.toThrowable(ex, request);
        }
     }
 
@@ -402,13 +406,13 @@ export class RequestHandler implements IRequestHandler{
                 const rpObj: T | null = response.data;
                 response.bodyObject = response.data;            }
         }catch(ex){
-            this._logger.error("Error setting response.bodyObject.", {error:ex, response: response, request: request});
+            this._logger.error("Error setting response.bodyObject.", this.diagnostic(request, {error:ex, response: response, request: request}));
         }
 
         return response;
        }catch(ex){
-            this._logger.error("Error during DELETE request.", {error:ex, response: response, request: request});
-            throw this.toThrowable(ex);
+            this._logger.error("Error during DELETE request.", this.diagnostic(request, {error:ex, response: response, request: request}));
+            throw this.toThrowable(ex, request);
        }
     }
 
@@ -448,8 +452,15 @@ export class RequestHandler implements IRequestHandler{
 
         config.path = request.path;
         config.method = request.method;
+        if (request.redirect) (config as { redirect?: HTTPRequest["redirect"] }).redirect = request.redirect;
 
         return {config: config};
+    }
+
+    private diagnostic(request: HTTPRequest, legacy: unknown, status?: number): unknown {
+        return request.sensitive
+            ? { method: request.method, path: request.path.split("?")[0], status }
+            : legacy;
     }
 
     private getQueryString(queryObj:object):string{
