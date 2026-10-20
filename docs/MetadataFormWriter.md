@@ -40,7 +40,9 @@ The encoded form state carries those values. Unknown variables fail before the P
 
 `capture.updateName` is the captured file's name: `<table>_<sys_id>`, or the platform's coalescing
 name for labels (`sys_documentation_<table>_<element>_<language>`) and choices
-(`sys_choice_<table>_<element>`). Capture verification looks for that name.
+(`sys_choice_<table>_<element>`). Capture verification looks for that name. An insert into those tables must
+supply the name parts (`name`, `element`, and `language` for labels) in `fields`, so that the name is known
+before the POST. Otherwise it is refused with `invalid_input` and `detail.field`.
 
 The capture prediction comes from `updateSetForScope<scope sys_id>` in the authenticated user's preferences.
 An explicit `updateSet` overrides this prediction. The writer checks the actual capture against that set.

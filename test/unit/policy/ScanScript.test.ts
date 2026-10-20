@@ -58,6 +58,11 @@ describe("read-only scripts", () => {
         expect(requirementForScript("gs.info('hi');").verbs).toEqual(["execute"]);
     });
 
+    it.each(["gs.getUser().savePreference('apps.current_app', 'global');", "gs.setCurrentApplicationId('global');"])(
+        "treats a persisted preference change as a write: %s", (script) => {
+        expect(scanScript(script).verbs).toContain("write");
+    });
+
     it("adds write on top of execute when the script mutates", () => {
         expect(requirementForScript("new GlideRecord('x').insert();").verbs).toEqual([
             "execute",

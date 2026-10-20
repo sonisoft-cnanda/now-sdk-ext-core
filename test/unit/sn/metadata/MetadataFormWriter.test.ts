@@ -21,7 +21,7 @@ function form(table = TABLE, id = '-1') {
 <input name="sys_row" value="${id === '-1' ? '-1' : '0'}"><input name="sysparm_encoded_record" value="signed-state">
 <input name="sysparm_transaction_scope" value="${state.formScope}"><input name="${table}.sys_scope" value="${state.formScope}">
 <input name="sysparm_ck" value="page-sentinel"><input name="sysparm_ck" id="duplicate" value="page-sentinel">
-<input name="sys_original.name" value="original"><input name="${table}.name" value="old">
+<input name="sys_original.name" value="original"><input name="${table}.name" value="old"><input name="${table}.element" value=""><input name="${table}.language" value="">
 <textarea name="${table}.script">old</textarea><input name="${table}.active" value="false">
 <textarea name="${table}.inputs.var__m_${A}.script"></textarea>
 ${state.missingAction ? '' : `<button data-action-name="sysverb_insert_and_stay" gsft_id="${A}"></button><button data-action-name="sysverb_update" gsft_id="${A}"></button><button data-action-name="sysverb_delete" gsft_id="${A}"></button>`}</form>`;
@@ -299,7 +299,17 @@ describe('MetadataFormWriter for applications we do not own', () => {
         const result = await writer.update(table, R, { scope: { sysId: S }, fields: { name: 'private-name-sentinel' } });
         expect(result.capture).toMatchObject({ updateName: name, updateSetSysId: SET });
         expect(req.get.mock.calls.some(([r]) => r.path.endsWith('/sys_update_xml') && r.query.sysparm_query.startsWith(`name=${name}^`))).toBe(true);
-        await expect(writer.insert(table, { scope: { sysId: S }, fields: { name: 'private-name-sentinel' } })).resolves.toMatchObject({ capture: { updateName: name } });
+        const parts = table === 'sys_documentation' ? { name: 'x_t', element: 'f', language: 'en' } : { name: 'x_t', element: 'f' };
+        req.get.mockClear();
+        await expect(writer.insert(table, { scope: { sysId: S }, fields: parts })).resolves.toMatchObject({ capture: { updateName: name } });
+        // The existing rows with that name are snapshotted before the POST, so an older row is never this insert's evidence.
+        const snapshot = req.get.mock.calls.findIndex(([r]) => r.path.endsWith('/sys_update_xml') && r.query.sysparm_query === `name=${name}^ORDERBYsys_id`);
+        expect(snapshot).toBeGreaterThanOrEqual(0);
+    });
+    it('refuses a coalescing insert whose name cannot be predicted from its fields', async () => {
+        await expect(writer.insert('sys_documentation', { scope: { sysId: S }, fields: { name: 'x_t', element: 'f' } }))
+            .rejects.toMatchObject({ code: 'invalid_input', detail: { field: 'language', table: 'sys_documentation' } });
+        expect(req.post).not.toHaveBeenCalled();
     });
     it('fails rather than guesses when a coalescing record lacks its name parts', async () => {
         state.captureName = 'sys_documentation_x_t_f_en';

@@ -41,7 +41,7 @@ export async function customizationEvidence(reader: MetadataReader, captureId: s
         }
     };
     const capture = captureId ? await read(() => reader.exact('sys_update_xml', captureId, 'replace_on_upgrade')) : undefined;
-    if (capture) report.replaceOnUpgrade = capture.replace_on_upgrade === 'true';
+    if (capture && ['true', 'false', '1', '0'].includes(capture.replace_on_upgrade)) report.replaceOnUpgrade = ['true', '1'].includes(capture.replace_on_upgrade);
     const versions = name ? await read(() => reader.rows('sys_update_version', `name=${name}^source_table=sys_store_app`, 'sys_id,name')) : undefined;
     if (versions) report.baselineVersion = versions.some(row => row.name === name);
     return report;

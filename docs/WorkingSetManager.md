@@ -38,17 +38,23 @@ application. `useUpdateSet` saves all three and reads them back.
 | `getUpdateSet(sysId)` | name, state, application, `isDefault` | `update_set_not_found` |
 | `createUpdateSet({ application, name, description? })` | creates an In progress set with `application` written server-side (the Table API drops that field) and reads it back | `update_set_exists` (same name open in that application), `application_not_found`, `application_not_applied`, `create_not_applied` |
 | `useUpdateSet(sysId, { allowDefault? })` | makes the set the working set for every later session; returns `previous` | `update_set_closed`, `default_update_set` (unless `allowDefault`, for restoring only), `working_set_not_applied` |
-| `restoreWorkingSet(previous)` | puts `previous` back; if that set has closed, uses the application's single In progress Default (`fallback: 'application_default'`) | `no_single_default` |
+| `restoreWorkingSet(previous)` | puts `previous` back; if that set has closed or was never set (`''`), uses the application's single In progress Default (`fallback: 'application_default'`). An unset application is Global | `scope_mismatch` (the set belongs to another application), `no_single_default` |
 | `moveCapture({ capture, sourceSet, targetSet, reason })` | moves one `sys_update_xml` row between In progress sets of its own application, appends the reason to `comments`, reads the move back | `capture_not_in_source`, `update_set_closed`, `default_update_set`, `scope_mismatch`, `duplicate_capture`, `newer_capture_exists`, `move_not_applied` |
-| `completeUpdateSet(sysId, { expectedCaptures })` | sets Complete after checking the set and reads the state back | `update_set_closed`, `default_update_set`, `capture_count_mismatch`, `mixed_scope_capture`, `duplicate_capture`, `update_set_in_use` (another user's current set), `complete_not_applied` |
+| `completeUpdateSet(sysId, { expectedCaptures })` | sets Complete after checking the set, reads the state back, then counts the captures again | `update_set_closed`, `default_update_set`, `capture_count_mismatch` (also after completion, with `detail.state: 'complete'`, when a capture arrived during it), `mixed_scope_capture`, `duplicate_capture`, `update_set_in_use` (another user's `sys_update_set` preference), `complete_not_applied` |
 
 `WorkingSetError.detail` holds only sys_ids, states and counts. It never holds names,
 descriptions or payloads.
 
 ## Notes
 
-- Creating a set and saving preferences run as short global background scripts (`execute` in the
-  policy ladder). Moves and completion use the Table API (`write`). Reads are `READ_ONLY`.
+- Creating a set and saving preferences run as short global background scripts, which need both
+  `execute` and `write` in the policy ladder: the scanner counts `savePreference` and
+  `setCurrentApplicationId` as writes. Moves and completion use the Table API (`write`). Reads
+  are `READ_ONLY`. The set name is passed to the script as data and is never built into an
+  encoded query.
+- `update_set_in_use` looks only at other users' `sys_update_set` preferences that the caller can
+  read. An `updateSetForScope` preference that points at the set, or a row hidden by ACLs, is not
+  detected.
 - `completeUpdateSet` leaves your own preferences on the completed set. A closed set is not
   captured into, and the next session falls back to the application's Default. Call
   `restoreWorkingSet` straight after it.

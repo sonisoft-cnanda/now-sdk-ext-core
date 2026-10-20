@@ -53,9 +53,16 @@ export class WorkingSetManager {
         const name = options?.name?.trim() ?? '';
         if (!name || name.length > 80 || /\p{Cc}/u.test(name) || /\p{Cc}/u.test(options.description ?? '')) throw new WorkingSetError('invalid_input');
         const application = await this.application(options.application);
-        const existing = await this._reader.rows('sys_update_set', `name=${name}^application=${application}^state=in progress`, 'sys_id,name,application');
-        if (existing.some(row => row.name === name && row.application === application)) throw new WorkingSetError('update_set_exists');
+        // The duplicate check runs with addQuery inside the script: the caller's name never becomes encoded-query text,
+        // where '^' would split it and a javascript: term would run on the server.
         const created = await this.script(`
+            var open = new GlideRecord('sys_update_set');
+            open.addQuery('name', P.name);
+            open.addQuery('application', P.application);
+            open.addQuery('state', 'in progress');
+            open.setLimit(1);
+            open.query();
+            if (open.hasNext()) { out({ exists: true }); return; }
             var set = new GlideRecord('sys_update_set');
             set.initialize();
             set.setValue('name', P.name);
@@ -64,6 +71,7 @@ export class WorkingSetManager {
             if (P.description) set.setValue('description', P.description);
             var id = set.insert();
             out({ sys_id: id ? '' + id : '' });`, { name, application, description: options.description ?? '' });
+        if (created.exists === true) throw new WorkingSetError('update_set_exists');
         const createdId = typeof created.sys_id === 'string' ? created.sys_id : '';
         if (!ID.test(createdId)) throw new WorkingSetError('create_not_applied');
         const set = await this.getUpdateSet(createdId);
@@ -92,12 +100,18 @@ export class WorkingSetManager {
      * application's single In progress Default is used instead and reported as the fallback.
      */
     public async restoreWorkingSet(previous: WorkingSet): Promise<RestoreWorkingSetResult> {
-        const application = previous?.application === 'global' || ID.test(previous?.application ?? '') ? previous.application : undefined;
-        if (!application || !ID.test(previous?.updateSet ?? '')) throw new WorkingSetError('invalid_input');
+        // A user with no saved preference reads back as '': the platform's own default is Global and its Default set.
+        const requested = previous?.application === '' ? 'global' : previous?.application;
+        const application = requested === 'global' || ID.test(requested ?? '') ? requested : undefined;
+        const updateSet = previous?.updateSet ?? '';
+        if (!application || (updateSet !== '' && !ID.test(updateSet))) throw new WorkingSetError('invalid_input');
         let set: UpdateSetSummary | undefined;
-        try { set = await this.getUpdateSet(previous.updateSet); } catch (error) {
-            if (!(error instanceof WorkingSetError && error.code === 'update_set_not_found')) throw error;
+        if (updateSet) {
+            try { set = await this.getUpdateSet(updateSet); } catch (error) {
+                if (!(error instanceof WorkingSetError && error.code === 'update_set_not_found')) throw error;
+            }
         }
+        if (set && set.application !== application) throw new WorkingSetError('scope_mismatch', { application, updateSet: set.sysId });
         if (set?.state === 'in progress') return { restored: await this.persist(application, set.sysId) };
         const defaults = await this._reader.rows('sys_update_set', `application=${application}^is_default=true^state=in progress`, 'sys_id,application');
         if (defaults.length !== 1 || defaults[0].application !== application) throw new WorkingSetError('no_single_default', { application });
@@ -158,6 +172,11 @@ export class WorkingSetManager {
             body: null, json: { state: 'complete' } });
         const completed = await this.getUpdateSet(sysId);
         if (completed.state !== 'complete') throw new WorkingSetError('complete_not_applied', { updateSet: sysId, state: completed.state });
+        // A capture that arrived between the checks and the state change is in the completed set: say so.
+        const final = await this._reader.rows('sys_update_xml', `update_set=${sysId}`, 'sys_id,update_set');
+        if (final.length !== rows.length || final.some(row => !rows.some(checked => checked.sys_id === row.sys_id))) {
+            throw new WorkingSetError('capture_count_mismatch', { updateSet: sysId, state: completed.state, expected: rows.length, actual: final.length });
+        }
         return completed;
     }
 

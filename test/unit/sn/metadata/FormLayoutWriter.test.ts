@@ -6,7 +6,7 @@ import { ServiceNowInstance } from '../../../../src/sn/ServiceNowInstance';
 import { policyRefusal } from '../../../../src/policy/PolicyRefusal';
 
 const APP = 'a'.repeat(32), SECTION = 'b'.repeat(32), SET = 'c'.repeat(32), OTHER = 'd'.repeat(32), USER = 'e'.repeat(32);
-const FORMATTER = 'f'.repeat(32), SECTION2 = '1'.repeat(32), XML = '2'.repeat(32);
+const FORMATTER = 'f'.repeat(32), SECTION2 = '1'.repeat(32), XML = '2'.repeat(32), VIEW = '3'.repeat(32);
 type Row = Record<string, string>;
 let state: any;
 let elements: Row[];
@@ -43,14 +43,15 @@ beforeEach(() => {
     captures = [];
     req = {
         get: jest.fn(async (r: any) => {
-            if (r.path === '/slushbucket.do') return state.redirect ? { status: 302, headers: { location: '/login.do' }, data: '' } : { status: 200, data: page() };
+            if (r.path === '/slushbucket.do') return state.redirect ? { status: 302, headers: { location: 'https://x.service-now.com/login.do?x=1' }, data: '' } : { status: 200, data: page() };
             if (r.path === '/xmlhttp.do') return { status: 200, data: `<xml><Sections><choice value="${SECTION}"/><choice value="${SECTION2}"/></Sections></xml>` };
             const table = r.path.split('/').at(-1), q: string = r.query.sysparm_query, f: string = r.query.sysparm_fields;
             const id = q.match(/^sys_id=([^^]+)/)?.[1];
             switch (table) {
                 case 'sys_scope': return response([{ sys_id: APP, scope: 'sn_compliance', active: 'true', sys_class_name: state.store ? 'sys_store_app' : 'sys_app' }], f);
                 case 'sys_store_app': return response([], f);
-                case 'sys_ui_section': return response([{ sys_id: SECTION, name: 'sn_compliance_policy', view: 'Default view', caption: '', sys_scope: state.sectionScope, sys_policy: state.policy }], f);
+                case 'sys_ui_section': return response([{ sys_id: SECTION, name: 'sn_compliance_policy', view: state.view ?? 'Default view', caption: '', sys_scope: state.sectionScope, sys_policy: state.policy }], f);
+                case 'sys_ui_view': return response(id === VIEW ? [{ sys_id: VIEW, name: 'sow' }] : [], f);
                 case 'sys_update_set': return response([{ sys_id: id!, name: 'NSE-15', application: id === SET ? state.setApplication : OTHER, state: state.setState }], f);
                 case 'sys_user': return response([{ sys_id: USER }], f);
                 case 'sys_user_preference': return response([{ sys_id: '9'.repeat(32), user: USER, name: `updateSetForScope${APP}`, value: state.current },
@@ -125,6 +126,26 @@ describe('FormLayoutWriter', () => {
     ])('refuses elements %o', async (elements, code) => {
         await expect(writer.setFormLayout(SECTION, options({ elements }))).rejects.toMatchObject({ code });
         expect(req.post).not.toHaveBeenCalled();
+    });
+    it('opens a non-default view by its name, not its sys_id', async () => {
+        state.view = VIEW;
+        await expect(writer.getFormLayout(SECTION)).resolves.toMatchObject({ view: 'sow' });
+        await writer.setFormLayout(SECTION, options());
+        const load = req.get.mock.calls.find(([r]) => r.path === '/slushbucket.do')![0];
+        expect(load.query.sysparm_view).toBe('sow');
+    });
+    it('reports the redirect target of a page that does not load', async () => {
+        state.redirect = true;
+        await expect(writer.setFormLayout(SECTION, options())).rejects.toMatchObject({ code: 'form_redirected', detail: { redirectPath: '/login.do' } });
+    });
+    it('does not attribute two changed captures to one save', async () => {
+        const post = req.post.getMockImplementation()!;
+        req.post.mockImplementationOnce(async (r: any) => {
+            const result = await post(r);
+            captures.push({ ...captures[0], sys_id: '4'.repeat(32) });
+            return result;
+        });
+        await expect(writer.setFormLayout(SECTION, options())).rejects.toMatchObject({ code: 'verification_unavailable', writeAttempted: true });
     });
     it('names a refused field', async () => {
         await expect(writer.setFormLayout(SECTION, options({ elements: ['absent'] }))).rejects.toMatchObject({ detail: { field: 'absent' } });

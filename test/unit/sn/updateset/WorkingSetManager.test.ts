@@ -67,9 +67,11 @@ beforeEach(() => {
         const params = JSON.parse(text.match(/var P = (.*);/)![1]);
         let result: unknown;
         if (text.includes("GlideRecord('sys_update_set')")) {
-            db.sys_update_set.push({ sys_id: NEW, name: params.name, state: 'in progress', is_default: 'false',
+            const open = db.sys_update_set.some(set => set.name === params.name && set.application === params.application && set.state === 'in progress');
+            if (open) result = { exists: true };
+            else db.sys_update_set.push({ sys_id: NEW, name: params.name, state: 'in progress', is_default: 'false',
                 application: scriptBehaviour.createApplication ?? params.application });
-            result = { sys_id: NEW };
+            result ??= { sys_id: NEW };
         } else {
             if (!scriptBehaviour.ignorePersist) {
                 preference('apps.current_app', params.application);
@@ -101,7 +103,6 @@ describe('WorkingSetManager', () => {
         await expect(manager.createUpdateSet({ application: APP, name: 'x' })).rejects.toMatchObject({ code: 'application_not_applied', detail: { application: 'global' } });
     });
     it.each([
-        [{ application: APP, name: 'Ours' }, 'update_set_exists'],
         [{ application: APP, name: '' }, 'invalid_input'],
         [{ application: APP, name: 'a'.repeat(81) }, 'invalid_input'],
         [{ application: 'not-an-id', name: 'x' }, 'invalid_input'],
@@ -109,6 +110,16 @@ describe('WorkingSetManager', () => {
     ])('refuses %o before any script', async (options, code) => {
         await expect(manager.createUpdateSet(options)).rejects.toMatchObject({ code });
         expect(script).not.toHaveBeenCalled();
+    });
+    it('refuses a name already open in the application, checked inside the script', async () => {
+        await expect(manager.createUpdateSet({ application: APP, name: 'Ours' })).rejects.toMatchObject({ code: 'update_set_exists' });
+        expect(db.sys_update_set.filter(set => set.name === 'Ours')).toHaveLength(1);
+    });
+    it('never puts the name into an encoded query', async () => {
+        const name = "x^nameSTARTSWITHjavascript:gs.getUser().savePreference('a','b')";
+        await manager.createUpdateSet({ application: APP, name });
+        expect(req.get.mock.calls.some(([r]: any) => JSON.stringify(r.query ?? {}).includes('javascript:gs.getUser'))).toBe(false);
+        expect(script.mock.calls[0][0]).toContain(JSON.stringify(name).slice(1, 20));
     });
     it('makes a set the working set and returns the previous one', async () => {
         const result = await manager.useUpdateSet(SET);
@@ -130,7 +141,15 @@ describe('WorkingSetManager', () => {
         await expect(manager.restoreWorkingSet({ application: APP, updateSet: SET })).resolves.toEqual({ restored: { application: APP, updateSet: SET } });
         await expect(manager.restoreWorkingSet({ application: APP, updateSet: CLOSED }))
             .resolves.toEqual({ restored: { application: APP, updateSet: DEFAULT }, fallback: 'application_default' });
-        await expect(manager.restoreWorkingSet({ application: OTHER_APP, updateSet: CLOSED })).rejects.toMatchObject({ code: 'no_single_default' });
+        await expect(manager.restoreWorkingSet({ application: OTHER_APP, updateSet: '' })).rejects.toMatchObject({ code: 'no_single_default' });
+    });
+    it('restores an unset context to the application Default', async () => {
+        await expect(manager.restoreWorkingSet({ application: APP, updateSet: '' }))
+            .resolves.toEqual({ restored: { application: APP, updateSet: DEFAULT }, fallback: 'application_default' });
+    });
+    it('refuses a previous pair whose set belongs to another application', async () => {
+        await expect(manager.restoreWorkingSet({ application: OTHER_APP, updateSet: SET })).rejects.toMatchObject({ code: 'scope_mismatch' });
+        expect(script).not.toHaveBeenCalled();
     });
 
     describe('moveCapture', () => {
@@ -188,6 +207,15 @@ describe('WorkingSetManager', () => {
         it('refuses a Default or closed set', async () => {
             await expect(manager.completeUpdateSet(DEFAULT, { expectedCaptures: 0 })).rejects.toMatchObject({ code: 'default_update_set' });
             await expect(manager.completeUpdateSet(CLOSED, { expectedCaptures: 0 })).rejects.toMatchObject({ code: 'update_set_closed' });
+        });
+        it('reports a capture that arrived while the set was being completed', async () => {
+            const put = req.put.getMockImplementation()!;
+            req.put.mockImplementationOnce(async (r: any) => {
+                db.sys_update_xml.push({ sys_id: XML2, name: 'sys_script_late', update_set: SET, application: APP });
+                return put(r);
+            });
+            await expect(manager.completeUpdateSet(SET, { expectedCaptures: 1 }))
+                .rejects.toMatchObject({ code: 'capture_count_mismatch', detail: { state: 'complete', expected: 1, actual: 2 } });
         });
         it('reports a completion that did not read back', async () => {
             req.put.mockResolvedValueOnce({ status: 403 });

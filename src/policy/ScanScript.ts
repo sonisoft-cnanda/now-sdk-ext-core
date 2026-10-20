@@ -43,6 +43,9 @@ const MUTATING_METHODS: ReadonlySet<string> = new Set([
     "updateWithReferences",
     "setValue", // stages a change; harmless alone, but never appears without a write
     "setWorkflow", // disabling business rules is only ever done around a write
+    "savePreference", // persists a sys_user_preference row
+    "setPreference",
+    "setCurrentApplicationId", // writes sys_update_set and updateSetForScope preferences
 ]);
 
 /** Constructs whose behaviour cannot be known statically. */

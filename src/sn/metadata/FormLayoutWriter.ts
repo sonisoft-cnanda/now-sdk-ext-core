@@ -34,7 +34,7 @@ export class FormLayoutWriter {
         const reader = this.reader();
         const row = await reader.exact('sys_ui_section', section, 'name,view,caption,sys_scope');
         if (!row) throw new MetadataScopeError('scope_mismatch');
-        return { section, table: row.name, view: viewName(row.view), caption: row.caption, scope: row.sys_scope, elements: await this.elements(reader, section) };
+        return { section, table: row.name, view: await viewName(reader, row.view), caption: row.caption, scope: row.sys_scope, elements: await this.elements(reader, section) };
     }
 
     /** Replace the section's layout with `elements` and verify the result and its capture. */
@@ -74,13 +74,13 @@ export class FormLayoutWriter {
             // The page saves into the user's set for the section's application; it takes no set parameter.
             if (preferenceValue(before, `updateSetForScope${scope.sysId}`) !== options.updateSet) throw new MetadataScopeError('update_set_not_current');
             previous = await this.elements(reader, section);
-            const view = viewName(row.view);
+            const view = await viewName(reader, row.view);
 
             const request = SessionManager.getInstance().getRequest(this._instance);
             const page = await request.get<string>({ method: 'GET', path: '/slushbucket.do', headers: null, body: null,
                 query: { sysparm_form: 'section', sysparm_list: section, sysparm_view: view, sysparm_transaction_scope: scope.sysId },
                 requires: READ_ONLY, responseFormat: 'text', redirect: 'manual', sensitive: true });
-            if (page.status !== 200) throw Object.assign(new Error('form_redirect'), { redirectPath: '/slushbucket.do' });
+            if (page.status !== 200) throw Object.assign(new Error('form_redirect'), { redirectPath: locationPath(page.headers) });
             const form = parseSlushbucketPage(typeof page.data === 'string' ? page.data : '');
             const token = form.inputs.sysparm_ck;
             if (!token) throw new MetadataScopeError('csrf_token_unavailable');
@@ -140,6 +140,8 @@ export class FormLayoutWriter {
             if (sectionAfter?.sys_scope !== scope.sysId) fail('scope_not_applied');
             const captures = observed.filter(capture => versions.get(capture.sys_id) !== capture.sys_mod_count);
             if (!captures.length || observed.some(capture => capture.name !== name || capture.sys_updated_on < started)) fail('not_captured');
+            // One save writes one Form Layout capture; more than one changed row cannot be attributed to this save.
+            if (captures.length > 1) fail('verification_unavailable');
             for (const capture of captures) {
                 const target = ID.test(capture.update_set) ? await reader.exact('sys_update_set', capture.update_set, 'name,application') : undefined;
                 if (!target) fail('not_captured');
@@ -180,7 +182,20 @@ export class FormLayoutWriter {
     }
 }
 
-/** sys_ui_section.view holds the view name; the page calls the Default view ''. */
-function viewName(view: string): string {
-    return !view || view === 'Default view' ? '' : view;
+/**
+ * The page takes a view by name and calls the Default view ''. sys_ui_section.view references sys_ui_view: the Default
+ * view's sys_id is literally 'Default view', every other view is a sys_id whose name the page needs.
+ */
+async function viewName(reader: MetadataReader, view: string): Promise<string> {
+    if (!view || view === 'Default view') return '';
+    if (!ID.test(view)) throw new MetadataScopeError('evidence_unavailable');
+    const record = await reader.exact('sys_ui_view', view, 'name');
+    if (!record?.name || !/^[a-z0-9_]+$/i.test(record.name)) throw new MetadataScopeError('evidence_unavailable');
+    return record.name;
+}
+
+function locationPath(headers: unknown): string | undefined {
+    const location = (headers as Record<string, unknown> | undefined)?.location;
+    if (typeof location !== 'string') return undefined;
+    try { return new URL(location, 'https://instance.invalid').pathname; } catch { return undefined; }
 }

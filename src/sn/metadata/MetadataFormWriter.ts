@@ -127,9 +127,17 @@ export class MetadataFormWriter {
             // Form GETs are part of the measured interval: never replace the original baseline.
             const loaded = await preferences();
             if (!comparePreferences(before, loaded).valid) throw new MetadataVerificationError('session_changed', table, recordId, undefined, [], false);
-            // A coalescing name for a new record is only known once the record exists.
-            let captureName = updateName(table, recordId, existing);
-            if (!captureName && operation !== 'insert') throw new MetadataScopeError('evidence_unavailable');
+            // A new label or choice list is named from the fields being inserted, so that the capture rows that already
+            // carry that name are snapshotted before the POST like every other capture; an older row with the name must
+            // never count as this write's evidence.
+            const fields = (options as MetadataWriteOptions).fields ?? {};
+            const insertedNames = Object.fromEntries(nameFields.map(field => [field, typeof fields[field] === 'string' ? fields[field] : '']));
+            let captureName = updateName(table, recordId, operation === 'insert' ? insertedNames : existing);
+            if (!captureName && operation === 'insert') {
+                throw new MetadataScopeError('invalid_input', { table, field: nameFields.find(field => !insertedNames[field]) ?? nameFields[0] });
+            }
+            if (!captureName) throw new MetadataScopeError('evidence_unavailable');
+            const predictedName = captureName;
             const previousCaptures = captureName ? await reader.rows('sys_update_xml', `name=${captureName}`, 'sys_id,name,sys_mod_count') : [];
             if (previousCaptures.some(row => row.name !== captureName || !/^\d+$/.test(row.sys_mod_count))) {
                 throw new MetadataScopeError('evidence_unavailable');
@@ -162,7 +170,8 @@ export class MetadataFormWriter {
             };
             const record = await collectEvidence(() => reader.exact(table, recordId, ['sys_scope', ...nameFields].join(',')));
             report.recordScope = record?.sys_scope ?? (!csrfRejected && operation === 'delete' ? scope.sysId : undefined);
-            captureName ??= updateName(table, recordId, record);
+            // The record as saved must carry the name its capture was snapshotted under.
+            if (nameFields.length && record && updateName(table, recordId, record) !== predictedName) captureName = undefined;
             if (captureName) report.updateName = captureName;
             const observedCaptures = captureName ? await collectEvidence(() => reader.rows('sys_update_xml', `name=${captureName}^sys_updated_on>=${started}`,
                 'sys_id,name,update_set,application,action,sys_updated_on,sys_mod_count')) ?? [] : [];

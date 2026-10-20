@@ -19,7 +19,7 @@ const result = await layouts.setFormLayout(sectionId, {
 // result.previousElements puts it back; result.capture.customization reports the upgrade skip
 ```
 
-Elements use the page's own values: a field name (dot-walked names allowed), `.begin_split`,
+A non-default view is opened by its `sys_ui_view` name; the Default view is `''`. Elements use the page's own values: a field name (dot-walked names allowed), `.begin_split`,
 `.split`, `.end_split`, or `.formatter.<sys_ui_formatter sys_id>`. Annotations and charts are not
 supported. The section order of the form (`sys_ui_form_sections_<form id>`) is a separate file,
 and this writer does not change it.
@@ -46,8 +46,9 @@ The single POST is never replayed. The writer then checks the following, and a f
 `MetadataVerificationError` with `writeAttempted: true`:
 
 - The section's elements read back in the requested order (`write_not_applied`).
-- Exactly one capture `sys_ui_section_<id>` landed in the expected set and application
-  (`not_captured`, `captured_elsewhere`, `mixed_scope_capture`).
+- Exactly one capture `sys_ui_section_<id>` changed, in the expected set and application
+  (`not_captured`, `captured_elsewhere`, `mixed_scope_capture`; more than one changed row is
+  `verification_unavailable`).
 - The user's preferences are unchanged (`session_changed`).
 
 For a Store application, `capture.customization` reports `replaceOnUpgrade` and
