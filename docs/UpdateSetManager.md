@@ -88,7 +88,7 @@ async getCurrentUpdateSet(): Promise<UpdateSetRecord | null>
 
 #### Returns
 
-`Promise<UpdateSetRecord | null>` -- the current update set record with `sys_id`, `name`, and `state` fields populated.
+`Promise<UpdateSetRecord | null>` -- the current update set record with `sys_id`, `name`, `state` and `application`. The picker reports only the name and sys_id; the state and application are read from `sys_update_set`.
 
 #### Throws
 
@@ -179,7 +179,7 @@ async createUpdateSet(options: CreateUpdateSetOptions): Promise<UpdateSetRecord>
 |----------|------|---------|-------------|
 | `name` | `string` | - | Name of the update set (required) |
 | `description` | `string` | - | Description of the update set |
-| `application` | `string` | - | Application scope sys_id |
+| `application` | `string` | - | `global`, a sys_scope sys_id, or a unique active scope name. With an In progress state the set is created through `WorkingSetManager.createUpdateSet`, which writes the application server-side and reads it back (the Table API silently drops this field) |
 | `state` | `string` | `"in progress"` | State of the update set |
 
 #### Returns
@@ -232,7 +232,7 @@ async moveRecordsToUpdateSet(
 | `sourceUpdateSet` | `string` | Source update set sys_id to move records from |
 | `onProgress` | `(message: string) => void` | Callback for progress updates |
 
-At least one of `recordSysIds`, `timeRange`, or `sourceUpdateSet` must be provided.
+Provide `recordSysIds` or `sourceUpdateSet`. A `timeRange` narrows a source set; on its own it is refused, because it would select every local capture on the instance in that window. Each move is read back, and a move the platform aborted (for example "Cannot move update to a set for a different scope") is counted as failed with `Move not applied`. To move one capture with scope and duplicate checks, use `WorkingSetManager.moveCapture`.
 
 #### Returns
 
@@ -245,7 +245,7 @@ At least one of `recordSysIds`, `timeRange`, or `sourceUpdateSet` must be provid
 #### Throws
 
 - `Error` if `targetUpdateSetId` is empty
-- `Error` if no selection criteria is provided
+- `Error` if no selection criteria is provided, or only `timeRange`
 
 #### Example
 

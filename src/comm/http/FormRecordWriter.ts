@@ -26,6 +26,16 @@ const SYS_ID = /^[0-9a-f]{32}$/i;
 /** Where a successful submit lands. Small, and it echoes back the action and sys_id. */
 const GOTO_URL = "modal_dialog_form_response.do?sysparm_returned_action=$action&sysparm_returned_sysid=$sys_id";
 
+/** The path a form request was redirected to, without its query: identifies the page, never values. */
+function redirectPath(headers: unknown): string | undefined {
+    const location = (headers as Record<string, unknown> | undefined)?.location;
+    if (typeof location !== "string") return undefined;
+    try {
+        const path = new URL(location, "https://instance.invalid").pathname;
+        return /^\/[a-z0-9_./-]{1,120}$/i.test(path) ? path : undefined;
+    } catch { return undefined; }
+}
+
 /**
  * Writes a record through its classic UI form (`/<table>.do`), exactly as a browser does:
  * load the form, then submit it with the form's tokens.
@@ -77,6 +87,9 @@ class FormTransport {
                 requires: READ_ONLY, responseFormat: "text", sensitive: options.sensitive,
                 ...(options.sensitive ? { redirect: "manual" as const } : {}),
             });
+            if (options.sensitive && response.status >= 300 && response.status < 400) {
+                throw Object.assign(new Error("form_redirect"), { redirectPath: redirectPath(response.headers) });
+            }
             const snapshot = parseFormHtml(this.text(response.data), table, options);
             if (sysId !== "-1" && (snapshot.isNewRecord || snapshot.sysId !== sysId)) {
                 throw new Error(`Record ${table}/${sysId} was not found or is not readable`);
@@ -84,6 +97,7 @@ class FormTransport {
             return snapshot;
         } catch (error) {
             if (options.sensitive && !isPolicyRefusal(error) && !(error instanceof FormSubmitError)) {
+                if (error instanceof Error && error.message === "form_redirect") throw error;
                 const code = error instanceof Error && ["csrf_token_unavailable", "csrf_rejected"].includes(error.message) ? error.message : "Form request failed";
                 throw new Error(code);
             }

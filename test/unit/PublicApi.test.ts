@@ -67,6 +67,15 @@ function exportedNames(): string[] {
             'FormTransportResult', 'MetadataReader', 'comparePreferences', 'preferenceValue']) expect(names).not.toContain(name);
     });
 
+    it('exports the NSE-15 lifecycle and layout contracts and keeps their helpers internal', () => {
+        const names = exportedNames();
+        for (const name of ['WorkingSetManager', 'WorkingSetError', 'WorkingSet', 'UpdateSetSummary', 'UseUpdateSetResult', 'RestoreWorkingSetResult',
+            'MoveCaptureResult', 'FormLayoutWriter', 'FormLayout', 'FormLayoutWriteResult', 'StoreCustomizationOptions', 'CustomizationReport',
+            'MetadataErrorDetail']) expect(names).toContain(name);
+        for (const name of ['updateName', 'updateNameFields', 'parseSlushbucketPage', 'parseSectionChoices', 'joinLayoutValues',
+            'resolveScope', 'customizationEvidence']) expect(names).not.toContain(name);
+    });
+
     it('exports table behavior discovery and its typed contracts', () => {
         const names = exportedNames();
         for (const name of ['TableBehaviorDiscovery', 'BEHAVIOR_CATEGORIES', 'TableBehaviorOptions', 'TableBehaviorResult', 'BehaviorReference', 'BehaviorDetailsResult']) expect(names).toContain(name);

@@ -11,6 +11,7 @@ import { IHttpResponse } from '../../../../src/comm/http/IHttpResponse';
 import { AuthenticationHandlerFactory } from '../../../../src/auth/AuthenticationHandlerFactory';
 import { RequestHandlerFactory } from '../../../../src/comm/http/RequestHandlerFactory';
 import { SessionManager } from '../../../../src/comm/http/SessionManager';
+import { WorkingSetManager } from '../../../../src/sn/updateset/WorkingSetManager';
 
 // Mock getCredentials
 const mockGetCredentials = createGetCredentialsMock();
@@ -148,12 +149,14 @@ describe('UpdateSetManager - Unit Tests', () => {
             const concoursepickerData = {
                 currentUpdateSet: { name: 'Default', sysId: 'set123' }
             };
-            mockRequestHandler.get.mockResolvedValue(createMockResponse(concoursepickerData, 200));
+            mockRequestHandler.get.mockResolvedValueOnce(createMockResponse(concoursepickerData, 200));
+            mockRequestHandler.get.mockResolvedValueOnce(createMockResponse({ sys_id: 'set123', name: 'Default', state: 'complete', application: { value: 'global' } }, 200));
 
             const result = await manager.getCurrentUpdateSet();
 
-            expect(result).toEqual({ sys_id: 'set123', name: 'Default', state: 'in progress' });
-            expect(mockRequestHandler.get).toHaveBeenCalledTimes(1);
+            // The real state and application, not an assumed "in progress".
+            expect(result).toEqual({ sys_id: 'set123', name: 'Default', state: 'complete', application: 'global' });
+            expect(mockRequestHandler.get).toHaveBeenCalledTimes(2);
             const callArgs = mockRequestHandler.get.mock.calls[0][0] as any;
             expect(callArgs.path).toBe('/api/now/ui/concoursepicker/current');
         });
@@ -245,6 +248,18 @@ describe('UpdateSetManager - Unit Tests', () => {
             }));
         });
 
+        it('should create a set for an application through WorkingSetManager, which verifies the application', async () => {
+            const create = jest.spyOn(WorkingSetManager.prototype, 'createUpdateSet').mockResolvedValue(
+                { sysId: 'a'.repeat(32), name: 'Feature Set', state: 'in progress', application: 'b'.repeat(32), isDefault: false });
+
+            const result = await manager.createUpdateSet({ name: 'Feature Set', description: 'Test desc', application: 'x_my_app' });
+
+            expect(create).toHaveBeenCalledWith({ application: 'x_my_app', name: 'Feature Set', description: 'Test desc' });
+            expect(result).toEqual({ sys_id: 'a'.repeat(32), name: 'Feature Set', state: 'in progress', application: 'b'.repeat(32), description: 'Test desc' });
+            expect(mockRequestHandler.post).not.toHaveBeenCalled();
+            create.mockRestore();
+        });
+
         it('should throw an error when name is empty', async () => {
             await expect(manager.createUpdateSet({ name: '' }))
                 .rejects.toThrow('Update set name is required');
@@ -268,8 +283,9 @@ describe('UpdateSetManager - Unit Tests', () => {
                 { sys_id: 'xml2', name: 'Record 2', type: 'sys_ui_page', update_set: 'old_set' }
             ];
 
-            // First call: GET to query records, subsequent calls: PUT for each record
+            // First call: GET to query records, then a PUT and a read-back GET for each record
             mockRequestHandler.get.mockResolvedValueOnce(createMockArrayResponse(mockRecords));
+            mockRequestHandler.get.mockResolvedValue(createMockResponse({ sys_id: 'xml', update_set: { value: 'target_set' } }));
             mockRequestHandler.put.mockResolvedValue(createMockResponse({}, 200));
 
             const result = await manager.moveRecordsToUpdateSet('target_set', {
@@ -282,12 +298,24 @@ describe('UpdateSetManager - Unit Tests', () => {
             expect(mockRequestHandler.put).toHaveBeenCalledTimes(2);
         });
 
+        it('should count a move the platform aborted as failed', async () => {
+            mockRequestHandler.get.mockResolvedValueOnce(createMockArrayResponse([{ sys_id: 'xml1', name: 'Record 1', type: 'sys_script', update_set: 'old_set' }]));
+            mockRequestHandler.get.mockResolvedValue(createMockResponse({ sys_id: 'xml1', update_set: 'old_set' }));
+            mockRequestHandler.put.mockResolvedValue(createMockResponse({}, 200));
+
+            const result = await manager.moveRecordsToUpdateSet('target_set', { recordSysIds: ['xml1'] });
+
+            expect(result).toMatchObject({ moved: 0, failed: 1 });
+            expect(result.errors[0].error).toContain('Move not applied');
+        });
+
         it('should move records from a source update set', async () => {
             const mockRecords = [
                 { sys_id: 'xml1', name: 'Record 1', type: 'sys_script', update_set: 'source_set' }
             ];
 
             mockRequestHandler.get.mockResolvedValueOnce(createMockArrayResponse(mockRecords));
+            mockRequestHandler.get.mockResolvedValue(createMockResponse({ sys_id: 'xml1', update_set: 'target_set' }));
             mockRequestHandler.put.mockResolvedValue(createMockResponse({}, 200));
 
             const result = await manager.moveRecordsToUpdateSet('target_set', {
@@ -299,16 +327,20 @@ describe('UpdateSetManager - Unit Tests', () => {
             expect(getCallArgs.query.sysparm_query).toContain('update_set=source_set');
         });
 
-        it('should move records by time range', async () => {
-            const mockRecords = [
-                { sys_id: 'xml1', name: 'Record 1', type: 'sys_script', update_set: 'some_set' }
-            ];
+        it('should refuse a time range without a source set, which would select every capture on the instance', async () => {
+            await expect(manager.moveRecordsToUpdateSet('target_set', {
+                timeRange: { start: '2025-01-01', end: '2025-12-31' }
+            })).rejects.toThrow('timeRange requires sourceUpdateSet or recordSysIds');
+            expect(mockRequestHandler.get).not.toHaveBeenCalled();
+        });
 
-            mockRequestHandler.get.mockResolvedValueOnce(createMockArrayResponse(mockRecords));
+        it('should move records from a source update set within a time range', async () => {
+            mockRequestHandler.get.mockResolvedValueOnce(createMockArrayResponse([{ sys_id: 'xml1', name: 'Record 1', type: 'sys_script', update_set: 'source_set' }]));
+            mockRequestHandler.get.mockResolvedValue(createMockResponse({ sys_id: 'xml1', update_set: 'target_set' }));
             mockRequestHandler.put.mockResolvedValue(createMockResponse({}, 200));
 
             const result = await manager.moveRecordsToUpdateSet('target_set', {
-                timeRange: { start: '2025-01-01', end: '2025-12-31' }
+                sourceUpdateSet: 'source_set', timeRange: { start: '2025-01-01', end: '2025-12-31' }
             });
 
             expect(result.moved).toBe(1);
