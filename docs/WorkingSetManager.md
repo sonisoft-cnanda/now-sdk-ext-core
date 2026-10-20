@@ -63,3 +63,22 @@ descriptions or payloads.
   rows. The `update-sets` skill's `complete-update-set.js` adds those checks.
 - Seen end to end on dev206299 (Australia patch 3) on 2026-10-20 for GRC (`sn_compliance`, an
   installed Store application) and for Global.
+
+## Live integration test
+
+`test/integration/sn/updateset/WorkingSetLifecycle_IT.test.ts` runs the whole use case against
+`SN_INSTANCE_ALIAS` (default `dev206299`) as part of `npm run test:integration`:
+
+1. Create a GRC (`sn_compliance`) set and check that a duplicate name is refused.
+2. Check that the layout change is refused while the set is not current, and again without the
+   Store acknowledgement.
+3. Add a field to the Policy form and put it back, then check that the set holds exactly one Form
+   Layout capture with `replace_on_upgrade=false`.
+4. Check that a move into a Global set is refused.
+5. Complete the set only at the reviewed count.
+6. Repeat the lifecycle in Global with an inactive Script Include, then restore the working set.
+
+The test skips when the instance has no active `sn_compliance` application.
+
+Each run leaves two Complete sets named `nex-it NSE-15 … (test only, do not promote)`, and the
+Policy section stays customized. A set the test leaves In progress after a failure is set to Ignore.
