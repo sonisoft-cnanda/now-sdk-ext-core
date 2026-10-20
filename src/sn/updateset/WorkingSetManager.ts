@@ -1,3 +1,4 @@
+import { isPolicyRefusal } from '../../policy/PolicyRefusal';
 import { SessionManager } from '../../comm/http/SessionManager';
 import type { ServiceNowRequest } from '../../comm/http/ServiceNowRequest';
 import { BackgroundScriptExecutor } from '../BackgroundScriptExecutor';
@@ -94,6 +95,8 @@ export class WorkingSetManager {
         try {
             return { previous, current: await this.persist(set.application, set.sysId), updateSet: set };
         } catch (error) {
+            // A refused script never ran: keep the refusal as it is, so callers that stop on it still do.
+            if (isPolicyRefusal(error)) throw error;
             // The preferences may already have changed: the caller needs the pair to put back.
             if (error instanceof WorkingSetError) throw new WorkingSetError(error.code, { ...error.detail, previous });
             throw new WorkingSetError('working_set_not_applied', { updateSet: set.sysId, previous });

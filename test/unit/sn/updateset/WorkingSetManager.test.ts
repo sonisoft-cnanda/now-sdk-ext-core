@@ -1,3 +1,4 @@
+import { policyRefusal } from '../../../../src/policy/PolicyRefusal';
 import { afterEach, beforeEach, describe, expect, it, jest } from '@jest/globals';
 import { WorkingSetManager } from '../../../../src/sn/updateset/WorkingSetManager';
 import { WorkingSetError } from '../../../../src/sn/updateset/WorkingSetModels';
@@ -142,6 +143,11 @@ describe('WorkingSetManager', () => {
     it.each([[CLOSED, 'update_set_closed'], [DEFAULT, 'default_update_set'], ['9'.repeat(32), 'update_set_not_found']])('refuses %s', async (id, code) => {
         await expect(manager.useUpdateSet(id)).rejects.toMatchObject({ code });
         expect(script).not.toHaveBeenCalled();
+    });
+    it('keeps a policy refusal of the script as the refusal', async () => {
+        const refusal = policyRefusal({ allowed: false, verbs: ['write'], decidingLayer: 'flag' } as any);
+        script.mockRejectedValueOnce(refusal);
+        await expect(manager.useUpdateSet(SET)).rejects.toBe(refusal);
     });
     it('allows a Default only when restoring', async () => {
         await expect(manager.useUpdateSet(DEFAULT, { allowDefault: true })).resolves.toMatchObject({ current: { updateSet: DEFAULT } });

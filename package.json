@@ -39,7 +39,7 @@
     "test:consumer": "node scripts/sdk-compat-consumer.mjs",
     "test:consumer:cleanup": "node scripts/sdk-compat-consumer-cleanup.test.mjs",
     "test:eval:live": "node scripts/sdk-compat-live.mjs",
-    "test:integration": "node --experimental-vm-modules node_modules/.bin/jest --forceExit --testPathPatterns=\"/integration/\" --watchAll=false --testTimeout=120000",
+    "test:integration": "node --experimental-vm-modules node_modules/.bin/jest --forceExit --runInBand --testPathPatterns=\"/integration/\" --watchAll=false --testTimeout=120000",
     "test:integration:auth": "node --experimental-vm-modules node_modules/.bin/jest --forceExit --runInBand --testTimeout=120000 --runTestsByPath test/integration/auth/DesktopBrowserSession_IT.test.ts",
     "test:all": "node --experimental-vm-modules node_modules/.bin/jest --forceExit --coverage --collectCoverage --coverageDirectory=\"./coverage\" --ci --reporters=default --reporters=jest-junit --watchAll=false",
     "watch-test": "npm run test:unit -- --watchAll",

@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, it } from '@jest/globals';
+import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
 import { getCredentials } from "@servicenow/sdk-cli/dist/auth/index.js";
 
 import { SessionManager } from '../../../../src/comm/http/SessionManager';
@@ -27,7 +27,7 @@ const MINUTE = 60_000;
 const STORE_SCOPE = 'sn_compliance';
 const STORE_TABLE = 'sn_compliance_policy';
 const FIELD = 'url';
-const STAMP = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+const STAMP = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
 const NOT_FOR_PROMOTION = 'NSE-15 integration test (test only, do not promote).';
 
 const credential = await getCredentials(SN_INSTANCE_ALIAS);
@@ -48,6 +48,7 @@ else if (!section) console.warn(`[WorkingSetLifecycle_IT] ${SN_INSTANCE_ALIAS} h
     const sectionId = section!.sys_id;
     const created: string[] = [];
     let previous: WorkingSet | undefined;
+    let insertedScriptInclude: string | undefined;
     let original: string[] = [];
     let changed: string[] = [];
     let storeSet: UpdateSetSummary;
@@ -55,26 +56,52 @@ else if (!section) console.warn(`[WorkingSetLifecycle_IT] ${SN_INSTANCE_ALIAS} h
     const optIn = { storeCustomization: { acknowledgeUpgradeSkip: true as const } };
     const captures = (set: string) => reader!.rows('sys_update_xml', `update_set=${set}`, 'sys_id,name,application,action,replace_on_upgrade');
 
+    beforeAll(async () => {
+        // Taken before any change, so it can be restored even when a later step throws part-way.
+        previous = await sets.getWorkingSet();
+        original = (await layouts.getFormLayout(sectionId)).elements;
+    }, 2 * MINUTE);
+
     afterAll(async () => {
-        // Put the layout back if a failure left it changed, then the user's working set, then close any open set.
-        try {
-            const now = await layouts.getFormLayout(sectionId);
-            if (original.length && JSON.stringify(now.elements) !== JSON.stringify(original) && storeSet) {
-                await sets.useUpdateSet(storeSet.sysId).catch(() => undefined);
-                await layouts.setFormLayout(sectionId, { elements: original, scope: { sysId: app }, updateSet: storeSet.sysId, ...optIn });
-            }
-        } finally {
-            if (previous) await sets.restoreWorkingSet(previous);
-            const request = SessionManager.getInstance().getRequest(instance!);
-            for (const id of created) {
-                const set = await sets.getUpdateSet(id);
-                if (set.state === 'in progress') {
-                    await request.put({ path: `/api/now/table/sys_update_set/${id}`, method: 'PUT', query: null, body: null,
-                        headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, json: { state: 'ignore' } });
-                }
-            }
+        // Each step is independent: one failure must not skip the others. The first error is rethrown at the end.
+        const errors: unknown[] = [];
+        const step = async (work: () => Promise<unknown>) => { try { await work(); } catch (error) { errors.push(error); } };
+        // A cleanup change goes into a set of its own, set to Ignore: it must never ride along in a promoted set.
+        const cleanupSet = async (application: string) => {
+            const set = await sets.createUpdateSet({ application, name: `nex-it NSE-15 cleanup ${STAMP}`,
+                description: `${NOT_FOR_PROMOTION} Puts back what a failed run left behind.` });
+            created.push(set.sysId);
+            await sets.useUpdateSet(set.sysId);
+            return set.sysId;
+        };
+        await step(async () => {
+            if (!original.length || JSON.stringify((await layouts.getFormLayout(sectionId)).elements) === JSON.stringify(original)) return;
+            const set = storeSet && (await sets.getUpdateSet(storeSet.sysId)).state === 'in progress' ? storeSet.sysId : await cleanupSet(app);
+            await sets.useUpdateSet(set);
+            await layouts.setFormLayout(sectionId, { elements: original, scope: { sysId: app }, updateSet: set, ...optIn });
+        });
+        await step(async () => {
+            if (!insertedScriptInclude || !(await reader!.rows('sys_script_include', `sys_id=${insertedScriptInclude}`, 'sys_id')).length) return;
+            const set = globalSet && (await sets.getUpdateSet(globalSet.sysId)).state === 'in progress' ? globalSet.sysId : await cleanupSet('global');
+            await sets.useUpdateSet(set);
+            await forms.delete('sys_script_include', insertedScriptInclude, { scope: 'global', updateSet: set,
+                confirm: { table: 'sys_script_include', sysId: insertedScriptInclude } });
+        });
+        const request = SessionManager.getInstance().getRequest(instance!);
+        for (const id of created) {
+            await step(async () => {
+                if ((await sets.getUpdateSet(id)).state !== 'in progress') return;
+                // Over the Table API a scoped set can only be edited with its application current.
+                await sets.useUpdateSet(id);
+                await request.put({ path: `/api/now/table/sys_update_set/${id}`, method: 'PUT', query: null, body: null,
+                    headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, json: { state: 'ignore' } });
+                if ((await sets.getUpdateSet(id)).state !== 'ignore') throw new Error(`could not set ${id} to Ignore`);
+            });
         }
-    }, 5 * MINUTE);
+        // Last, so no cleanup step above can leave the user in a test set.
+        await step(async () => { if (previous) await sets.restoreWorkingSet(previous); });
+        if (errors.length) throw errors[0];
+    }, 10 * MINUTE);
 
     it('creates an update set in the Store application, verified', async () => {
         storeSet = await sets.createUpdateSet({ application: app, name: `nex-it NSE-15 ${STORE_SCOPE} form ${STAMP}`,
@@ -85,7 +112,6 @@ else if (!section) console.warn(`[WorkingSetLifecycle_IT] ${SN_INSTANCE_ALIAS} h
     }, 2 * MINUTE);
 
     it('refuses the layout change while the set is not the working set', async () => {
-        original = (await layouts.getFormLayout(sectionId)).elements;
         changed = original.includes(FIELD) ? original.filter(item => item !== FIELD) : [...original, FIELD];
         await expect(layouts.setFormLayout(sectionId, { elements: changed, scope: { sysId: app }, updateSet: storeSet.sysId, ...optIn }))
             .rejects.toMatchObject({ code: 'update_set_not_current' });
@@ -94,7 +120,7 @@ else if (!section) console.warn(`[WorkingSetLifecycle_IT] ${SN_INSTANCE_ALIAS} h
 
     it('makes the set the working set for later sessions', async () => {
         const used = await sets.useUpdateSet(storeSet.sysId);
-        previous = used.previous;
+        expect(used.previous).toEqual(previous);
         expect(used.current).toEqual({ application: app, updateSet: storeSet.sysId });
         expect(await sets.getWorkingSet()).toEqual({ application: app, updateSet: storeSet.sysId });
     }, 2 * MINUTE);
@@ -133,6 +159,9 @@ else if (!section) console.warn(`[WorkingSetLifecycle_IT] ${SN_INSTANCE_ALIAS} h
     }, 2 * MINUTE);
 
     it('completes the Store set only at the reviewed count', async () => {
+        // Never complete a set over a layout that was not put back, and never let the refusal call itself complete it.
+        expect((await layouts.getFormLayout(sectionId)).elements).toEqual(original);
+        expect(await captures(storeSet.sysId)).toHaveLength(1);
         await expect(sets.completeUpdateSet(storeSet.sysId, { expectedCaptures: 2 })).rejects.toMatchObject({ code: 'capture_count_mismatch' });
         await expect(sets.completeUpdateSet(storeSet.sysId, { expectedCaptures: 1 })).resolves.toMatchObject({ state: 'complete' });
     }, 2 * MINUTE);
@@ -140,20 +169,26 @@ else if (!section) console.warn(`[WorkingSetLifecycle_IT] ${SN_INSTANCE_ALIAS} h
     it('runs the same lifecycle in Global', async () => {
         await sets.useUpdateSet(globalSet.sysId);
         const scope = 'global' as const;
+        // A verification failure can still leave the record behind: keep its id for cleanup either way.
         const inserted = await forms.insert('sys_script_include', { scope, updateSet: globalSet.sysId,
-            fields: { name: `NexItNse15${STAMP}`, active: false, description: NOT_FOR_PROMOTION, script: '// NSE-15 integration test' } });
+            fields: { name: `NexItNse15${STAMP}`, active: false, description: NOT_FOR_PROMOTION, script: '// NSE-15 integration test' } })
+            .catch((error: unknown) => { insertedScriptInclude = (error as { sysId?: string }).sysId; throw error; });
+        insertedScriptInclude = inserted.sysId;
         expect(inserted.capture).toMatchObject({ updateSetSysId: globalSet.sysId, recordScope: 'global', updateName: `sys_script_include_${inserted.sysId}` });
         const removed = await forms.delete('sys_script_include', inserted.sysId, { scope, updateSet: globalSet.sysId,
             confirm: { table: 'sys_script_include', sysId: inserted.sysId } });
         expect(removed.capture).toMatchObject({ action: 'DELETE', updateSetSysId: globalSet.sysId });
+        insertedScriptInclude = undefined;
         expect(await captures(globalSet.sysId)).toEqual([expect.objectContaining({ application: 'global', action: 'DELETE' })]);
         await expect(sets.completeUpdateSet(globalSet.sysId, { expectedCaptures: 1 })).resolves.toMatchObject({ state: 'complete' });
     }, 4 * MINUTE);
 
     it('restores the working set it found', async () => {
-        const restored = await sets.restoreWorkingSet(previous!);
-        expect(restored.restored.application).toBe(previous!.application || 'global');
+        const saved = previous!;
+        const restored = await sets.restoreWorkingSet(saved);
+        // The set it found is still In progress, so it comes back exactly: no fallback to a Default.
+        expect(restored).toEqual({ restored: { application: saved.application || 'global', updateSet: saved.updateSet } });
         expect(await sets.getWorkingSet()).toEqual(restored.restored);
-        previous = undefined;
+        // previous stays set: afterAll restores again after any cleanup change, which may have switched sets.
     }, 2 * MINUTE);
 });
