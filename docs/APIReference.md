@@ -193,6 +193,37 @@ class UpdateSetManager {
 }
 ```
 
+### WorkingSetManager
+
+The verified update-set lifecycle for any application, including Store applications and Global. See [WorkingSetManager Guide](./WorkingSetManager.md).
+
+```typescript
+class WorkingSetManager {
+    constructor(instance: ServiceNowInstance)
+
+    getWorkingSet(): Promise<WorkingSet>
+    getUpdateSet(sysId: string): Promise<UpdateSetSummary>
+    createUpdateSet(options: CreateScopedUpdateSetOptions): Promise<UpdateSetSummary>
+    useUpdateSet(sysId: string, options?: UseUpdateSetOptions): Promise<UseUpdateSetResult>
+    restoreWorkingSet(previous: WorkingSet): Promise<RestoreWorkingSetResult>
+    moveCapture(options: MoveCaptureOptions): Promise<MoveCaptureResult>
+    completeUpdateSet(sysId: string, options: CompleteUpdateSetOptions): Promise<UpdateSetSummary>
+}
+```
+
+### FormLayoutWriter
+
+Read and replace one form section layout through the Form Layout page, with verified capture. See [FormLayoutWriter Guide](./FormLayoutWriter.md).
+
+```typescript
+class FormLayoutWriter {
+    constructor(instance: ServiceNowInstance)
+
+    getFormLayout(section: string): Promise<FormLayout>
+    setFormLayout(section: string, options: FormLayoutWriteOptions): Promise<FormLayoutWriteResult>
+}
+```
+
 ## Code & Schema
 
 ### CodeSearch
@@ -729,6 +760,9 @@ enum ProgressStatus {
 - [ATF Test Executor](./ATFTestExecutor.md)
 - [Scope Manager](./ScopeManager.md)
 - [Update Set Manager](./UpdateSetManager.md)
+- [Working Set Manager](./WorkingSetManager.md)
+- [Form Layout Writer](./FormLayoutWriter.md)
+- [Metadata Form Writer](./MetadataFormWriter.md)
 - [Code Search](./CodeSearch.md)
 - [Schema Discovery](./SchemaDiscovery.md)
 - [Attachment Manager](./AttachmentManager.md)

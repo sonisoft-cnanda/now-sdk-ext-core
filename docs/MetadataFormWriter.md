@@ -22,7 +22,14 @@ await writer.delete(created.table, created.sysId, {
 ```
 
 Scope accepts `{ sysId: '...' }`, `{ scope: 'x_example_app' }`, or literal `'global'`.
-There is no default scope. Installed Store applications are refused.
+There is no default scope.
+
+An installed Store application's files can be changed only with an explicit acknowledgement:
+`storeCustomization: { acknowledgeUpgradeSkip: true }` and an explicit `updateSet`. Without them
+the writer refuses with `store_scope` or `update_set_required` before anything is sent. Changing
+a Store file marks it as customized, and upgrades of that application then skip it. The result's
+`capture.customization` reports `replaceOnUpgrade` and whether a vendor `baselineVersion` exists.
+Files the vendor locked (`sys_policy` read or protected) are refused with `protected_record`.
 The table must extend `sys_metadata` and must pass the table deny list.
 Caller fields must exist on the form. Caller `sys_*` fields are refused.
 An initial query accepts equality terms for ordinary fields. It cannot override system fields.
@@ -30,6 +37,10 @@ An initial query accepts equality terms for ordinary fields. It cannot override 
 Pass `initialQuery`, `variables`, `variableField` and `view` as with `FormRecordWriter`.
 For example, an ATF step can use `initialQuery` to select its test and step configuration.
 The encoded form state carries those values. Unknown variables fail before the POST.
+
+`capture.updateName` is the captured file's name: `<table>_<sys_id>`, or the platform's coalescing
+name for labels (`sys_documentation_<table>_<element>_<language>`) and choices
+(`sys_choice_<table>_<element>`). Capture verification looks for that name.
 
 The capture prediction comes from `updateSetForScope<scope sys_id>` in the authenticated user's preferences.
 An explicit `updateSet` overrides this prediction. The writer checks the actual capture against that set.
@@ -43,8 +54,9 @@ Equal preference values with replaced row IDs pass and appear in `preferenceRows
 The result never includes the full preference snapshot.
 
 The writer never selects an application or update set. It never repairs preferences or capture rows.
-If needed, the caller can restore its original set explicitly with `UpdateSetManager.setCurrentUpdateSet`.
-Resolve the original set's name and pass `{ name, sysId }`. Coordinate that operation with other session users.
+Make the set current, and restore the original afterwards, with `WorkingSetManager`
+(`useUpdateSet` and `restoreWorkingSet`; see [WorkingSetManager](./WorkingSetManager.md)).
+Coordinate that operation with other session users.
 Avoid concurrent metadata writes and picker changes in one session.
 
 Each POST runs once. A 401 or uncertain response is never replayed.
@@ -55,6 +67,8 @@ Keep the client clock synchronized with the instance. A client clock that runs a
 A backward time margin is not applied because it could admit older evidence. Do not repeat a write to resolve a clock error.
 Sanitized messages can omit legitimate long identifiers or text that matches submitted values.
 Use the typed error and record/capture read-back when a message lacks detail.
+`MetadataScopeError.detail` names what was refused, using identifiers only: `field`, `table`, the set's `updateSetState`
+and `updateSetApplication`, or a form's `redirectPath`.
 Delete requires exact confirmation and a global Delete action that calls `confirmAndDeleteFromForm()`.
 The writer checks record absence, a DELETE capture and metadata-delete evidence.
 It never uses a second deletion path.
@@ -62,4 +76,6 @@ It never uses a second deletion path.
 Form endpoints and action names are platform behavior, rather than a documented integration contract.
 The governing evidence covers Australia patch 3 on dev206299.
 Run the committed integration lifecycle before claiming support for another family or table.
-This API does not publish an application, complete an update set or promote a change.
+This API does not publish an application or promote a change. Form layouts use
+[FormLayoutWriter](./FormLayoutWriter.md); creating, completing and restoring sets use
+[WorkingSetManager](./WorkingSetManager.md).
