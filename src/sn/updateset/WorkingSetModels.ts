@@ -72,6 +72,8 @@ export interface WorkingSetErrorDetail {
     expected?: number;
     actual?: number;
     status?: number;
+    /** The working set before a change that did not read back: pass it to restoreWorkingSet. */
+    previous?: WorkingSet;
 }
 
 /** An update-set lifecycle step was refused, or its outcome did not read back as required. */

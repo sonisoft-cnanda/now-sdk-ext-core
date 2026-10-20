@@ -40,7 +40,7 @@ application. `useUpdateSet` saves all three and reads them back.
 | `useUpdateSet(sysId, { allowDefault? })` | makes the set the working set for every later session; returns `previous` | `update_set_closed`, `default_update_set` (unless `allowDefault`, for restoring only), `working_set_not_applied` |
 | `restoreWorkingSet(previous)` | puts `previous` back; if that set has closed or was never set (`''`), uses the application's single In progress Default (`fallback: 'application_default'`). An unset application is Global | `scope_mismatch` (the set belongs to another application), `no_single_default` |
 | `moveCapture({ capture, sourceSet, targetSet, reason })` | moves one `sys_update_xml` row between In progress sets of its own application, appends the reason to `comments`, reads the move back | `capture_not_in_source`, `update_set_closed`, `default_update_set`, `scope_mismatch`, `duplicate_capture`, `newer_capture_exists`, `move_not_applied` |
-| `completeUpdateSet(sysId, { expectedCaptures })` | sets Complete after checking the set, reads the state back, then counts the captures again | `update_set_closed`, `default_update_set`, `capture_count_mismatch` (also after completion, with `detail.state: 'complete'`, when a capture arrived during it), `mixed_scope_capture`, `duplicate_capture`, `update_set_in_use` (another user's `sys_update_set` preference), `complete_not_applied` |
+| `completeUpdateSet(sysId, { expectedCaptures })` | sets Complete after checking the set, reads the state back, then counts the captures again | `update_set_closed`, `default_update_set`, `capture_count_mismatch` (also after completion, with `detail.state: 'complete'`, when a capture arrived during it), `mixed_scope_capture`, `duplicate_capture`, `update_set_in_use` (another user's preference points at the set), `complete_not_applied` |
 
 `WorkingSetError.detail` holds only sys_ids, states and counts. It never holds names,
 descriptions or payloads.
@@ -52,9 +52,10 @@ descriptions or payloads.
   `setCurrentApplicationId` as writes. Moves and completion use the Table API (`write`). Reads
   are `READ_ONLY`. The set name is passed to the script as data and is never built into an
   encoded query.
-- `update_set_in_use` looks only at other users' `sys_update_set` preferences that the caller can
-  read. An `updateSetForScope` preference that points at the set, or a row hidden by ACLs, is not
-  detected.
+- `update_set_in_use` looks at other users' `sys_update_set` and `updateSetForScope<app>`
+  preferences that the caller can read. A row hidden by ACLs is not detected.
+- When `useUpdateSet` fails after the preferences may have changed, the error's `detail.previous`
+  is the pair to pass to `restoreWorkingSet`.
 - `completeUpdateSet` leaves your own preferences on the completed set. A closed set is not
   captured into, and the next session falls back to the application's Default. Call
   `restoreWorkingSet` straight after it.

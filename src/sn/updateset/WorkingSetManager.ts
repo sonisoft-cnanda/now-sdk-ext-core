@@ -91,8 +91,13 @@ export class WorkingSetManager {
         if (set.state !== 'in progress') throw new WorkingSetError('update_set_closed', { updateSet: set.sysId, state: set.state });
         if (set.isDefault && !options.allowDefault) throw new WorkingSetError('default_update_set', { updateSet: set.sysId });
         const previous = await this.getWorkingSet();
-        const current = await this.persist(set.application, set.sysId);
-        return { previous, current, updateSet: set };
+        try {
+            return { previous, current: await this.persist(set.application, set.sysId), updateSet: set };
+        } catch (error) {
+            // The preferences may already have changed: the caller needs the pair to put back.
+            if (error instanceof WorkingSetError) throw new WorkingSetError(error.code, { ...error.detail, previous });
+            throw new WorkingSetError('working_set_not_applied', { updateSet: set.sysId, previous });
+        }
     }
 
     /**
@@ -165,7 +170,8 @@ export class WorkingSetManager {
         const names = rows.map(row => row.name);
         if (new Set(names).size !== names.length) throw new WorkingSetError('duplicate_capture', { updateSet: sysId });
         const user = await this.user();
-        const users = await this._reader.rows('sys_user_preference', `name=sys_update_set^value=${sysId}`, 'sys_id,user,name,value');
+        // Another user's current set, or the set remembered for the application, both still capture into it.
+        const users = await this._reader.rows('sys_user_preference', `name=sys_update_set^ORnameSTARTSWITHupdateSetForScope^value=${sysId}`, 'sys_id,user,name,value');
         if (users.some(row => row.user !== user)) throw new WorkingSetError('update_set_in_use', { updateSet: sysId });
         await this._request.put<unknown>({ path: `/api/now/table/sys_update_set/${sysId}`, method: 'PUT',
             headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, query: { sysparm_fields: 'sys_id' },

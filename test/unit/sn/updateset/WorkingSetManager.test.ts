@@ -14,14 +14,22 @@ let script: jest.SpiedFunction<BackgroundScriptExecutor['executeScript']>;
 let scriptBehaviour: { createApplication?: string; ignorePersist?: boolean };
 let manager: WorkingSetManager;
 
+function matchesTerm(row: Row, term: string): boolean {
+    if (term === 'sys_id=javascript:gs.getUserID()') return row.sys_id === USER;
+    const inMatch = term.match(/^(\w+)IN(.*)$/);
+    if (inMatch) return inMatch[2].split(',').includes(row[inMatch[1]]);
+    const starts = term.match(/^(\w+)STARTSWITH(.*)$/);
+    if (starts) return (row[starts[1]] ?? '').startsWith(starts[2]);
+    const [field, value] = term.split('=');
+    return (row[field] ?? '') === value;
+}
 function matches(row: Row, query: string): boolean {
-    return query.split('^').filter(term => term && !term.startsWith('ORDERBY')).every(term => {
-        if (term === 'sys_id=javascript:gs.getUserID()') return row.sys_id === USER;
-        const inMatch = term.match(/^(\w+)IN(.*)$/);
-        if (inMatch) return inMatch[2].split(',').includes(row[inMatch[1]]);
-        const [field, value] = term.split('=');
-        return (row[field] ?? '') === value;
-    });
+    // ^OR joins a term to the one before it, as in an encoded query.
+    const groups: string[][] = [];
+    for (const term of query.split('^').filter(item => item && !item.startsWith('ORDERBY'))) {
+        if (term.startsWith('OR') && groups.length) groups.at(-1)!.push(term.slice(2)); else groups.push([term]);
+    }
+    return groups.every(group => group.some(term => matchesTerm(row, term)));
 }
 const respond = (rows: Row[], fields: string) => {
     const picked = rows.map(row => Object.fromEntries(fields.split(',').map(field => [field, row[field] ?? ''])));
@@ -126,9 +134,10 @@ describe('WorkingSetManager', () => {
         expect(result.previous).toEqual({ application: 'global', updateSet: 'f'.repeat(32) });
         expect(result.current).toEqual({ application: APP, updateSet: SET });
     });
-    it('fails when the preferences do not read back', async () => {
+    it('fails when the preferences do not read back, and says what to restore', async () => {
         scriptBehaviour.ignorePersist = true;
-        await expect(manager.useUpdateSet(SET)).rejects.toMatchObject({ code: 'working_set_not_applied' });
+        await expect(manager.useUpdateSet(SET)).rejects.toMatchObject({ code: 'working_set_not_applied',
+            detail: { previous: { application: 'global', updateSet: 'f'.repeat(32) } } });
     });
     it.each([[CLOSED, 'update_set_closed'], [DEFAULT, 'default_update_set'], ['9'.repeat(32), 'update_set_not_found']])('refuses %s', async (id, code) => {
         await expect(manager.useUpdateSet(id)).rejects.toMatchObject({ code });
@@ -199,6 +208,7 @@ describe('WorkingSetManager', () => {
             ['mixed_scope_capture', () => db.sys_update_xml.push({ sys_id: XML2, name: 'sys_script_y', update_set: SET, application: 'global' }), 2],
             ['duplicate_capture', () => db.sys_update_xml.push({ sys_id: XML2, name: 'sys_ui_section_x', update_set: SET, application: APP }), 2],
             ['update_set_in_use', () => db.sys_user_preference.push({ sys_id: 'c'.repeat(32), user: 'd'.repeat(32), name: 'sys_update_set', value: SET }), 1],
+            ['update_set_in_use', () => db.sys_user_preference.push({ sys_id: 'c'.repeat(32), user: 'd'.repeat(32), name: `updateSetForScope${APP}`, value: SET }), 1],
         ] as const)('refuses %s', async (code, setup, expected) => {
             setup();
             await expect(manager.completeUpdateSet(SET, { expectedCaptures: expected })).rejects.toMatchObject({ code });
