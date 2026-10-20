@@ -35,7 +35,8 @@ beforeEach(() => {
         { sys_id: '2'.repeat(32), user: U, name: 'sys_update_set', value: OTHER },
         { sys_id: '3'.repeat(32), user: U, name: 'apps.current_app', value: 'global' }];
     req = { get: jest.fn(async (r: any) => {
-        if (r.path.endsWith('.do')) return { status: 200, data: form(r.path.slice(1,-3), r.query?.sys_id ?? R) };
+        if (r.path.endsWith('.do')) return state.redirect ? { status: 302, headers: { location: 'https://example.service-now.com/sys_ui_policy_list.do?sysparm_query=private-script-sentinel' }, data: '' }
+            : { status: 200, data: form(r.path.slice(1,-3), r.query?.sys_id ?? R) };
         const t = r.path.split('/').at(-1), q = r.query.sysparm_query;
         if (t === 'sys_scope') return response(state.scopeRows);
         if (t === 'sys_store_app') return response(state.store ? [{ sys_id: S, scope: 'x_test' }] : []);
@@ -50,11 +51,12 @@ beforeEach(() => {
             return response([{ sys_id: id, name: 'Test set', application: state.setScope, state: 'in progress' }]);
         }
         if (t === 'sys_ui_action') return response([{ sys_id: A, table: state.actionTable, action_name: 'sysverb_delete', onclick: state.onclick, name: 'Delete' }]);
-        if (t === 'sys_update_xml') return response(captured && !state.noCapture ? [{ sys_id: A, name: `${TABLE}_${R}`,
+        if (t === 'sys_update_version') return response(state.baseline ? [{ sys_id: A, name: state.captureName ?? `${TABLE}_${R}` }] : []);
+        if (t === 'sys_update_xml') return response(captured && !state.noCapture ? [{ sys_id: A, name: state.captureName ?? `${TABLE}_${R}`, replace_on_upgrade: 'false',
             update_set: state.captureSet, application: state.captureScope, action: deleted ? 'DELETE' : 'INSERT_OR_UPDATE',
             sys_mod_count:String(state.captureMod), sys_updated_on: state.stale ? '2000-01-01 00:00:00' : '2099-01-01 00:00:00' }] : []);
         if (t === 'sys_metadata_delete') return response(deleted && !state.noDeleteEvidence ? [{ sys_id: A, sys_metadata: R, sys_scope: S, sys_created_on: '2099-01-01 00:00:00' }] : []);
-        return response(stored ? [{...stored, sys_scope: state.recordScope}] : []);
+        return response(stored ? [{...stored, sys_scope: state.recordScope, sys_policy: state.policy ?? '', name: 'x_t', element: 'f', language: 'en'}] : []);
     }), post: jest.fn(async (r: any) => {
         if (state.refusal) throw state.refusal;
         if (state.postError) throw new Error('private-script-sentinel');
@@ -62,7 +64,7 @@ beforeEach(() => {
         deleted = r.fields.sys_action === 'sysverb_delete';
         stored = deleted || state.notSaved ? undefined : { sys_id: R, sys_scope: S };
         if (state.mutate) state.mutate();
-        return { status: 302, headers: { location: `/${TABLE}.do?sys_id=${R}` }, data: '' };
+        return { status: 302, headers: { location: `${r.path}?sys_id=${R}` }, data: '' };
     }), getUserSession: jest.fn(async () => ({ userToken: 'session-sentinel', instanceUrl: 'https://example.service-now.com' })) };
     jest.spyOn(SessionManager.getInstance(), 'getRequest').mockReturnValue(req as any);
     writer = new MetadataFormWriter(new ServiceNowInstance({ alias: 'unit-test' }));
@@ -240,6 +242,74 @@ describe('MetadataFormWriter', () => {
 
 });
 
+describe('MetadataFormWriter for applications we do not own', () => {
+    const store = () => { state.store = true; };
+    const optIn = { storeCustomization: { acknowledgeUpgradeSkip: true as const } };
+    it('still refuses a Store scope without the explicit opt-in', async () => {
+        store();
+        await expect(writer.insert(TABLE, { ...options(), updateSet: SET })).rejects.toMatchObject({ code: 'store_scope' });
+        expect(req.get.mock.calls.some(([r]) => r.path.endsWith('.do'))).toBe(false);
+    });
+    it('requires an explicit update set with the opt-in', async () => {
+        store();
+        await expect(writer.insert(TABLE, { ...options(), ...optIn })).rejects.toMatchObject({ code: 'update_set_required' });
+        expect(req.post).not.toHaveBeenCalled();
+    });
+    it('writes a Store file with the opt-in and reports the upgrade evidence', async () => {
+        store(); state.baseline = true;
+        const result = await writer.update(TABLE, R, { ...options(), ...optIn, updateSet: SET });
+        expect(result.capture).toMatchObject({ updateSetSysId: SET, updateName: `${TABLE}_${R}`,
+            customization: { storeApplication: true, replaceOnUpgrade: false, baselineVersion: true } });
+        expect(req.post.mock.calls[0][0].fields.sysparm_transaction_update_set).toBe(SET);
+    });
+    it('keeps a verified write when the upgrade evidence cannot be read', async () => {
+        store();
+        const get = req.get.getMockImplementation()!;
+        req.get.mockImplementation(async (r: any) => r.path.endsWith('/sys_update_version') ? { status: 403, headers: {}, bodyObject: {} } : get(r));
+        await expect(writer.update(TABLE, R, { ...options(), ...optIn, updateSet: SET }))
+            .resolves.toMatchObject({ capture: { customization: { storeApplication: true, replaceOnUpgrade: false } } });
+    });
+    it.each(['read', 'protected'])('refuses a Store file with sys_policy %s before the form', async policy => {
+        store(); state.policy = policy;
+        await expect(writer.update(TABLE, R, { ...options(), ...optIn, updateSet: SET })).rejects.toMatchObject({ code: 'protected_record', detail: { table: TABLE } });
+        expect(req.get.mock.calls.some(([r]) => r.path.endsWith('.do'))).toBe(false);
+    });
+    it('does not apply the Store checks to a custom application', async () => {
+        state.policy = 'read';
+        await expect(writer.update(TABLE, R, options())).resolves.toMatchObject({ capture: { updateSetSysId: SET } });
+        expect((await writer.update(TABLE, R, options())).capture.customization).toBeUndefined();
+    });
+    it('names the refused field and the refused update set without caller values', async () => {
+        await expect(writer.insert(TABLE, { ...options(), fields: { absent: 'private-script-sentinel' } }))
+            .rejects.toMatchObject({ code: 'field_not_supported', detail: { field: 'absent', table: TABLE } });
+        state.setScope = 'global';
+        await expect(writer.insert(TABLE, { ...options(), updateSet: OTHER }))
+            .rejects.toMatchObject({ code: 'invalid_input', detail: { updateSetState: 'in progress', updateSetApplication: 'global' } });
+    });
+    it('reports a redirected form by path only', async () => {
+        state.redirect = true;
+        let failure: any;
+        try { await writer.insert(TABLE, options()); } catch (error) { failure = error; }
+        expect(failure).toMatchObject({ code: 'form_redirected', detail: { table: TABLE, redirectPath: '/sys_ui_policy_list.do' } });
+        expect(JSON.stringify(failure.detail)).not.toContain('private');
+        expect(req.post).not.toHaveBeenCalled();
+    });
+    it.each([['sys_documentation', 'sys_documentation_x_t_f_en'], ['sys_choice_set', 'sys_choice_x_t_f']])('verifies %s under its coalescing name', async (table, name) => {
+        state.captureName = name;
+        const result = await writer.update(table, R, { scope: { sysId: S }, fields: { name: 'private-name-sentinel' } });
+        expect(result.capture).toMatchObject({ updateName: name, updateSetSysId: SET });
+        expect(req.get.mock.calls.some(([r]) => r.path.endsWith('/sys_update_xml') && r.query.sysparm_query.startsWith(`name=${name}^`))).toBe(true);
+        await expect(writer.insert(table, { scope: { sysId: S }, fields: { name: 'private-name-sentinel' } })).resolves.toMatchObject({ capture: { updateName: name } });
+    });
+    it('fails rather than guesses when a coalescing record lacks its name parts', async () => {
+        state.captureName = 'sys_documentation_x_t_f_en';
+        const get = req.get.getMockImplementation()!;
+        req.get.mockImplementation(async (r: any) => r.path.endsWith('/sys_documentation')
+            ? response([{ sys_id: R, sys_scope: S, name: 'x_t', element: '', language: 'en' }]) : get(r));
+        await expect(writer.update('sys_documentation', R, { scope: { sysId: S }, fields: { name: 'n' } })).rejects.toMatchObject({ code: 'evidence_unavailable' });
+        expect(req.post).not.toHaveBeenCalled();
+    });
+});
 
 describe('confirmed CSRF rejection at the public metadata boundary', () => {
     it.each(['insert', 'update', 'delete'] as const)('%s preserves CSRF rejection and partial evidence', async operation => {
