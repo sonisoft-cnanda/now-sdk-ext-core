@@ -107,6 +107,8 @@ export * from './sn/transaction/ClusterTransactionManager.js';
 export * from './sn/transaction/ClusterTransactionModels.js';
 export * from './sn/updateset/UpdateSetManager.js';
 export * from './sn/updateset/UpdateSetModels.js';
+export * from './sn/updateset/WorkingSetManager.js';
+export * from './sn/updateset/WorkingSetModels.js';
 export * from './sn/user/UserRequest.js';
 export * from './sn/variables/VariableDefinitions.js';
 export * from './sn/variables/VariableModels.js';

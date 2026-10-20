@@ -6,6 +6,7 @@ import { TableAPIRequest } from "../../comm/http/TableAPIRequest";
 import { HTTPRequest } from "../../comm/http/HTTPRequest";
 import { IHttpResponse } from "../../comm/http/IHttpResponse";
 import { BackgroundScriptExecutor } from "../BackgroundScriptExecutor";
+import { WorkingSetManager } from "./WorkingSetManager";
 import {
     SetUpdateSetOptions,
     ListUpdateSetsOptions,
@@ -104,10 +105,16 @@ export class UpdateSetManager {
         if (resp.status === 200 && resp.bodyObject?.result?.currentUpdateSet) {
             const current = resp.bodyObject.result.currentUpdateSet;
             this._logger.info(`Current update set: ${current.name}`);
+            // The picker reports only name and sys_id; read the real state and application.
+            const record = await this._tableAPI.get<UpdateSetSingleResponse>(
+                `${UpdateSetManager.UPDATE_SET_TABLE}/${current.sysId}`, { sysparm_fields: 'sys_id,name,state,application' });
+            const row = record?.status === 200 ? record.bodyObject?.result : undefined;
+            const application = typeof row?.application === 'object' ? (row.application as { value?: string })?.value : row?.application;
             return {
                 sys_id: current.sysId,
                 name: current.name,
-                state: 'in progress'
+                state: row?.state ?? '',
+                ...(application ? { application } : {})
             };
         }
 
@@ -163,6 +170,15 @@ export class UpdateSetManager {
             throw new Error('Update set name is required');
         }
 
+        // The Table API drops sys_update_set.application (its create ACL), so a set requested for an
+        // application is created through WorkingSetManager, which writes and verifies it.
+        if (options.application && (!options.state || options.state === 'in progress')) {
+            const created = await new WorkingSetManager(this._instance).createUpdateSet({
+                application: options.application, name: options.name, description: options.description });
+            this._logger.info(`Created update set: ${created.name} with sys_id: ${created.sysId} in ${created.application}`);
+            return { sys_id: created.sysId, name: created.name, state: created.state, application: created.application, description: options.description };
+        }
+
         this._logger.info(`Creating update set: ${options.name}`);
 
         const body: Record<string, string> = {
@@ -208,6 +224,10 @@ export class UpdateSetManager {
 
         if (!options.recordSysIds && !options.timeRange && !options.sourceUpdateSet) {
             throw new Error('At least one selection criteria is required: recordSysIds, timeRange, or sourceUpdateSet');
+        }
+        if (options.timeRange && !options.recordSysIds && !options.sourceUpdateSet) {
+            // A time range alone selects every capture on the instance in that window, from every user and set.
+            throw new Error('timeRange requires sourceUpdateSet or recordSysIds');
         }
 
         this._logger.info(`Moving records to update set: ${targetUpdateSetId}`);
@@ -287,7 +307,13 @@ export class UpdateSetManager {
                     { update_set: targetUpdateSetId }
                 );
 
-                if (putResp && (putResp.status === 200 || putResp.status === 201)) {
+                // The platform's move rule can abort a cross-scope move without an error status: read it back.
+                const after: IHttpResponse<UpdateXmlSingleResponse> | undefined = putResp && (putResp.status === 200 || putResp.status === 201)
+                    ? await this._tableAPI.get<UpdateXmlSingleResponse>(`${UpdateSetManager.UPDATE_XML_TABLE}/${record.sys_id}`, { sysparm_fields: 'sys_id,update_set' })
+                    : undefined;
+                const landed = after?.bodyObject?.result?.update_set;
+                const landedId = typeof landed === 'object' ? (landed as { value?: string })?.value : landed;
+                if (landedId === targetUpdateSetId) {
                     result.moved++;
                     result.records.push({
                         sys_id: record.sys_id,
@@ -305,7 +331,9 @@ export class UpdateSetManager {
                     });
                     result.errors.push({
                         sys_id: record.sys_id,
-                        error: `Unexpected status: ${putResp?.status ?? 'unknown'}`
+                        error: putResp && (putResp.status === 200 || putResp.status === 201)
+                            ? 'Move not applied: the record is not in the target update set (a cross-scope move is aborted by the platform)'
+                            : `Unexpected status: ${putResp?.status ?? 'unknown'}`
                     });
                 }
             } catch (err) {
