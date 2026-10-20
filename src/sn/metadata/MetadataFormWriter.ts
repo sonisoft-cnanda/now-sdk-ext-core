@@ -134,7 +134,7 @@ export class MetadataFormWriter {
             const insertedNames = Object.fromEntries(nameFields.map(field => [field, typeof fields[field] === 'string' ? fields[field] : '']));
             let captureName = updateName(table, recordId, operation === 'insert' ? insertedNames : existing);
             if (!captureName && operation === 'insert') {
-                throw new MetadataScopeError('invalid_input', { table, field: nameFields.find(field => !insertedNames[field]) ?? nameFields[0] });
+                throw new MetadataScopeError('invalid_input', { table, field: nameFields.find(field => !/^[a-z0-9_]+$/i.test(insertedNames[field])) ?? nameFields[0] });
             }
             if (!captureName) throw new MetadataScopeError('evidence_unavailable');
             const predictedName = captureName;

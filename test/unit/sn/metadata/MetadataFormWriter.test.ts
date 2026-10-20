@@ -319,6 +319,10 @@ describe('MetadataFormWriter for applications we do not own', () => {
         await expect(writer.update('sys_documentation', R, { scope: { sysId: S }, fields: { name: 'n' } })).rejects.toMatchObject({ code: 'evidence_unavailable' });
         expect(req.post).not.toHaveBeenCalled();
     });
+    it('names the field whose value cannot be part of the coalescing name', async () => {
+        await expect(writer.insert('sys_documentation', { scope: { sysId: S }, fields: { name: 'x_t', element: 'f', language: 'en-US' } }))
+            .rejects.toMatchObject({ code: 'invalid_input', detail: { field: 'language' } });
+    });
 });
 
 describe('confirmed CSRF rejection at the public metadata boundary', () => {
