@@ -32,7 +32,8 @@ export class MetadataScopeError extends Error {
     public constructor(public readonly code: 'scope_required' | 'scope_unknown' | 'scope_ambiguous' |
         'scope_mismatch' | 'scope_not_applied' | 'store_scope' | 'table_not_supported' |
         'field_not_supported' | 'delete_not_supported' | 'not_permitted' | 'csrf_token_unavailable' |
-        'invalid_input' | 'evidence_unavailable' | 'update_set_required' | 'protected_record' | 'form_redirected',
+        'invalid_input' | 'evidence_unavailable' | 'update_set_required' | 'protected_record' | 'form_redirected' |
+        'update_set_not_current',
         detail?: MetadataErrorDetail) {
         super(`Metadata write refused: ${code}`);
         this.name = 'MetadataScopeError';

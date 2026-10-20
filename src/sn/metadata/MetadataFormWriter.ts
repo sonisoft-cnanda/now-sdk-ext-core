@@ -6,12 +6,13 @@ import { SessionManager } from '../../comm/http/SessionManager';
 import { isPolicyRefusal } from '../../policy/PolicyRefusal';
 import { stripSecretsFromError } from '../../util/redact';
 import type { ServiceNowInstance } from '../ServiceNowInstance';
-import type { MetadataScopeRef, MetadataWriteOptions, MetadataDeleteOptions, MetadataWriteResult, CaptureReport, CustomizationReport } from './MetadataModels';
+import type { MetadataWriteOptions, MetadataDeleteOptions, MetadataWriteResult, CaptureReport } from './MetadataModels';
 import { MetadataScopeError } from './MetadataScopeError';
 import { MetadataVerificationError } from './MetadataVerificationError';
 import { MetadataReader, MetadataRow } from './internal/MetadataReader';
 import { comparePreferences, preferenceValue } from './internal/MetadataPreferences';
 import { updateName, updateNameFields } from './internal/MetadataUpdateNames';
+import { customizationEvidence, resolveScope } from './internal/MetadataScope';
 
 const ID = /^[a-f0-9]{32}$/i;
 const NAME = /^[a-z0-9_]+$/i;
@@ -34,23 +35,6 @@ export class MetadataFormWriter {
         }
         return this.write('delete', table, sysId, options);
     }
-    private async scope(reader: MetadataReader, ref: MetadataScopeRef): Promise<{ sysId: string; scope: string; store: boolean }> {
-        if (!ref) throw new MetadataScopeError('scope_required');
-        const id = ref === 'global' ? 'global' : typeof ref === 'object' && 'sysId' in ref ? ref.sysId : undefined;
-        const name = typeof ref === 'object' && 'scope' in ref ? ref.scope : undefined;
-        if (id ? id !== 'global' && !ID.test(id) : !name || !NAME.test(name) || name === 'global') {
-            throw new MetadataScopeError('invalid_input');
-        }
-        const rows = await reader.rows('sys_scope', id ? `sys_id=${id}` : `scope=${name}^active=true`, 'sys_id,scope,active,sys_class_name');
-        if (rows.some(row => id ? row.sys_id !== id : row.scope !== name)) throw new MetadataScopeError('evidence_unavailable');
-        if (!rows.length) throw new MetadataScopeError('scope_unknown');
-        if (rows.length !== 1) throw new MetadataScopeError('scope_ambiguous');
-        const app = rows[0];
-        if ((!id && app.active !== 'true') || !app.scope || (app.sys_id !== 'global' && !ID.test(app.sys_id))) throw new MetadataScopeError('evidence_unavailable');
-        // An installed Store application is written only with the caller's explicit opt-in (see write).
-        const store = app.sys_class_name === 'sys_store_app' || !!await reader.exact('sys_store_app', app.sys_id, 'scope');
-        return { sysId: app.sys_id, scope: app.scope, store };
-    }
     private async table(reader: MetadataReader, table: string, deleting: boolean): Promise<void> {
         const visited = new Set<string>();
         let rows = await reader.rows('sys_db_object', `name=${table}`, 'sys_id,name,super_class');
@@ -68,21 +52,6 @@ export class MetadataFormWriter {
         }
         throw new MetadataScopeError('table_not_supported');
     }
-    /** Upgrade evidence for a Store file. Best effort: a missing read never turns a verified write into a failure. */
-    private async customization(reader: MetadataReader, captureId: string | undefined, name: string | undefined): Promise<CustomizationReport> {
-        const report: CustomizationReport = { storeApplication: true };
-        const read = async <T>(collect: () => Promise<T>): Promise<T | undefined> => {
-            try { return await collect(); } catch (error) {
-                if (isPolicyRefusal(error)) throw error;
-                return undefined;
-            }
-        };
-        const capture = captureId ? await read(() => reader.exact('sys_update_xml', captureId, 'replace_on_upgrade')) : undefined;
-        if (capture) report.replaceOnUpgrade = capture.replace_on_upgrade === 'true';
-        const versions = name ? await read(() => reader.rows('sys_update_version', `name=${name}^source_table=sys_store_app`, 'sys_id,name')) : undefined;
-        if (versions) report.baselineVersion = versions.some(row => row.name === name);
-        return report;
-    }
     private async write(operation: 'insert' | 'update' | 'delete', table: string, sysId: string,
         options: MetadataWriteOptions | MetadataDeleteOptions): Promise<MetadataWriteResult> {
         if (!NAME.test(table ?? '') || (operation !== 'insert' && !ID.test(sysId ?? ''))) throw new MetadataScopeError('invalid_input');
@@ -99,7 +68,7 @@ export class MetadataFormWriter {
         try {
             const request = SessionManager.getInstance().getRequest(this._instance);
             const reader = new MetadataReader(request);
-            const { store, ...scope } = await this.scope(reader, options.scope);
+            const { store, ...scope } = await resolveScope(reader, options.scope);
             if (store && options.storeCustomization?.acknowledgeUpgradeSkip !== true) throw new MetadataScopeError('store_scope');
             if (store && !options.updateSet) throw new MetadataScopeError('update_set_required');
             await this.table(reader, table, operation === 'delete');
@@ -233,7 +202,7 @@ export class MetadataFormWriter {
                     'sys_id,sys_metadata,sys_scope,sys_created_on'));
                 if (!csrfRejected && (!deleted.length || deleted.some(row => row.sys_metadata !== recordId || row.sys_scope !== scope.sysId || row.sys_created_on < started))) fail('delete_not_captured');
             }
-            if (store) report.customization = await this.customization(reader, captures.at(-1)?.sys_id, captureName);
+            if (store) report.customization = await customizationEvidence(reader, captures.at(-1)?.sys_id, captureName);
             if (csrfRejected) fail('csrf_rejected');
             if (!comparison.valid) fail('session_changed');
             if (submitFailure) fail(submitFailure instanceof Error && submitFailure.message === 'csrf_rejected' ? 'csrf_rejected' : 'verification_unavailable');
