@@ -60,7 +60,11 @@ export function parseSectionChoices(xml: string): string[] {
     return values;
 }
 
-/** The page's `saveAllSelected` join: comma-separated, commas inside a value escaped. */
-export function joinLayoutValues(values: string[]): string {
-    return values.map(value => value.replace(/,/g, '\\,')).join(',');
+/**
+ * The page's `saveAllSelected` join: comma-separated, with a comma inside a value written `\,`. The page escapes only
+ * the delimiter, so a value holding a backslash cannot be encoded unambiguously and is refused (undefined).
+ */
+export function joinLayoutValues(values: string[]): string | undefined {
+    if (values.some(value => value.includes('\\'))) return undefined;
+    return values.map(value => value.split(',').join('\\,')).join(',');
 }

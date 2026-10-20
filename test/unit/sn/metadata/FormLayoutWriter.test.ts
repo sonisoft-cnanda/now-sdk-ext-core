@@ -13,6 +13,7 @@ let elements: Row[];
 let captures: Row[];
 let req: { get: jest.Mock<any>; post: jest.Mock<any> };
 let writer: FormLayoutWriter;
+let getRow: (r: any) => Promise<any>;
 
 const response = (rows: Row[], fields: string) => {
     const picked = rows.map(row => Object.fromEntries(fields.split(',').map(field => [field, row[field] ?? ''])));
@@ -68,6 +69,7 @@ beforeEach(() => {
             return { status: 302, headers: { location: '/sn_compliance_policy.do' }, data: '' };
         }),
     };
+    getRow = req.get.getMockImplementation()!;
     jest.spyOn(SessionManager.getInstance(), 'getRequest').mockReturnValue(req as any);
     writer = new FormLayoutWriter(new ServiceNowInstance({ alias: 'unit-test' }));
 });
@@ -136,6 +138,14 @@ describe('FormLayoutWriter', () => {
         setup();
         await expect(writer.setFormLayout(SECTION, options())).rejects.toMatchObject({ name: 'MetadataVerificationError', code, sysId: SECTION, writeAttempted: true });
         expect(req.post).toHaveBeenCalledTimes(1);
+    });
+    it('refuses a page value it cannot encode the way the page does, before the POST', async () => {
+        const original = page;
+        req.get.mockImplementation(async (r: any) => r.path === '/slushbucket.do'
+            ? { status: 200, data: original().replace('<option value="active">', '<option value="ac\\tive">') }
+            : (await getRow(r)));
+        await expect(writer.setFormLayout(SECTION, options())).rejects.toMatchObject({ code: 'evidence_unavailable' });
+        expect(req.post).not.toHaveBeenCalled();
     });
     it('keeps a policy refusal intact', async () => {
         state.refusal = policyRefusal({ allowed: false, verbs: ['write'], decidingLayer: 'default' } as any);

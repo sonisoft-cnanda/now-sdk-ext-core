@@ -105,6 +105,9 @@ export class FormLayoutWriter {
             const versions = new Map(priorCaptures.map(capture => [capture.sys_id, capture.sys_mod_count]));
             const started = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
+            const [lcodes0, lcodes1, lcodes2] = [joinLayoutValues(available), joinLayoutValues(elements), joinLayoutValues([...order, '.new'])];
+            if (lcodes0 === undefined || lcodes1 === undefined || lcodes2 === undefined) throw new MetadataScopeError('evidence_unavailable');
+
             submitted = true;
             let submitFailure: unknown;
             try {
@@ -115,7 +118,7 @@ export class FormLayoutWriter {
                         sysparm_collection: form.inputs.sysparm_collection ?? '', sysparm_collection_relationship: form.inputs.sysparm_collection_relationship ?? '',
                         sysparm_referring_url: form.inputs.sysparm_referring_url ?? '', sysparm_redirect_url: '', sysparm_sys_id: '',
                         sysparm_record_scope: form.inputs.sysparm_record_scope ?? '', sysparm_transaction_scope: scope.sysId,
-                        lcodes_0: joinLayoutValues(available), lcodes_1: joinLayoutValues(elements), lcodes_2: joinLayoutValues([...order, '.new']),
+                        lcodes_0: lcodes0, lcodes_1: lcodes1, lcodes_2: lcodes2,
                     } });
             } catch (error) {
                 if (isPolicyRefusal(error)) throw error;
