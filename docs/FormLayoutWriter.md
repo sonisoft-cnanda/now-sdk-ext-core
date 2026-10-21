@@ -20,8 +20,14 @@ const result = await layouts.setFormLayout(sectionId, {
 ```
 
 A non-default view is opened by its `sys_ui_view` name; the Default view is `''`. Elements use the page's own values: a field name (dot-walked names allowed), `.begin_split`,
-`.split`, `.end_split`, or `.formatter.<sys_ui_formatter sys_id>`. Annotations and charts are not
-supported. The section order of the form (`sys_ui_form_sections_<form id>`) is a separate file,
+`.split`, `.end_split`, or `.formatter.<sys_ui_formatter sys_id>`. `getFormLayout` shows an
+annotation as `.annotation.<id>`, a chart as `.chart.<id>`, and an embedded related list as
+`.list.<relationship>` (for example `.list.12M.<table>.<field>.<suffix>`). Their stored
+`sys_ui_element.element` would otherwise look like a field name. `setFormLayout` cannot write
+them back, and the Form Layout page does not even offer an embedded list. So it refuses any
+section that holds one with `section_not_supported` (`detail.field` is `annotation`, `chart` or
+`list`) before posting. Leaving them out of the list would delete them. Change such
+a section in the Form Layout UI. The section order of the form (`sys_ui_form_sections_<form id>`) is a separate file,
 and this writer does not change it.
 
 ## Before the save

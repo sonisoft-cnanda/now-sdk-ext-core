@@ -33,7 +33,7 @@ export class MetadataScopeError extends Error {
         'scope_mismatch' | 'scope_not_applied' | 'store_scope' | 'table_not_supported' |
         'field_not_supported' | 'delete_not_supported' | 'not_permitted' | 'csrf_token_unavailable' |
         'invalid_input' | 'evidence_unavailable' | 'update_set_required' | 'protected_record' | 'form_redirected' |
-        'update_set_not_current',
+        'update_set_not_current' | 'section_not_supported',
         detail?: MetadataErrorDetail) {
         super(`Metadata write refused: ${code}`);
         this.name = 'MetadataScopeError';
