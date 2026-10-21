@@ -121,6 +121,8 @@ export class ColumnWriter {
             const prior = await reader.rows('sys_update_xml', captureQuery, 'sys_id,name,sys_mod_count');
             if (prior.some(row => !/^\d+$/.test(row.sys_mod_count))) throw new MetadataScopeError('evidence_unavailable');
             const versions = new Map(prior.map(row => [row.sys_id, row.sys_mod_count]));
+            // A form element left behind by an earlier column of this name (deleting a column keeps it) is not this save's placement.
+            const leftover = new Set((await reader.rows('sys_ui_element', `element=${column}^sys_ui_section.name=${table}`, 'sys_id')).map(element => element.sys_id));
             const started = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
             submitted = true;
@@ -150,11 +152,12 @@ export class ColumnWriter {
                 if (NAME.test(formRecord.element)) messages = [...messages, `The platform saved the column as ${formRecord.element}, not ${column}`];
                 fail('write_not_applied');
             }
+            // Only the submitted form's record is this save's column: another row of that name was written by someone else.
             const saved = await reader.rows(DICTIONARY, `name=${table}^element=${column}`, `sys_id,${dictionaryFields}`);
-            if (saved.length > 1 || (formRecord && saved.some(other => other.sys_id !== recordId))) fail('verification_unavailable');
-            const row = formRecord ?? saved[0];
-            if (!row) fail('write_not_applied');
-            recordId = row.sys_id;
+            if (saved.some(other => other.sys_id !== recordId)) fail('verification_unavailable');
+            const csrfRejected = submitFailure instanceof Error && submitFailure.message === 'csrf_rejected';
+            if (!formRecord) fail(csrfRejected ? 'csrf_rejected' : 'write_not_applied');
+            const row = formRecord;
             report.recordScope = row.sys_scope;
             if (row.name !== table || row.element !== column || row.internal_type !== type ||
                 (maxLength !== undefined && row.max_length !== String(maxLength)) || (reference !== undefined && row.reference !== reference)) fail('write_not_applied');
@@ -164,7 +167,8 @@ export class ColumnWriter {
             if (!labels.some(doc => doc.label === label)) fail('write_not_applied');
             if (labels.some(doc => doc.sys_scope !== scope.sysId)) fail('scope_not_applied');
             if (labels.some(doc => doc.sys_update_name !== `sys_documentation_${table}_${column}_${doc.language}`)) fail('not_captured');
-            const placed = await reader.rows('sys_ui_element', `element=${column}^sys_ui_section.name=${table}`, 'sys_id,element,sys_ui_section');
+            const placed = (await reader.rows('sys_ui_element', `element=${column}^sys_ui_section.name=${table}`, 'sys_id,element,sys_ui_section'))
+                .filter(element => !leftover.has(element.sys_id));
             if (placed.some(element => element.element !== column || !sections.some(section => section.sys_id === element.sys_ui_section))) fail('verification_unavailable');
             const formSections = [...new Set(placed.map(element => element.sys_ui_section))];
             const expected = [dictionaryName, ...labels.map(doc => doc.sys_update_name), ...formSections.map(id => `sys_ui_section_${id}`)];
@@ -198,7 +202,7 @@ export class ColumnWriter {
             }
             if (store) report.customization = await customizationEvidence(reader, dictionaryCapture?.sys_id, dictionaryName);
             if (!comparison.valid) fail('session_changed');
-            if (submitFailure) fail(submitFailure instanceof Error && submitFailure.message === 'csrf_rejected' ? 'csrf_rejected' : 'verification_unavailable');
+            if (submitFailure) fail(csrfRejected ? 'csrf_rejected' : 'verification_unavailable');
             return { table, column, sysId: row.sys_id, label, type, scope, formSections, captures: expected, capture: report as CaptureReport, messages };
         } catch (error) {
             if (isPolicyRefusal(error) || (!submitted && error instanceof MetadataScopeError) || error instanceof MetadataVerificationError) throw stripSecretsFromError(error);

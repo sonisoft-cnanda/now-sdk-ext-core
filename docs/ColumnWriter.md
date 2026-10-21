@@ -31,7 +31,7 @@ row has the name it predicted:
 | The application adding it | The table | Column name |
 | --- | --- | --- |
 | Global | any | `u_<name>` |
-| An installed Store application | any, its own included | `u_<name>` |
+| An installed Store application | its own table (seen); other tables get the same rule, not yet seen | `u_<name>` |
 | A scoped application | its own table | `<name>`, unchanged |
 | A scoped application | another application's table | `<scope>_<name>` |
 
@@ -62,7 +62,8 @@ set to Ignore.
 ## Before the save
 
 Each of these is checked before anything is posted. A failure throws `MetadataScopeError` and
-nothing is sent:
+nothing is sent. The exception is a change to the user's preferences while the form loads:
+`MetadataVerificationError` `session_changed` with `writeAttempted: false`.
 
 - The column, label, type, maximum length and reference are valid (`invalid_input`, with
   `detail.field` naming the option). The type is a `sys_glide_object`; `reference` is required for
@@ -86,11 +87,14 @@ nothing is sent:
 The form is submitted once, with insert-and-stay, and never replayed. A failure after it throws
 `MetadataVerificationError` with `writeAttempted: true` and the dictionary record's sys_id:
 
-- One dictionary row for the table and column, with the requested type, length and reference
+- The submitted form's dictionary record exists (`write_not_applied`; `csrf_rejected` when the
+  instance refused the form's token) and no other row has that table and column
+  (`verification_unavailable`). It has the requested column name, type, length and reference
   (`write_not_applied`), in the application (`scope_not_applied`), named
   `sys_dictionary_<table>_<column>` (`not_captured`).
 - A label with the requested text; every label row in the application and named for its language.
-- Every field the platform placed is on one of the table's sections.
+- Every field the platform placed is on one of the table's sections. A form element of that name
+  left behind by an earlier, deleted column is not counted as this save's placement.
 - Exactly one changed capture of each name (Dictionary, each Field Label, each placed section's Form
   Layout), `INSERT_OR_UPDATE`, in the set and the application (`not_captured`,
   `captured_elsewhere`, `mixed_scope_capture`; two changed rows of one name is
@@ -98,4 +102,5 @@ The form is submitted once, with insert-and-stay, and never replayed. A failure 
 - The user's preferences are unchanged (`session_changed`).
 
 For a Store application, `capture.customization` reports `replaceOnUpgrade` and the baseline
-version of the Dictionary capture.
+version of the Dictionary capture when they can be read (best effort: a failed read leaves the
+field out rather than failing a verified add).

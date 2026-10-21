@@ -83,9 +83,9 @@ beforeEach(() => {
             state.column = element;
             if (state.apply) {
                 dictionary.push({ sys_id: state.recId ?? REC, name: TABLE, element: state.renamed ?? element, internal_type: r.fields['sys_dictionary.internal_type'],
-                    max_length: r.fields['sys_dictionary.max_length'] ?? '40', reference: r.fields['sys_dictionary.reference'] ?? '',
+                    max_length: state.savedMaxLength ?? r.fields['sys_dictionary.max_length'] ?? '40', reference: state.savedReference ?? r.fields['sys_dictionary.reference'] ?? '',
                     sys_scope: state.savedScope, sys_update_name: `sys_dictionary_${TABLE}_${element}` });
-                labels.push({ sys_id: `${labels.length + 1}`.padStart(32, '4'), name: TABLE, element, language: 'en', label: r.fields['sys_dictionary.column_label'],
+                labels.push({ sys_id: `${labels.length + 1}`.padStart(32, '4'), name: TABLE, element, language: 'en', label: state.savedLabel ?? r.fields['sys_dictionary.column_label'],
                     sys_scope: state.savedScope, sys_update_name: `sys_documentation_${TABLE}_${element}_en` });
                 captures.push(capture(`sys_dictionary_${TABLE}_${element}`), ...(state.noLabelCapture ? [] : [capture(`sys_documentation_${TABLE}_${element}_en`)]));
                 if (state.place) {
@@ -93,7 +93,8 @@ beforeEach(() => {
                     if (!state.noFormCapture) captures.push(capture(`sys_ui_section_${SECTION}`, state.formCapture ?? {}));
                 }
             }
-            if (state.postError) throw new Error('socket hang up');
+            if (state.extraCapture) captures.push(capture(state.extraCapture));
+            if (state.postError) throw new Error(state.postError === true ? 'socket hang up' : state.postError);
             return { status: 302, headers: { location: `/sys_dictionary.do?sys_id=${state.recId ?? REC}&sysparm_view=&sysparm_nameofstack=s&sysparm_transaction_scope=${r.fields.sysparm_transaction_scope}` }, data: '' };
         }),
         getUserSession: jest.fn(async () => ({ userToken: 'session-token', instanceUrl: 'https://x.service-now.com' })),
@@ -175,6 +176,13 @@ describe('ColumnWriter', () => {
         expect(result.column).toBe('u_triage_note');
         expect(req.post.mock.calls[0][0].fields['sys_dictionary.element']).toBe('u_triage_note');
         expect(result.capture.customization).toEqual({ storeApplication: true, replaceOnUpgrade: false, baselineVersion: true });
+    });
+
+    it('does not count a form element left by an earlier column of that name as this placement', async () => {
+        elements.push({ sys_id: '0'.repeat(31) + '9', element: 'triage_note', sys_ui_section: SECTION });
+        state.place = false;
+        await expect(writer.addColumn(TABLE, options())).resolves.toMatchObject({ formSections: [],
+            captures: [`sys_dictionary_${TABLE}_triage_note`, `sys_documentation_${TABLE}_triage_note_en`] });
     });
 
     describe('refuses before posting', () => {
@@ -283,6 +291,41 @@ describe('ColumnWriter', () => {
             state.prefsChange = true;
             const error = await writer.addColumn(TABLE, options()).catch(e => e);
             expect(error.code).toBe('session_changed');
+        });
+        it('a saved length other than the one requested', async () => {
+            state.savedMaxLength = '40';
+            await failed('write_not_applied');
+        });
+        it('a saved label other than the one requested', async () => {
+            state.savedLabel = 'Other';
+            await failed('write_not_applied');
+        });
+        it('a saved reference other than the one requested', async () => {
+            state.savedReference = 'cmn_location';
+            await failed('write_not_applied', { type: 'reference', reference: 'sys_user', maxLength: undefined });
+        });
+        it('two changed captures of one name', async () => {
+            state.extraCapture = `sys_documentation_${TABLE}_triage_note_en`;
+            await failed('verification_unavailable');
+        });
+        it('a capture row older than the save', async () => {
+            captures.push(capture(`sys_dictionary_${TABLE}_triage_note`, { sys_updated_on: '2000-01-01 00:00:00' }));
+            await failed('not_captured');
+        });
+        it('a row of that name that is not the submitted form\'s record', async () => {
+            dictionary.push({ sys_id: OTHER, name: TABLE, element: 'triage_note' });
+            const get = req.get.getMockImplementation()!;
+            // Written by someone else after the pre-check.
+            let checks = 0;
+            req.get.mockImplementation(async (r: any) => {
+                if (r.path.endsWith('/sys_dictionary') && r.query.sysparm_query.startsWith('nameIN') && checks++ === 0) return response([], r.query.sysparm_fields);
+                return get(r);
+            });
+            await failed('verification_unavailable');
+        });
+        it('a token the instance refused, with nothing saved', async () => {
+            state.apply = false; state.postError = 'csrf_rejected';
+            await failed('csrf_rejected');
         });
         it('a POST that failed after the platform saved', async () => {
             state.postError = true;
