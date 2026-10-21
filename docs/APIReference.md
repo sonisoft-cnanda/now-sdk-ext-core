@@ -224,6 +224,19 @@ class FormLayoutWriter {
 }
 ```
 
+### ListLayoutWriter
+
+Read and replace a table's list columns for one view through the List Layout page, with verified capture. See [ListLayoutWriter Guide](./ListLayoutWriter.md).
+
+```typescript
+class ListLayoutWriter {
+    constructor(instance: ServiceNowInstance)
+
+    getListLayout(table: string, view?: string): Promise<ListLayout>
+    setListLayout(table: string, options: ListLayoutWriteOptions): Promise<ListLayoutWriteResult>
+}
+```
+
 ## Code & Schema
 
 ### CodeSearch
@@ -762,6 +775,7 @@ enum ProgressStatus {
 - [Update Set Manager](./UpdateSetManager.md)
 - [Working Set Manager](./WorkingSetManager.md)
 - [Form Layout Writer](./FormLayoutWriter.md)
+- [List Layout Writer](./ListLayoutWriter.md)
 - [Metadata Form Writer](./MetadataFormWriter.md)
 - [Code Search](./CodeSearch.md)
 - [Schema Discovery](./SchemaDiscovery.md)

@@ -84,3 +84,47 @@ export interface FormLayoutWriteResult {
     previousElements: string[];
     capture: CaptureReport;
 }
+/** A table's list columns for one view (not a related list, not a user's personalized list). */
+export interface ListLayout {
+    table: string;
+    /** View name; '' is the Default view. */
+    view: string;
+    /** False when the table has no list of its own for the view (it shows its parent's); a save creates one. */
+    exists: boolean;
+    /** sys_id of the list, when it exists. A save replaces it, so it changes on every save. */
+    sysId?: string;
+    /** sys_scope of the list, when it exists. */
+    scope?: string;
+    /** sys_update_name of the list, when it exists. */
+    updateName?: string;
+    /** Column names in order; dot-walked columns as `field.field`. */
+    columns: string[];
+}
+export interface ListLayoutWriteOptions {
+    /** The complete new column list, in order. Each column must be offered by the List Layout page. */
+    columns: string[];
+    /** View name; '' or omitted is the Default view. */
+    view?: string;
+    /** Must be the list's own application; for a table with no list yet, the application the new list will belong to. */
+    scope: MetadataScopeRef;
+    /** In progress set of that application, already the user's set for it (WorkingSetManager.useUpdateSet). */
+    updateSet: string;
+    /** Required when the list belongs to an installed Store application. */
+    storeCustomization?: StoreCustomizationOptions;
+}
+export interface ListLayoutWriteResult {
+    table: string;
+    view: string;
+    scope: { sysId: string; scope: string };
+    /** sys_id of the list after the save (a new record on every save). */
+    sysId: string;
+    /** sys_id of the list the save replaced; absent when the list was created. */
+    previousSysId?: string;
+    /** True when the table had no list of its own and the save created one. */
+    created: boolean;
+    /** The columns read back after the save. */
+    columns: string[];
+    /** The columns before the save, to restore them; empty when the list was created. */
+    previousColumns: string[];
+    capture: CaptureReport;
+}

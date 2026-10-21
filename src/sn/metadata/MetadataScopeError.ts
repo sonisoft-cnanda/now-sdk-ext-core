@@ -1,4 +1,6 @@
 const IDENTIFIER = /^[a-z0-9_]{1,80}$/i;
+// A field may be dot-walked (caller_id.email); each part is an identifier.
+const FIELD = /^[a-z0-9_]{1,80}(\.[a-z0-9_]{1,80}){0,5}$/i;
 const STATES = new Set(['in progress', 'complete', 'ignore']);
 
 /**
@@ -15,7 +17,7 @@ export interface MetadataErrorDetail {
 function safeDetail(detail?: MetadataErrorDetail): MetadataErrorDetail | undefined {
     if (!detail) return undefined;
     const safe: MetadataErrorDetail = {};
-    if (detail.field && IDENTIFIER.test(detail.field)) safe.field = detail.field;
+    if (detail.field && FIELD.test(detail.field)) safe.field = detail.field;
     if (detail.table && IDENTIFIER.test(detail.table)) safe.table = detail.table;
     if (detail.updateSetState !== undefined) safe.updateSetState = STATES.has(detail.updateSetState) ? detail.updateSetState : 'unknown';
     if (detail.updateSetApplication && (detail.updateSetApplication === 'global' || /^[a-f0-9]{32}$/i.test(detail.updateSetApplication))) {
@@ -33,7 +35,7 @@ export class MetadataScopeError extends Error {
         'scope_mismatch' | 'scope_not_applied' | 'store_scope' | 'table_not_supported' |
         'field_not_supported' | 'delete_not_supported' | 'not_permitted' | 'csrf_token_unavailable' |
         'invalid_input' | 'evidence_unavailable' | 'update_set_required' | 'protected_record' | 'form_redirected' |
-        'update_set_not_current' | 'section_not_supported',
+        'update_set_not_current' | 'section_not_supported' | 'domain_not_supported',
         detail?: MetadataErrorDetail) {
         super(`Metadata write refused: ${code}`);
         this.name = 'MetadataScopeError';
