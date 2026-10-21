@@ -128,3 +128,41 @@ export interface ListLayoutWriteResult {
     previousColumns: string[];
     capture: CaptureReport;
 }
+export interface ColumnWriteOptions {
+    /**
+     * The column name, lower case. The platform's prefix is added when it is missing: `u_` in Global, `<scope>_` when the
+     * application adds the column to another application's table, none on the application's own table.
+     */
+    column: string;
+    /** The column label (the Field Label record, in the session's language). */
+    label: string;
+    /** The column type: a sys_glide_object name such as string, integer, boolean, glide_date_time or reference. */
+    type: string;
+    /** Maximum length, for string types. The platform's default for the type applies when omitted. */
+    maxLength?: number;
+    /** The referenced table: required for type reference, optional for glide_list, refused otherwise. */
+    reference?: string;
+    /** The application the column belongs to. */
+    scope: MetadataScopeRef;
+    /** In progress set of that application, already the user's set for it (WorkingSetManager.useUpdateSet). */
+    updateSet: string;
+    /** Required when the application is an installed Store application. */
+    storeCustomization?: StoreCustomizationOptions;
+}
+export interface ColumnWriteResult {
+    table: string;
+    /** The column's name as the platform saved it, prefix included. */
+    column: string;
+    /** sys_id of the sys_dictionary record. */
+    sysId: string;
+    label: string;
+    type: string;
+    scope: { sysId: string; scope: string };
+    /** Form sections the platform appended the field to (the Default view's main section); empty when it placed it nowhere. */
+    formSections: string[];
+    /** Update names of every capture the save made, each verified in the set: Dictionary, Field Label(s), Form Layout(s). */
+    captures: string[];
+    /** The Dictionary capture. */
+    capture: CaptureReport;
+    messages: string[];
+}

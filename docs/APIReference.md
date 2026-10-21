@@ -237,6 +237,18 @@ class ListLayoutWriter {
 }
 ```
 
+### ColumnWriter
+
+Add a column to a table through the dictionary form, with the column, its label, the platform's form placement and every capture verified. See [ColumnWriter Guide](./ColumnWriter.md).
+
+```typescript
+class ColumnWriter {
+    constructor(instance: ServiceNowInstance)
+
+    addColumn(table: string, options: ColumnWriteOptions): Promise<ColumnWriteResult>
+}
+```
+
 ## Code & Schema
 
 ### CodeSearch
@@ -776,6 +788,7 @@ enum ProgressStatus {
 - [Working Set Manager](./WorkingSetManager.md)
 - [Form Layout Writer](./FormLayoutWriter.md)
 - [List Layout Writer](./ListLayoutWriter.md)
+- [Column Writer](./ColumnWriter.md)
 - [Metadata Form Writer](./MetadataFormWriter.md)
 - [Code Search](./CodeSearch.md)
 - [Schema Discovery](./SchemaDiscovery.md)
