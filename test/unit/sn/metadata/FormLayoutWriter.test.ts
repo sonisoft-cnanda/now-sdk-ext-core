@@ -22,7 +22,10 @@ const response = (rows: Row[], fields: string) => {
 const layout = (values: string[]) => {
     elements = values.map((value, position) => value.startsWith('.formatter.')
         ? { sys_id: `${position}`.padStart(32, '0'), element: 'process_flow.xml', type: 'formatter', sys_ui_formatter: value.slice(11), position: String(position) }
-        : { sys_id: `${position}`.padStart(32, '0'), element: value, type: value.startsWith('.') ? value : '', sys_ui_formatter: '', position: String(position) });
+        // As stored: an annotation's or chart's element is the sys_id of its record, with no prefix.
+        : /^\.(annotation|chart|list)\./.test(value)
+            ? { sys_id: `${position}`.padStart(32, '0'), element: value.split('.').slice(2).join('.'), type: value.split('.')[1], sys_ui_formatter: '', position: String(position) }
+            : { sys_id: `${position}`.padStart(32, '0'), element: value, type: value.startsWith('.') ? value : '', sys_ui_formatter: '', position: String(position) });
 };
 const page = () => `<html><form name="other"><input type="hidden" name="sysparm_ck" value="wrong"></form>
 <FORM name="editPage" action="slushbucket.do" method="post">
@@ -146,6 +149,16 @@ describe('FormLayoutWriter', () => {
             return result;
         });
         await expect(writer.setFormLayout(SECTION, options())).rejects.toMatchObject({ code: 'verification_unavailable', writeAttempted: true });
+    });
+    it.each([['annotation', '4'.repeat(32)], ['chart', '4'.repeat(32)], ['list', '12M.x_t.f.snmp']])('shows a %s with its type prefix, never as a bare value', async (kind, id) => {
+        layout(['name', `.${kind}.${id}`, 'type']);
+        await expect(writer.getFormLayout(SECTION)).resolves.toMatchObject({ elements: ['name', `.${kind}.${id}`, 'type'] });
+    });
+    it.each(['annotation', 'chart', 'list'])('refuses a section holding a %s before the POST, whatever list is sent', async kind => {
+        layout(['name', `.${kind}.${'4'.repeat(32)}`, 'type']);
+        await expect(writer.setFormLayout(SECTION, options({ elements: ['name', 'type'] })))
+            .rejects.toMatchObject({ code: 'section_not_supported', detail: { field: kind } });
+        expect(req.post).not.toHaveBeenCalled();
     });
     it('names a refused field', async () => {
         await expect(writer.setFormLayout(SECTION, options({ elements: ['absent'] }))).rejects.toMatchObject({ detail: { field: 'absent' } });

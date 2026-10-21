@@ -74,6 +74,10 @@ export class FormLayoutWriter {
             // The page saves into the user's set for the section's application; it takes no set parameter.
             if (preferenceValue(before, `updateSetForScope${scope.sysId}`) !== options.updateSet) throw new MetadataScopeError('update_set_not_current');
             previous = await this.elements(reader, section);
+            // Annotations, charts and embedded lists cannot be written back through this save (the page does not offer an
+            // embedded list at all): leaving them out of the list could delete them.
+            const opaque = previous.find(value => /^\.(annotation|chart|list)\./.test(value));
+            if (opaque) throw new MetadataScopeError('section_not_supported', { field: opaque.split('.')[1] });
             const view = await viewName(reader, row.view);
 
             const request = SessionManager.getInstance().getRequest(this._instance);
@@ -177,6 +181,9 @@ export class FormLayoutWriter {
                 if (!ID.test(row.sys_ui_formatter)) throw new MetadataScopeError('evidence_unavailable');
                 return `.formatter.${row.sys_ui_formatter}`;
             }
+            // An annotation's or chart's element is the sys_id of its record, and an embedded list's is its relationship
+            // (for example 12M.<table>.<field>): show them with a type prefix, so none can be mistaken for a field name.
+            if (row.type === 'annotation' || row.type === 'chart' || row.type === 'list') return `.${row.type}.${row.element}`;
             return row.element;
         });
     }
