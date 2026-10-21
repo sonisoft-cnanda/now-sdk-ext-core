@@ -71,9 +71,10 @@ function exportedNames(): string[] {
         const names = exportedNames();
         for (const name of ['WorkingSetManager', 'WorkingSetError', 'WorkingSet', 'UpdateSetSummary', 'UseUpdateSetResult', 'RestoreWorkingSetResult',
             'MoveCaptureResult', 'FormLayoutWriter', 'FormLayout', 'FormLayoutWriteResult', 'StoreCustomizationOptions', 'CustomizationReport',
-            'MetadataErrorDetail', 'ListLayoutWriter', 'ListLayout', 'ListLayoutWriteOptions', 'ListLayoutWriteResult']) expect(names).toContain(name);
+            'MetadataErrorDetail', 'ListLayoutWriter', 'ListLayout', 'ListLayoutWriteOptions', 'ListLayoutWriteResult',
+            'ColumnWriter', 'ColumnWriteOptions', 'ColumnWriteResult']) expect(names).toContain(name);
         for (const name of ['updateName', 'updateNameFields', 'parseSlushbucketPage', 'parseSectionChoices', 'joinLayoutValues',
-            'resolveScope', 'customizationEvidence']) expect(names).not.toContain(name);
+            'resolveScope', 'customizationEvidence', 'columnName']) expect(names).not.toContain(name);
     });
 
     it('exports table behavior discovery and its typed contracts', () => {
