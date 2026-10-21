@@ -35,6 +35,15 @@ Caller fields must exist on the form. Caller `sys_*` fields are refused.
 An initial query accepts equality terms for ordinary fields. It cannot override system fields.
 
 Pass `initialQuery`, `variables`, `variableField` and `view` as with `FormRecordWriter`.
+
+Catalog variable references are checked by the writer, not by the form. These are
+`catalog_script_client.cat_variable` and `catalog_ui_policy_action.catalog_variable`. The server
+renders them with only "-- None --", and the page's script adds the variables. The value must be
+`IO:<item_option_new sys_id>`, and the variable must belong to the record's catalog item or
+variable set. A UI policy action names neither; it is resolved through its `ui_policy`, which you
+pass as `initialQuery: 'ui_policy=<sys_id>'`, as the policy's related list does. The field is read
+back after the save (`write_not_applied` if it was not kept). A value any form control refuses is
+reported as `field_not_supported`, with `detail.field`.
 For example, an ATF step can use `initialQuery` to select its test and step configuration.
 The encoded form state carries those values. Unknown variables fail before the POST.
 
