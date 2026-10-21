@@ -24,6 +24,8 @@ function form(table = TABLE, id = '-1') {
 <input name="sys_original.name" value="original"><input name="${table}.name" value="old"><input name="${table}.element" value=""><input name="${table}.language" value="">
 <textarea name="${table}.script">old</textarea><input name="${table}.active" value="false">
 <textarea name="${table}.inputs.var__m_${A}.script"></textarea>
+<input name="${table}.cat_item" value=""><input name="${table}.catalog_item" value=""><input name="${table}.variable_set" value=""><input name="${table}.type" value="">
+<select name="${table}.cat_variable"><option value="">-- None --</option></select><select name="${table}.catalog_variable"><option value="">-- None --</option></select>
 ${state.missingAction ? '' : `<button data-action-name="sysverb_insert_and_stay" gsft_id="${A}"></button><button data-action-name="sysverb_update" gsft_id="${A}"></button><button data-action-name="sysverb_delete" gsft_id="${A}"></button>`}</form>`;
 }
 beforeEach(() => {
@@ -35,6 +37,7 @@ beforeEach(() => {
         { sys_id: '2'.repeat(32), user: U, name: 'sys_update_set', value: OTHER },
         { sys_id: '3'.repeat(32), user: U, name: 'apps.current_app', value: 'global' }];
     req = { get: jest.fn(async (r: any) => {
+        if (r.path.endsWith('.do')) state.loadQuery = r.query?.sysparm_query ?? '';
         if (r.path.endsWith('.do')) return state.redirect ? { status: 302, headers: { location: 'https://example.service-now.com/sys_ui_policy_list.do?sysparm_query=private-script-sentinel' }, data: '' }
             : { status: 200, data: form(r.path.slice(1,-3), r.query?.sys_id ?? R) };
         const t = r.path.split('/').at(-1), q = r.query.sysparm_query;
@@ -55,6 +58,8 @@ beforeEach(() => {
         if (t === 'sys_update_xml') return response(captured && !state.noCapture ? [{ sys_id: A, name: state.captureName ?? `${TABLE}_${R}`, replace_on_upgrade: 'false',
             update_set: state.captureSet, application: state.captureScope, action: deleted ? 'DELETE' : 'INSERT_OR_UPDATE',
             sys_mod_count:String(state.captureMod), sys_updated_on: state.stale ? '2000-01-01 00:00:00' : '2099-01-01 00:00:00' }] : []);
+        if (t === 'item_option_new') return response(state.variable && q.startsWith(`sys_id=${state.variable.sys_id}`) ? [state.variable] : []);
+        if (t === 'catalog_ui_policy') return response(state.policyRow && q.startsWith(`sys_id=${state.policyRow.sys_id}`) ? [state.policyRow] : []);
         if (t === 'sys_metadata_delete') return response(deleted && !state.noDeleteEvidence ? [{ sys_id: A, sys_metadata: R, sys_scope: S, sys_created_on: '2099-01-01 00:00:00' }] : []);
         return response(stored ? [{...stored, sys_scope: state.recordScope, sys_policy: state.policy ?? '', name: 'x_t', element: 'f', language: 'en'}] : []);
     }), post: jest.fn(async (r: any) => {
@@ -62,7 +67,13 @@ beforeEach(() => {
         if (state.postError) throw new Error('private-script-sentinel');
         captured = true; if (!state.noCaptureChange) state.captureMod++;
         deleted = r.fields.sys_action === 'sysverb_delete';
-        stored = deleted || state.notSaved ? undefined : { sys_id: R, sys_scope: S };
+        const table = r.path.slice(1, -3);
+        // What the form saves: posted fields, then values set by the initial query at load time (the signed state).
+        const loaded = Object.fromEntries(String(state.loadQuery ?? '').split('^').filter(Boolean).map((term: string) => [term.slice(0, term.indexOf('=')), term.slice(term.indexOf('=') + 1)]));
+        const saved = (field: string) => r.fields[`${table}.${field}`] ?? loaded[field] ?? stored?.[field] ?? '';
+        stored = deleted || state.notSaved ? undefined : { sys_id: R, sys_scope: S,
+            cat_item: state.savedItem ?? saved('cat_item'), catalog_item: saved('catalog_item'), variable_set: saved('variable_set'), ui_policy: saved('ui_policy'),
+            cat_variable: state.dropReference ? '' : r.fields[`${table}.cat_variable`] ?? '', catalog_variable: state.dropReference ? '' : r.fields[`${table}.catalog_variable`] ?? '' };
         if (state.mutate) state.mutate();
         return { status: 302, headers: { location: `${r.path}?sys_id=${R}` }, data: '' };
     }), getUserSession: jest.fn(async () => ({ userToken: 'session-sentinel', instanceUrl: 'https://example.service-now.com' })) };
@@ -473,5 +484,78 @@ describe('CSRF evidence interpretation remains independent', () => {
         await expect(result).rejects.toMatchObject({name:'MetadataVerificationError',code:'verification_unavailable',
             table:TABLE,sysId:R,writeAttempted:true});
         expect(req.post).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('MetadataFormWriter and catalog variable references', () => {
+    const ITEM = '6'.repeat(32), VAR = '7'.repeat(32), POLICY = '8'.repeat(32), VSET = '9'.repeat(32);
+    beforeEach(() => { state.variable = { sys_id: VAR, cat_item: ITEM, variable_set: '' }; });
+    it('sets a client script variable the form only fills in the browser, then reads it back', async () => {
+        state.captureName = `catalog_script_client_${R}`;
+        const result = await writer.insert('catalog_script_client', { scope: { sysId: S }, fields: { cat_item: ITEM, type: 'onChange', cat_variable: `IO:${VAR}` } });
+        expect(result.capture.updateName).toBe(`catalog_script_client_${R}`);
+        expect(req.post.mock.calls[0][0].fields['catalog_script_client.cat_variable']).toBe(`IO:${VAR}`);
+    });
+    it('finds a UI policy action\'s item through its policy (initial query), as the related list does', async () => {
+        state.captureName = `catalog_ui_policy_action_${R}`;
+        state.policyRow = { sys_id: POLICY, catalog_item: ITEM, variable_set: '' };
+        await expect(writer.insert('catalog_ui_policy_action', { scope: { sysId: S }, initialQuery: `ui_policy=${POLICY}`,
+            fields: { catalog_variable: `IO:${VAR}` } })).resolves.toMatchObject({ table: 'catalog_ui_policy_action' });
+    });
+    it('accepts a variable of the record\'s variable set', async () => {
+        state.captureName = `catalog_script_client_${R}`;
+        state.variable = { sys_id: VAR, cat_item: '', variable_set: VSET };
+        await expect(writer.insert('catalog_script_client', { scope: { sysId: S }, fields: { variable_set: VSET, cat_variable: `IO:${VAR}` } })).resolves.toBeDefined();
+    });
+    it.each([
+        ['another item\'s variable', () => { state.variable = { sys_id: VAR, cat_item: OTHER, variable_set: '' }; }, `IO:${VAR}`],
+        ['a variable that does not exist', () => { state.variable = undefined; }, `IO:${VAR}`],
+        ['a value that is not IO:<sys_id>', () => undefined, 'request_type'],
+    ])('refuses %s before the POST, naming the field', async (_label, setup, value) => {
+        setup();
+        await expect(writer.insert('catalog_script_client', { scope: { sysId: S }, fields: { cat_item: ITEM, cat_variable: value } }))
+            .rejects.toMatchObject({ code: 'field_not_supported', detail: { field: 'cat_variable', table: 'catalog_script_client' } });
+        expect(req.post).not.toHaveBeenCalled();
+    });
+    it('reports a reference the platform did not keep', async () => {
+        state.captureName = `catalog_script_client_${R}`;
+        state.dropReference = true;
+        await expect(writer.insert('catalog_script_client', { scope: { sysId: S }, fields: { cat_item: ITEM, cat_variable: `IO:${VAR}` } }))
+            .rejects.toMatchObject({ code: 'write_not_applied' });
+    });
+    it('names the field the form refuses', async () => {
+        state.captureName = `catalog_script_client_${R}`;
+        await expect(writer.insert('catalog_script_client', { scope: { sysId: S }, fields: { cat_item: ITEM, catalog_variable: 'not-offered' } }))
+            .rejects.toMatchObject({ code: 'field_not_supported', detail: { field: 'catalog_variable' } });
+    });
+});
+
+describe('catalog variable references: the owner cannot be faked', () => {
+    const ITEM = '6'.repeat(32), VAR = '7'.repeat(32), POLICY = '8'.repeat(32), OTHER_ITEM = '0'.repeat(31) + '1';
+    beforeEach(() => { state.variable = { sys_id: VAR, cat_item: ITEM, variable_set: '' }; state.captureName = `catalog_script_client_${R}`; });
+    const refused = async (call: Promise<unknown>) => {
+        await expect(call).rejects.toMatchObject({ code: 'field_not_supported' });
+        expect(req.post).not.toHaveBeenCalled();
+    };
+    it('refuses an owner in the initial query that is not exactly a sys_id', async () => {
+        await refused(writer.insert('catalog_script_client', { scope: { sysId: S }, initialQuery: `cat_item=${ITEM}=x`, fields: { cat_variable: `IO:${VAR}` } }));
+    });
+    it.each([null, 7, true, ['a']])('refuses a written owner that is not a string (%p)', async owner => {
+        await refused(writer.insert('catalog_script_client', { scope: { sysId: S }, fields: { cat_item: owner as never, cat_variable: `IO:${VAR}` } }));
+    });
+    it('refuses a UI policy action whose own item disagrees with its policy', async () => {
+        state.captureName = `catalog_ui_policy_action_${R}`;
+        state.policyRow = { sys_id: POLICY, catalog_item: OTHER_ITEM, variable_set: '' };
+        await refused(writer.insert('catalog_ui_policy_action', { scope: { sysId: S }, initialQuery: `ui_policy=${POLICY}^catalog_item=${ITEM}`,
+            fields: { catalog_variable: `IO:${VAR}` } }));
+    });
+    it('refuses an update that moves the record to another item while pointing at the old item\'s variable', async () => {
+        stored = { sys_id: R, sys_scope: S, cat_item: ITEM, variable_set: '' };
+        await refused(writer.update('catalog_script_client', R, { scope: { sysId: S }, fields: { cat_item: OTHER_ITEM, cat_variable: `IO:${VAR}` } }));
+    });
+    it('reports a saved owner the variable does not belong to', async () => {
+        state.savedItem = OTHER_ITEM;
+        await expect(writer.insert('catalog_script_client', { scope: { sysId: S }, fields: { cat_item: ITEM, cat_variable: `IO:${VAR}` } }))
+            .rejects.toMatchObject({ code: 'write_not_applied', writeAttempted: true });
     });
 });

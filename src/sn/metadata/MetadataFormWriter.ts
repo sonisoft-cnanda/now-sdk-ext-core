@@ -19,6 +19,23 @@ const NAME = /^[a-z0-9_]+$/i;
 const WRITE_DENY = new Set(['sys_update_set', 'sys_update_xml', 'sys_scope', 'sys_app', 'sys_store_app',
     'sys_db_object', 'sys_dictionary', 'sys_security_acl', 'sys_user_role']);
 const DELETE_DENY = new Set(['sys_documentation', 'sys_package', 'sys_app_module']);
+/**
+ * Choice fields that point at a catalog variable. The server renders them with only "-- None --" and the page's script
+ * fills in IO:<item_option_new sys_id> options, so the form's own options cannot validate them. The writer checks the
+ * reference itself: the variable must belong to the record's catalog item or variable set (found through `via` when the
+ * record names neither, as a UI policy action does through its policy).
+ */
+interface VariableReferenceRule { field: string; item: string; via?: { field: string; table: string; item: string } }
+const VARIABLE_REFERENCES: Record<string, VariableReferenceRule> = {
+    catalog_script_client: { field: 'cat_variable', item: 'cat_item' },
+    catalog_ui_policy_action: { field: 'catalog_variable', item: 'catalog_item',
+        via: { field: 'ui_policy', table: 'catalog_ui_policy', item: 'catalog_item' } },
+};
+const VARIABLE_REFERENCE = /^IO:([0-9a-f]{32})$/;
+/** The fields that decide which catalog item or variable set a record's variable must belong to. */
+function ownerFields(rule: VariableReferenceRule): string[] {
+    return [rule.item, 'variable_set', ...(rule.via ? [rule.via.field] : [])];
+}
 
 /** Scoped metadata CRUD. All form work uses the internal FormRecordWriter seam. */
 export class MetadataFormWriter {
@@ -35,6 +52,58 @@ export class MetadataFormWriter {
         }
         return this.write('delete', table, sysId, options);
     }
+    /**
+     * The catalog variable a write points this record at, checked against the record's item or variable set. undefined when
+     * the table has no such field or the write does not set it; '' (no variable) passes as written.
+     */
+    private async variableReference(reader: MetadataReader, table: string, recordId: string, options: MetadataWriteOptions,
+        operation: string): Promise<{ field: string; value: string } | undefined> {
+        const rule = VARIABLE_REFERENCES[table];
+        const value = rule ? options.fields?.[rule.field] : undefined;
+        if (!rule || value === undefined || operation === 'delete') return undefined;
+        if (value === '') return { field: rule.field, value: '' };
+        const match = typeof value === 'string' ? VARIABLE_REFERENCE.exec(value) : null;
+        if (!match) throw new MetadataScopeError('field_not_supported', { field: rule.field, table });
+        // The owner the record will have: written now, set by the initial query, or already stored.
+        const query = new Map<string, string>();
+        for (const term of (options.initialQuery ?? '').split('^').filter(Boolean)) {
+            const at = term.indexOf('=');
+            query.set(term.slice(0, at), term.slice(at + 1));
+        }
+        const stored = operation === 'update' ? await reader.exact(table, recordId, ownerFields(rule).join(',')) : undefined;
+        const owner = (field: string): string => {
+            const written = options.fields?.[field];
+            const chosen = written !== undefined ? written : query.has(field) ? query.get(field) : stored?.[field] ?? '';
+            // An owner is a sys_id or empty; anything else would be posted as something the check never saw.
+            if (typeof chosen !== 'string' || (chosen !== '' && !ID.test(chosen))) throw new MetadataScopeError('field_not_supported', { field, table });
+            return chosen;
+        };
+        await this.requireOwnedVariable(reader, rule, table, match[1], owner);
+        return { field: rule.field, value: match[0] };
+    }
+
+    /**
+     * The variable must belong to the record's catalog item or variable set. A UI policy action takes them from its policy;
+     * an item or set of its own that disagrees with the policy is refused.
+     */
+    private async requireOwnedVariable(reader: MetadataReader, rule: VariableReferenceRule, table: string, variableId: string,
+        owner: (field: string) => string): Promise<void> {
+        const refuse = (): never => { throw new MetadataScopeError('field_not_supported', { field: rule.field, table }); };
+        let item = owner(rule.item);
+        let set = owner('variable_set');
+        const policy = rule.via ? owner(rule.via.field) : '';
+        if (rule.via && policy) {
+            const parent = await reader.exact(rule.via.table, policy, `${rule.via.item},variable_set`);
+            if (!parent) refuse();
+            if ((item && item !== parent[rule.via.item]) || (set && set !== parent.variable_set)) refuse();
+            item = parent[rule.via.item] ?? '';
+            set = parent.variable_set ?? '';
+        }
+        const variable = await reader.exact('item_option_new', variableId, 'cat_item,variable_set');
+        const belongs = !!variable && ((ID.test(item) && variable.cat_item === item) || (ID.test(set) && variable.variable_set === set));
+        if (!belongs) refuse();
+    }
+
     private async table(reader: MetadataReader, table: string, deleting: boolean): Promise<void> {
         const visited = new Set<string>();
         let rows = await reader.rows('sys_db_object', `name=${table}`, 'sys_id,name,super_class');
@@ -112,6 +181,14 @@ export class MetadataFormWriter {
             for (const field of Object.keys(writeOptions.fields ?? {})) {
                 if (!NAME.test(field) || /^sys_/i.test(field) || !form.fields[`${table}.${field}`]) throw new MetadataScopeError('field_not_supported', { field, table });
             }
+            const variableReference = await this.variableReference(reader, table, recordId, writeOptions, operation);
+            if (variableReference) {
+                // As the page's script would: offer the verified option on the control before the form validates it.
+                const control = form.fields[`${table}.${variableReference.field}`];
+                if (control.choices && !control.choices.some(choice => choice.value === variableReference.value)) {
+                    control.choices.push({ value: variableReference.value, label: variableReference.value });
+                }
+            }
             const action = operation === 'insert' ? 'sysverb_insert_and_stay' : operation === 'update' ? 'sysverb_update' : 'sysverb_delete';
             if (operation !== 'insert' && !form.actions[action]) throw new MetadataScopeError('not_permitted');
             if (operation === 'delete') {
@@ -123,7 +200,14 @@ export class MetadataFormWriter {
                     throw new MetadataScopeError('delete_not_supported');
                 }
             }
-            transport.validate(form, options);
+            try { transport.validate(form, options); } catch (error) {
+                if (!(error instanceof InvalidParameterException)) throw error;
+                // Name the value the form refused: validate the fields one at a time.
+                const rejected = Object.keys(writeOptions.fields ?? {}).find(field => {
+                    try { transport.validate(form, { fields: { [field]: writeOptions.fields?.[field] ?? null } }); return false; } catch { return true; }
+                });
+                throw new MetadataScopeError('field_not_supported', rejected ? { field: rejected, table } : undefined);
+            }
             // Form GETs are part of the measured interval: never replace the original baseline.
             const loaded = await preferences();
             if (!comparePreferences(before, loaded).valid) throw new MetadataVerificationError('session_changed', table, recordId, undefined, [], false);
@@ -168,7 +252,8 @@ export class MetadataFormWriter {
                     return undefined;
                 }
             };
-            const record = await collectEvidence(() => reader.exact(table, recordId, ['sys_scope', ...nameFields].join(',')));
+            const record = await collectEvidence(() => reader.exact(table, recordId,
+                ['sys_scope', ...nameFields, ...(variableReference ? [variableReference.field, ...ownerFields(VARIABLE_REFERENCES[table])] : [])].join(',')));
             report.recordScope = record?.sys_scope ?? (!csrfRejected && operation === 'delete' ? scope.sysId : undefined);
             // The record as saved must carry the name its capture was snapshotted under.
             if (nameFields.length && record && updateName(table, recordId, record) !== predictedName) captureName = undefined;
@@ -186,6 +271,20 @@ export class MetadataFormWriter {
             if (!csrfRejected) {
                 if (operation === 'delete' ? !!record : !record) fail(operation === 'delete' ? 'delete_not_applied' : 'write_not_applied');
                 if (record && record.sys_scope !== scope.sysId) fail('scope_not_applied');
+                if (record && variableReference && record[variableReference.field] !== variableReference.value) fail('write_not_applied');
+                // The variable must belong to the owner the record actually saved, not only to the one checked beforehand.
+                if (record && variableReference?.value) {
+                    const saved = await collectEvidence(async () => {
+                        try {
+                            await this.requireOwnedVariable(reader, VARIABLE_REFERENCES[table], table, variableReference.value.slice(3), field => record[field] ?? '');
+                            return true;
+                        } catch (error) {
+                            if (error instanceof MetadataScopeError) return false;
+                            throw error;
+                        }
+                    });
+                    if (saved === false) fail('write_not_applied');
+                }
                 if (observedCaptures.some(row => row.name !== captureName || row.sys_updated_on < started || !/^\d+$/.test(row.sys_mod_count))) fail('not_captured');
                 if (!captures.length) fail('not_captured');
             }
