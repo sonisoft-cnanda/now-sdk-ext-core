@@ -26,6 +26,8 @@ const LANGUAGE = /^[a-z][a-z_]{1,9}$/i;
 const CONTROL = /[\u0000-\u001f\u007f-\u009f]/;
 const CHOICE = 'sys_choice';
 const CHOICE_FIELDS = 'sys_id,name,element,language,value,label,sequence,inactive,hint,dependent_value';
+/** The fields a Choice list capture carries for each choice and that a commit applies on the target. */
+const CAPTURED_FIELDS = ['value', 'label', 'sequence', 'inactive', 'hint', 'language', 'dependent_value'] as const;
 const MAX_SEQUENCE = 2 ** 31 - 1;
 
 type Operation = 'insert' | 'update' | 'delete';
@@ -194,6 +196,13 @@ export class ChoiceWriter {
             const prior = await reader.rows('sys_update_xml', `name=${updateName}`, 'sys_id,name,sys_mod_count');
             if (prior.some(row => row.name !== updateName || !/^\d+$/.test(row.sys_mod_count))) throw new MetadataScopeError('evidence_unavailable');
             const versions = new Map(prior.map(row => [row.sys_id, row.sys_mod_count]));
+            if (operation === 'delete') {
+                // Counted again just before the post: a record that took the value while the form loaded counts too.
+                inUse = await this.count(request, table, `${element}=${value}`);
+                if (inUse > 0 && (options as ChoiceRemoveOptions).confirmInUse !== true) {
+                    throw new MetadataScopeError('choice_in_use', { table, field: element, records: inUse });
+                }
+            }
             const started = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
             submitted = true;
@@ -227,7 +236,9 @@ export class ChoiceWriter {
                 const same = await reader.rows(CHOICE, `name=${table}^element=${element}^language=${language}`, 'sys_id,value');
                 if (same.some(other => other.value === value && other.sys_id !== recordId)) fail('verification_unavailable');
             }
-            const remaining = await reader.rows(CHOICE, `name=${table}^element=${element}`, 'sys_id');
+            // Every language: the capture holds the whole list.
+            const remaining = await reader.rows(CHOICE, `name=${table}^element=${element}`, CHOICE_FIELDS);
+            if (remaining.some(other => other.name !== table || other.element !== element)) fail('verification_unavailable');
             const sets = await reader.rows('sys_choice_set', `name=${table}^element=${element}`, 'sys_id,name,element,sys_scope,sys_update_name');
             if (sets.length > 1) fail('verification_unavailable');
             const savedSet = sets[0];
@@ -259,12 +270,16 @@ export class ChoiceWriter {
             const emptied = !savedSet && !remaining.length;
             if (capture.action !== (emptied ? 'DELETE' : 'INSERT_OR_UPDATE')) fail('not_captured');
             if (!emptied) {
-                // The capture holds the whole list: it must hold this save's choice as saved, or no longer hold a removed one.
+                // A commit replaces the target's list with the capture's, so the capture must be the list as it now is: every
+                // choice, in every language, with every field a commit applies. That holds this save's choice as saved, and no
+                // longer holds a removed one.
                 const payload = await reader.exact('sys_update_xml', capture.sys_id, 'payload');
                 const captured = payload ? await capturedChoices(payload.payload) : undefined;
                 if (!captured) fail('verification_unavailable');
-                const entry = captured.get(recordId);
-                if (operation === 'delete' ? entry !== undefined : entry?.value !== value || entry.label !== row?.label) fail('not_captured');
+                if (captured.size !== remaining.length || remaining.some(saved => {
+                    const entry = captured.get(saved.sys_id);
+                    return !entry || CAPTURED_FIELDS.some(field => entry[field] !== (saved[field] ?? ''));
+                })) fail('not_captured');
             }
             if (store) report.customization = await customizationEvidence(reader, capture.sys_id, updateName);
             if (!comparison.valid) fail('session_changed');
@@ -339,7 +354,7 @@ function choiceSet(row: MetadataRow): ChoiceSetRef {
 }
 
 /** The choices a Choice list capture holds, by sys_id; undefined when the payload is not one. */
-async function capturedChoices(payload: string): Promise<Map<string, { value: string; label: string }> | undefined> {
+async function capturedChoices(payload: string): Promise<Map<string, Record<(typeof CAPTURED_FIELDS)[number], string>> | undefined> {
     let document: unknown;
     // xml2js ships no types that the type-aware lint can resolve (as in XMLRecordManager).
     // eslint-disable-next-line @typescript-eslint/no-unsafe-call, @typescript-eslint/no-unsafe-member-access
@@ -349,12 +364,15 @@ async function capturedChoices(payload: string): Promise<Map<string, { value: st
     const list = (document as { record_update?: { sys_choice?: unknown[] } })?.record_update?.sys_choice;
     if (!Array.isArray(list) || list.length !== 1) return undefined;
     const rows = (list[0] as { sys_choice?: unknown[] }).sys_choice ?? [];
-    const result = new Map<string, { value: string; label: string }>();
+    const result = new Map<string, Record<(typeof CAPTURED_FIELDS)[number], string>>();
     for (const entry of rows) {
         const record = entry as Record<string, unknown>;
         const sysId = text(record.sys_id);
         if (!sysId || result.has(sysId)) return undefined;
-        result.set(sysId, { value: text(record.value) ?? '', label: text(record.label) ?? '' });
+        const fields = Object.fromEntries(CAPTURED_FIELDS.map(field => [field, text(record[field])]));
+        // A field missing from the capture is not the same as an empty one.
+        if (Object.values(fields).some(field => field === undefined)) return undefined;
+        result.set(sysId, fields as Record<(typeof CAPTURED_FIELDS)[number], string>);
     }
     return result;
 }

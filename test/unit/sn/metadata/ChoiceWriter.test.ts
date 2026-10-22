@@ -40,8 +40,11 @@ ${id === '-1' || state.missingAction ? '' : `<button data-action-name="sysverb_u
 let serial = 0;
 const payload = () => `<?xml version="1.0" encoding="UTF-8"?><record_update><sys_choice action="INSERT_OR_UPDATE" field="${ELEMENT}" table="${TABLE}">` +
     `<sys_choice_set action="INSERT_OR_UPDATE"><sys_id>${CHOICE_SET}</sys_id></sys_choice_set>` +
-    choices.filter(c => !state.dropFromPayload || c.sys_id !== state.dropFromPayload).map(c => `<sys_choice action="INSERT_OR_UPDATE"><hint/><label>${state.payloadLabel ?? c.label}</label>` +
-        `<sys_id>${c.sys_id}</sys_id><value>${c.value}</value></sys_choice>`).join('') + '</sys_choice></record_update>';
+    [...choices, ...(state.keepInPayload ? [state.keepInPayload] : [])].filter(c => !state.dropFromPayload || c.sys_id !== state.dropFromPayload)
+        .map(c => `<sys_choice action="INSERT_OR_UPDATE">${c.dependent_value ? `<dependent_value>${c.dependent_value}</dependent_value>` : '<dependent_value/>'}` +
+            `${c.hint ? `<hint>${c.hint}</hint>` : '<hint/>'}<inactive>${c.inactive}</inactive><label>${state.payloadLabel ?? c.label}</label>` +
+            `<language>${c.language}</language>${c.sequence ? `<sequence>${state.staleSequence ?? c.sequence}</sequence>` : '<sequence/>'}` +
+            `${state.omitValue ? '' : `<sys_id>${c.sys_id}</sys_id>`}<value>${c.value}</value></sys_choice>`).join('') + '</sys_choice></record_update>';
 const recapture = () => {
     const set = state.captureSet;
     if (!choices.length && state.dropSetWhenEmpty) sets = [];
@@ -71,6 +74,8 @@ beforeEach(() => {
             }
             if (r.path.startsWith('/api/now/stats/')) {
                 state.stats = r;
+                state.counts = (state.counts ?? 0) + 1;
+                if (state.inUseLater !== undefined && state.counts > 1) state.inUse = state.inUseLater;
                 return { status: 200, bodyObject: { result: { stats: { count: String(state.inUse) } } } };
             }
             const table = r.path.split('/').at(-1), q: string = r.query.sysparm_query, f: string = r.query.sysparm_fields;
@@ -100,7 +105,7 @@ beforeEach(() => {
                 case 'sys_user': return response([{ sys_id: USER }], f);
                 case 'sys_user_preference': state.prefReads = (state.prefReads ?? 0) + 1;
                     return response([{ sys_id: '9'.repeat(32), user: USER, name: `updateSetForScope${APP}`, value: state.current },
-                        ...(state.prefsChange && state.prefReads > 1 ? [{ sys_id: '7'.repeat(32), user: USER, name: 'apps.current_app', value: OTHER }] : [])], f);
+                        ...(state.prefsChange && state.prefReads > (state.prefsChangeAfter ?? 1) ? [{ sys_id: '7'.repeat(32), user: USER, name: 'apps.current_app', value: OTHER }] : [])], f);
                 case 'sys_update_xml': {
                     if (id) return response(captures.filter(c => c.sys_id === id), f);
                     const since = q.match(/sys_updated_on>=([^^]+)/)?.[1];
@@ -323,6 +328,50 @@ describe('ChoiceWriter.setChoice', () => {
         await failed('verification_unavailable');
     });
 
+    it('fails a capture that is not the list as saved: a stale field, a sibling missing, or another language dropped', async () => {
+        await writer.setChoice(TABLE, ELEMENT, options({ value: '2', sequence: 7 }));
+        again();
+        state.staleSequence = '2';
+        await failed('not_captured', { value: '2', sequence: 8 });
+        again();
+        state.staleSequence = undefined;
+        state.dropFromPayload = ONE;
+        await failed('not_captured', { value: '2', label: 'Two' });
+        again();
+        state.dropFromPayload = undefined;
+        choices.push(choice('0'.repeat(31) + '3', 'un', 'Un', '1', { language: 'fr' }));
+        state.dropFromPayload = '0'.repeat(31) + '3';
+        await failed('not_captured', { value: '2', label: 'Deux' });
+        again();
+        state.dropFromPayload = undefined;
+        state.omitValue = true;
+        await failed('verification_unavailable', { value: '2', label: 'Dos' });
+    });
+
+    it('refuses a form that echoes another column or language, and fails a rejected token or a session changed by the save', async () => {
+        state.query = {};
+        const load = req.get.getMockImplementation()!;
+        req.get.mockImplementation(async (r: any) => {
+            const response = await load(r);
+            return r.path === '/sys_choice.do' && state.echo ? { ...response, data: response.data.replace(state.echo[0], state.echo[1]) } : response;
+        });
+        state.echo = [`name="sys_choice.element" value="${ELEMENT}"`, 'name="sys_choice.element" value="other"'];
+        await refused('scope_not_applied');
+        state.echo = ['name="sys_choice.language" value="en"', 'name="sys_choice.language" value="fr"'];
+        await refused('scope_not_applied');
+        state.echo = undefined;
+        state.apply = false;
+        state.postError = 'csrf_rejected';
+        await failed('csrf_rejected');
+        again();
+        state.apply = true;
+        state.postError = undefined;
+        state.prefsChange = true;
+        state.prefsChangeAfter = 2;
+        state.prefReads = 0;
+        await failed('session_changed');
+    });
+
     it('fails a new list created in another application, and a changed session', async () => {
         sets = [];
         state.savedSetScope = OTHER;
@@ -384,6 +433,16 @@ describe('ChoiceWriter.removeChoice', () => {
         state.dropSetWhenEmpty = false;
         state.forceAction = 'DELETE';
         await failed('not_captured', { value: '1' }, true);
+    });
+
+    it('refuses when a record takes the value while the form loads, and fails a capture that still holds the removed choice', async () => {
+        state.inUseLater = 1;
+        expect((await refused('choice_in_use', { value: '2' }, true)).detail).toEqual({ table: TABLE, field: ELEMENT, records: 1 });
+        expect(state.counts).toBe(2);
+        state.inUseLater = undefined;
+        state.inUse = 0;
+        state.keepInPayload = choices[1];
+        await failed('not_captured', { value: '2' }, true);
     });
 
     it('refuses a missing value and a table-specific Delete, and fails a delete that did not happen', async () => {

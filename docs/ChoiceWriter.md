@@ -66,8 +66,8 @@ nothing is sent; a change to the user's preferences while the form loads is
 
 - The table, column, language and update set are well formed, and the value, label, sequence,
   inactive flag and hint are ones the platform keeps as given (`invalid_input`, with
-  `detail.field`). A value has no `^`, no `javascript:`, no control characters and no surrounding
-  spaces; it fits the column's maximum length, and an integer column's value is an integer. A
+  `detail.field`). A value is 1 to 4000 characters, with no `^`, no `javascript:`, no control
+  characters and no surrounding spaces; it fits the column's maximum length, and an integer column's value is an integer. A
   label is at most 100 characters, a hint 255.
 - The table exists and is not one of the platform's schema tables (`table_not_supported`); the
   column is defined on it or on a table it extends (`column_not_found`).
@@ -80,16 +80,19 @@ nothing is sent; a change to the user's preferences while the form loads is
   own would replace it there. Change the defining table's list instead.
 - To add, a label is given; to change, something differs (`choice_unchanged`); to remove, the value
   exists (`choice_not_found`). Two choices with the value in one language are refused
-  (`choice_ambiguous`).
+  (`choice_ambiguous`). Dependent lists (choices told apart by `dependent_value`) are therefore
+  not a write target, and the writer never sets `dependent_value`.
 - The update set is In progress in the same application (`invalid_input`, with its state and
   application).
 - To remove, the records holding the value are counted (Stats API, the table and the tables
   extending it). Any count refuses the removal (`choice_in_use`, with `detail.records`) unless
-  `confirmInUse` is set; those records keep the value. Inactivating keeps the label and hides the
+  `confirmInUse` is set; those records keep the value. The count is taken again just before the
+  post, so a record that took the value while the form loaded counts too. Inactivating keeps the label and hides the
   choice from new selections.
 - The form loads for that table, column and language in that scope (`scope_not_applied`,
   `form_redirected`), offers each field the writer posts (`field_not_supported`), offers Update to
-  change (`not_permitted`), and its Delete is the platform's own (`delete_not_supported`).
+  change and Delete to remove (`not_permitted`), and its Delete is the platform's own
+  (`delete_not_supported`).
 
 ## After the save
 
@@ -104,9 +107,13 @@ it throws `MetadataVerificationError` with `writeAttempted: true` and the choice
   `sys_choice_<table>_<element>` (`not_captured`).
 - Exactly one changed capture of that name, in the set and the application (`not_captured`,
   `captured_elsewhere`, `mixed_scope_capture`; two changed rows is `verification_unavailable`),
-  `INSERT_OR_UPDATE` (`DELETE` only if no choice set is left). It holds the choice as saved, or no
-  longer holds a removed one (`not_captured`).
-- The user's preferences are unchanged (`session_changed`).
+  `INSERT_OR_UPDATE` (`DELETE` only if no choice set is left). A commit replaces the target's
+  list with the capture's, so the capture must be the list as it now is: every choice, in every
+  language, with the value, label, sequence, inactive flag, hint, language and dependent value read
+  back (`not_captured`; an unreadable capture is `verification_unavailable`). That holds this
+  save's choice as saved, and no longer holds a removed one.
+- The user's preferences are unchanged, apart from the current set becoming the posted one, which
+  `preferencesUnchanged: false` and `currentUpdateSet` report (`session_changed`).
 
 For a Store application, `capture.customization` reports `replaceOnUpgrade` and the baseline
 version of the capture when they can be read (best effort).
