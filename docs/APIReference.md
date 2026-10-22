@@ -263,6 +263,20 @@ class ColumnWriter {
 }
 ```
 
+### ChoiceWriter
+
+Add, change and remove a column's choices through the choice form, with the choice, the list's choice set and its one Choice list capture verified. Removing a value records still hold needs `confirmInUse`. See [ChoiceWriter Guide](./ChoiceWriter.md).
+
+```typescript
+class ChoiceWriter {
+    constructor(instance: ServiceNowInstance)
+
+    getChoices(table: string, element: string, options?: ChoiceListOptions): Promise<ChoiceList>
+    setChoice(table: string, element: string, options: ChoiceWriteOptions): Promise<ChoiceWriteResult>
+    removeChoice(table: string, element: string, options: ChoiceRemoveOptions): Promise<ChoiceWriteResult>
+}
+```
+
 ## Code & Schema
 
 ### CodeSearch
@@ -804,6 +818,7 @@ enum ProgressStatus {
 - [Form Layout Writer](./FormLayoutWriter.md)
 - [List Layout Writer](./ListLayoutWriter.md)
 - [Column Writer](./ColumnWriter.md)
+- [Choice Writer](./ChoiceWriter.md)
 - [Metadata Form Writer](./MetadataFormWriter.md)
 - [Code Search](./CodeSearch.md)
 - [Schema Discovery](./SchemaDiscovery.md)

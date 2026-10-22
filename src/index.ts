@@ -86,6 +86,7 @@ export * from './sn/health/HealthModels.js';
 export * from './sn/health/InstanceHealth.js';
 export * from './sn/knowledge/KnowledgeManager.js';
 export * from './sn/knowledge/KnowledgeModels.js';
+export * from './sn/metadata/ChoiceWriter.js';
 export * from './sn/metadata/ColumnWriter.js';
 export * from './sn/metadata/FormLayoutWriter.js';
 export * from './sn/metadata/ListLayoutWriter.js';

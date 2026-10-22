@@ -72,9 +72,10 @@ function exportedNames(): string[] {
         for (const name of ['WorkingSetManager', 'WorkingSetError', 'WorkingSet', 'UpdateSetSummary', 'UseUpdateSetResult', 'RestoreWorkingSetResult',
             'MoveCaptureResult', 'FormLayoutWriter', 'FormLayout', 'FormLayoutWriteResult', 'StoreCustomizationOptions', 'CustomizationReport',
             'MetadataErrorDetail', 'ListLayoutWriter', 'ListLayout', 'ListLayoutWriteOptions', 'ListLayoutWriteResult',
-            'ColumnWriter', 'ColumnWriteOptions', 'ColumnWriteResult']) expect(names).toContain(name);
+            'ColumnWriter', 'ColumnWriteOptions', 'ColumnWriteResult', 'ChoiceWriter', 'Choice', 'ChoiceColumn', 'ChoiceSetRef', 'ChoiceList',
+            'ChoiceListOptions', 'ChoiceWriteOptions', 'ChoiceRemoveOptions', 'ChoiceWriteResult']) expect(names).toContain(name);
         for (const name of ['updateName', 'updateNameFields', 'parseSlushbucketPage', 'parseSectionChoices', 'joinLayoutValues',
-            'resolveScope', 'customizationEvidence', 'columnName']) expect(names).not.toContain(name);
+            'resolveScope', 'customizationEvidence', 'columnName', 'ancestry', 'SCHEMA_TABLES', 'requirePlatformDelete', 'capturedChoices']) expect(names).not.toContain(name);
     });
 
     it('exports update set export and its typed contracts', () => {
