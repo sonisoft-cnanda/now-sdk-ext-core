@@ -225,8 +225,11 @@ describe('UpdateSetExporter', () => {
         expect(script).not.toHaveBeenCalled();
     });
 
-    it('accepts an upper-case id', async () => {
-        await expect(exporter.exportUpdateSet(SET.toUpperCase().replace(/1/g, '1'))).resolves.toMatchObject({ recordCount: 2 });
+    it('accepts an upper-case id and exports the lower-case set', async () => {
+        const MIXED = 'ab'.repeat(16);
+        db.sys_update_set.push({ sys_id: MIXED, name: 'STORY-3', state: 'complete', application: APP, parent: '', base_update_set: '' });
+        db.sys_update_xml.push({ sys_id: id(), update_set: MIXED, remote_update_set: '' });
+        await expect(exporter.exportUpdateSet(` ${MIXED.toUpperCase()} `)).resolves.toMatchObject({ recordCount: 1, updateSet: { sysId: MIXED } });
     });
 
     it('reads a Retrieved Update Set without a script, a copy or a delete', async () => {
