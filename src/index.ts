@@ -108,6 +108,8 @@ export * from './sn/task/TaskModels.js';
 export * from './sn/task/TaskOperations.js';
 export * from './sn/transaction/ClusterTransactionManager.js';
 export * from './sn/transaction/ClusterTransactionModels.js';
+export * from './sn/updateset/UpdateSetExporter.js';
+export * from './sn/updateset/UpdateSetExportModels.js';
 export * from './sn/updateset/UpdateSetManager.js';
 export * from './sn/updateset/UpdateSetModels.js';
 export * from './sn/updateset/WorkingSetManager.js';

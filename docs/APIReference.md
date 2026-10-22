@@ -190,6 +190,20 @@ class UpdateSetManager {
     moveRecordsToUpdateSet(targetUpdateSetId: string, options?: MoveRecordsOptions): Promise<MoveRecordsResult>
     cloneUpdateSet(sourceUpdateSetId: string, newName: string, onProgress?: (msg: string) => void): Promise<CloneUpdateSetResult>
     inspectUpdateSet(updateSetSysId: string): Promise<InspectUpdateSetResult>
+    /** @deprecated use UpdateSetExporter */
+    exportUpdateSet(updateSetSysId: string): Promise<string>
+}
+```
+
+### UpdateSetExporter
+
+Export a local or retrieved update set, or a batch, to the platform's XML unload, with the file checked against the set and the temporary copy cleaned up. See [UpdateSetExporter Guide](./UpdateSetExporter.md).
+
+```typescript
+class UpdateSetExporter {
+    constructor(instance: ServiceNowInstance)
+
+    exportUpdateSet(sysId: string, options?: UpdateSetExportOptions): Promise<UpdateSetExportResult>
 }
 ```
 
@@ -786,6 +800,7 @@ enum ProgressStatus {
 - [Scope Manager](./ScopeManager.md)
 - [Update Set Manager](./UpdateSetManager.md)
 - [Working Set Manager](./WorkingSetManager.md)
+- [Update Set Exporter](./UpdateSetExporter.md)
 - [Form Layout Writer](./FormLayoutWriter.md)
 - [List Layout Writer](./ListLayoutWriter.md)
 - [Column Writer](./ColumnWriter.md)

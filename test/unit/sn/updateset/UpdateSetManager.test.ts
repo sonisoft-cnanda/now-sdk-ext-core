@@ -12,6 +12,7 @@ import { AuthenticationHandlerFactory } from '../../../../src/auth/Authenticatio
 import { RequestHandlerFactory } from '../../../../src/comm/http/RequestHandlerFactory';
 import { SessionManager } from '../../../../src/comm/http/SessionManager';
 import { WorkingSetManager } from '../../../../src/sn/updateset/WorkingSetManager';
+import { UpdateSetExporter } from '../../../../src/sn/updateset/UpdateSetExporter';
 
 // Mock getCredentials
 const mockGetCredentials = createGetCredentialsMock();
@@ -524,6 +525,22 @@ describe('UpdateSetManager - Unit Tests', () => {
 
             await expect(manager.inspectUpdateSet('nonexistent'))
                 .rejects.toThrow("Update set 'nonexistent' not found");
+        });
+    });
+
+    // ================================================================
+    // exportUpdateSet (deprecated wrapper)
+    // ================================================================
+    describe('exportUpdateSet', () => {
+        it('requires a sys_id', async () => {
+            await expect(manager.exportUpdateSet('  ')).rejects.toThrow('Update set sys_id is required');
+        });
+
+        it('delegates to UpdateSetExporter, exporting any state as before, and returns the XML', async () => {
+            const spy = jest.spyOn(UpdateSetExporter.prototype, 'exportUpdateSet').mockResolvedValue({ xml: '<unload/>' } as any);
+            await expect(manager.exportUpdateSet(` ${'a'.repeat(32)} `)).resolves.toBe('<unload/>');
+            expect(spy).toHaveBeenCalledWith('a'.repeat(32), { includeIncomplete: true });
+            spy.mockRestore();
         });
     });
 });
