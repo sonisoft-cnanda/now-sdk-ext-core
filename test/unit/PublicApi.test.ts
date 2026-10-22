@@ -77,6 +77,12 @@ function exportedNames(): string[] {
             'resolveScope', 'customizationEvidence', 'columnName']) expect(names).not.toContain(name);
     });
 
+    it('exports update set export and its typed contracts', () => {
+        const names = exportedNames();
+        for (const name of ['UpdateSetExporter', 'UpdateSetExportError', 'UpdateSetExportOptions', 'UpdateSetExportResult',
+            'ExportedUpdateSet', 'UpdateSetExportErrorCode', 'UpdateSetExportErrorDetail']) expect(names).toContain(name);
+    });
+
     it('exports table behavior discovery and its typed contracts', () => {
         const names = exportedNames();
         for (const name of ['TableBehaviorDiscovery', 'BEHAVIOR_CATEGORIES', 'TableBehaviorOptions', 'TableBehaviorResult', 'BehaviorReference', 'BehaviorDetailsResult']) expect(names).toContain(name);
