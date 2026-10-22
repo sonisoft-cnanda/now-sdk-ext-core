@@ -166,3 +166,99 @@ export interface ColumnWriteResult {
     capture: CaptureReport;
     messages: string[];
 }
+/** One sys_choice row of a column's choice list. */
+export interface Choice {
+    sysId: string;
+    value: string;
+    label: string;
+    /** Order in the list; undefined when the row has none. */
+    sequence?: number;
+    inactive: boolean;
+    hint: string;
+    /** Set when the list depends on another field's value. */
+    dependentValue: string;
+    language: string;
+}
+/** The column a choice list belongs to, as its dictionary row says. */
+export interface ChoiceColumn {
+    /** The table that defines the column: the table itself, or a table it extends. */
+    table: string;
+    type: string;
+    /**
+     * sys_dictionary.choice: '1' dropdown with -- None --, '3' dropdown without, '2' suggestion, '0' or '' none. With none,
+     * the form shows the column as a plain field and does not offer the choices.
+     */
+    choice: string;
+    scope: string;
+}
+/** A choice list's application file (sys_choice_set): it carries the list's application and its capture name. */
+export interface ChoiceSetRef {
+    sysId: string;
+    scope: string;
+    /** sys_update_name: `sys_choice_<table>_<element>`, the one capture that holds every choice of the list. */
+    updateName: string;
+}
+export interface ChoiceListOptions {
+    /** sys_choice.language; 'en' when omitted. */
+    language?: string;
+}
+export interface ChoiceList {
+    table: string;
+    element: string;
+    language: string;
+    column: ChoiceColumn;
+    /** Absent when the table has no list of its own for the column. */
+    choiceSet?: ChoiceSetRef;
+    /** In list order: sequence, then value. */
+    choices: Choice[];
+}
+export interface ChoiceWriteOptions extends ChoiceListOptions {
+    /** The stored value; it identifies the choice within the list and language. */
+    value: string;
+    /** Required to add a choice; changes the label of an existing one. */
+    label?: string;
+    sequence?: number;
+    inactive?: boolean;
+    hint?: string;
+    /** The choice list's application (its sys_choice_set's application, or the column's for a new list). */
+    scope: MetadataScopeRef;
+    /** In progress set of that application. The capture follows it; it need not be the user's current set. */
+    updateSet: string;
+    /** Required when the application is an installed Store application. */
+    storeCustomization?: StoreCustomizationOptions;
+}
+export interface ChoiceRemoveOptions extends ChoiceListOptions {
+    value: string;
+    scope: MetadataScopeRef;
+    updateSet: string;
+    storeCustomization?: StoreCustomizationOptions;
+    /**
+     * Remove the choice even though records still hold its value. They keep the value, which the form then shows as
+     * it is stored, without a label. Inactivating the choice instead keeps the label and hides it from new selections.
+     */
+    confirmInUse?: boolean;
+}
+export interface ChoiceWriteResult {
+    table: string;
+    element: string;
+    language: string;
+    value: string;
+    action: 'insert' | 'update' | 'delete';
+    /** sys_id of the sys_choice row. */
+    sysId: string;
+    /** The row as read back after the save; absent after a delete. */
+    choice?: Choice;
+    /** The row before the save; absent for an insert. */
+    previous?: Choice;
+    /** The list in this language after the save. */
+    choices: Choice[];
+    column: ChoiceColumn;
+    /** The list's application file after the save. Removing the last choice keeps it (seen); absent only if the platform removed it. */
+    choiceSet?: ChoiceSetRef & { created: boolean };
+    /** Records that hold the value (counted for a delete). */
+    inUse?: number;
+    scope: { sysId: string; scope: string };
+    /** The Choice list capture, `sys_choice_<table>_<element>`. */
+    capture: CaptureReport;
+    messages: string[];
+}

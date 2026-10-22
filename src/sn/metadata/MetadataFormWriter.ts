@@ -13,6 +13,7 @@ import { MetadataReader, MetadataRow } from './internal/MetadataReader';
 import { comparePreferences, preferenceValue } from './internal/MetadataPreferences';
 import { updateName, updateNameFields } from './internal/MetadataUpdateNames';
 import { customizationEvidence, resolveScope } from './internal/MetadataScope';
+import { requirePlatformDelete } from './internal/MetadataFormActions';
 
 const ID = /^[a-f0-9]{32}$/i;
 const NAME = /^[a-z0-9_]+$/i;
@@ -191,15 +192,7 @@ export class MetadataFormWriter {
             }
             const action = operation === 'insert' ? 'sysverb_insert_and_stay' : operation === 'update' ? 'sysverb_update' : 'sysverb_delete';
             if (operation !== 'insert' && !form.actions[action]) throw new MetadataScopeError('not_permitted');
-            if (operation === 'delete') {
-                const actionId = form.actions[action];
-                if (!ID.test(actionId)) throw new MetadataScopeError('delete_not_supported');
-                const definition = await reader.exact('sys_ui_action', actionId, 'table,action_name,onclick,name');
-                if (!definition || definition.table !== 'global' || definition.action_name !== 'sysverb_delete' ||
-                    definition.name !== 'Delete' || !/^\s*(?:return\s+)?confirmAndDeleteFromForm\(\);?\s*$/.test(definition.onclick)) {
-                    throw new MetadataScopeError('delete_not_supported');
-                }
-            }
+            if (operation === 'delete') await requirePlatformDelete(reader, form.actions);
             try { transport.validate(form, options); } catch (error) {
                 if (!(error instanceof InvalidParameterException)) throw error;
                 // Name the value the form refused: validate the fields one at a time.
