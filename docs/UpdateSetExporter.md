@@ -108,9 +108,15 @@ interface UpdateSetExportResult {
 
 ## Permissions and policy
 
-The processors require `admin`, `delegated_developer` or `update_set_admin`. A local export runs a
-background script (execute) and its download deletes records (write), so `--read-only`, `--deny-execute` and
-`NEX_POLICY_DENY` refuse it before anything is copied. A Retrieved Update Set export is a read.
+A local export runs a background script, so it needs a role that can run Scripts - Background (admin).
+`update_set_admin` alone can use the UI button but not this. The processors themselves accept
+`admin`, `delegated_developer` or `update_set_admin`.
+
+A local export needs both `execute` (the script) and `write`: the script's copy is a write the script scan
+cannot see, because it happens inside `UpdateSetExport`, and the download and cleanup delete records. The
+exporter checks both against the installed policy before it sends the script. So `--read-only`,
+`--deny-write`, `--deny-execute` and `NEX_POLICY_DENY` refuse a local export before anything is copied. A
+Retrieved Update Set export is a read and is allowed under all of them.
 
 `UpdateSetManager.exportUpdateSet(sysId)` is deprecated. It now calls this exporter with
 `includeIncomplete: true` and returns `result.xml`.

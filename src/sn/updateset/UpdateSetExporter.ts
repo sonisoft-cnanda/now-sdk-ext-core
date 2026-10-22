@@ -1,6 +1,8 @@
 import { Parser } from 'xml2js';
 import { SessionManager } from '../../comm/http/SessionManager';
 import type { ServiceNowRequest } from '../../comm/http/ServiceNowRequest';
+import { checkRequirement } from '../../policy/Policy';
+import { policyRefusal } from '../../policy/PolicyRefusal';
 import { READ_ONLY } from '../../policy/PolicyTypes';
 import { CSRFTokenHelper } from '../../util/CSRFTokenHelper';
 import { BackgroundScriptExecutor } from '../BackgroundScriptExecutor';
@@ -74,6 +76,11 @@ export class UpdateSetExporter {
             return this.result(xml, plan, undefined, messages);
         }
 
+        // The script's write is inside the platform's UpdateSetExport, which the script scan cannot see, so it
+        // would be sent with execute alone. Its copy is deleted by a download and a cleanup that need write:
+        // refuse here, before anything is copied, rather than leave a Loaded copy that cannot be removed.
+        const decision = checkRequirement({ verbs: ['execute', 'write'], target: 'instance' });
+        if (!decision.allowed) throw policyRefusal(decision);
         const before = await this.evidence(() => this.copies(id));
         const temporary = await this.copy(id, plan.kind === 'batch', options.includeIncomplete === true, before);
         let xml: string | undefined, failure: unknown;
@@ -177,8 +184,14 @@ export class UpdateSetExporter {
     private async leftovers(id: string, before: string[], error: unknown): Promise<never> {
         let after: string[];
         try { after = await this.copies(id); } catch { throw error; }
-        const temporary = after.filter(sysId => !before.includes(sysId));
-        if (!temporary.length) throw error;
+        const copies = after.filter(sysId => !before.includes(sysId));
+        if (!copies.length) throw error;
+        // A batch copy's children carry their own remote_sys_id; they point at the copied base instead.
+        let children: string[] = [];
+        try {
+            children = (await this._reader.rows('sys_remote_update_set', `remote_base_update_setIN${copies.join(',')}`, 'sys_id')).map(row => row.sys_id);
+        } catch { /* report the copies found so far */ }
+        const temporary = [...new Set([...copies, ...children])];
         throw new UpdateSetExportError(error instanceof UpdateSetExportError ? error.code : 'script_result_unavailable', { updateSet: id, temporary });
     }
 
@@ -281,7 +294,8 @@ export class UpdateSetExporter {
     }
 
     private async token(): Promise<string> {
-        const response = await this._request.get<string>({ path: '/upload.do', headers: null, query: null, body: null, responseFormat: 'text', requires: READ_ONLY });
+        const response = await this._request.get<string>({ path: '/upload.do', headers: null, query: null, body: null, responseFormat: 'text',
+            requires: READ_ONLY, sensitive: true });
         const token = response.status === 200 && typeof response.data === 'string' ? CSRFTokenHelper.extractCSRFToken(response.data) : null;
         if (!token) throw new UpdateSetExportError('evidence_unavailable', { status: response.status });
         return token;

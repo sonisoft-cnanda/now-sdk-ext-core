@@ -4,7 +4,8 @@ import { UpdateSetExportError } from '../../../../src/sn/updateset/UpdateSetExpo
 import { SessionManager } from '../../../../src/comm/http/SessionManager';
 import { BackgroundScriptExecutor } from '../../../../src/sn/BackgroundScriptExecutor';
 import { ServiceNowInstance } from '../../../../src/sn/ServiceNowInstance';
-import { policyRefusal } from '../../../../src/policy/PolicyRefusal';
+import { isPolicyRefusal, policyRefusal } from '../../../../src/policy/PolicyRefusal';
+import { denyLayer, grantLayer, installPolicy, resetPolicyForTests } from '../../../../src/policy/Policy';
 import { READ_ONLY } from '../../../../src/policy/PolicyTypes';
 
 const SET = '1'.repeat(32), BASE = '2'.repeat(32), CHILD = '3'.repeat(32), WIP = '4'.repeat(32), GRAND = '5'.repeat(32);
@@ -155,7 +156,10 @@ beforeEach(() => {
     exporter = new UpdateSetExporter(new ServiceNowInstance({ alias: 'unit-test' }));
     (exporter as any)._poll.delayMs = 0;
 });
-afterEach(() => jest.restoreAllMocks());
+afterEach(() => {
+    jest.restoreAllMocks();
+    resetPolicyForTests();
+});
 
 const copies = () => db.sys_remote_update_set.filter(row => ![REMOTE, RBASE, RCHILD].includes(row.sys_id));
 const downloads = () => req.get.mock.calls.map(call => call[0] as any).filter(r => r.path.endsWith('update_set.do'));
@@ -323,6 +327,30 @@ describe('UpdateSetExporter', () => {
         expect(outcome.code).toBe('script_result_unavailable');
         expect(outcome.detail.temporary).toEqual([copies()[0].sys_id]);
         expect(req.delete).not.toHaveBeenCalled();
+    });
+
+    it('names a batch copy\'s children too when the script result could not be read', async () => {
+        platform.copyWithoutResult = true;
+        const outcome = await codeOf(exporter.exportUpdateSet(BASE)) as any;
+        expect(outcome.code).toBe('script_result_unavailable');
+        expect([...outcome.detail.temporary].sort()).toEqual(copies().map(row => row.sys_id).sort());
+        expect(outcome.detail.temporary).toHaveLength(2);
+        expect(req.delete).not.toHaveBeenCalled();
+    });
+
+    it('refuses a local export under a write denial before anything is copied, though execute is granted', async () => {
+        // The script scan cannot see UpdateSetExport's insert, so the script alone would pass with execute.
+        installPolicy([denyLayer('flag', ['write']), grantLayer('default', ['write', 'execute'])]);
+        const error = await exporter.exportUpdateSet(SET).catch((caught: unknown) => caught);
+        expect(isPolicyRefusal(error)).toBe(true);
+        expect(script).not.toHaveBeenCalled();
+        expect(downloads()).toEqual([]);
+        expect(copies()).toEqual([]);
+    });
+
+    it('still reads a Retrieved Update Set under a write and execute denial', async () => {
+        installPolicy([denyLayer('flag', ['write', 'execute']), grantLayer('default', ['write', 'execute'])]);
+        await expect(exporter.exportUpdateSet(REMOTE)).resolves.toMatchObject({ source: 'retrieved', recordCount: 1 });
     });
 
     it('reports an unreadable script result with no copy as such', async () => {
