@@ -94,7 +94,7 @@ export function parseFormHtml(html: string, table: string, options: FormTranspor
             if (tag === "textarea" && textarea) {
                 // HTML ignores a newline right after <textarea>, and the platform always writes one: a browser
                 // never posts it. Kept, every save would add a newline to the field (and an empty one becomes "\n").
-                const value = textarea.text.replace(/^\r?\n/, "");
+                const value = textarea.text.replace(/^(?:\r\n?|\n)/, "");
                 if (options.captureRenderedInputs) renderedInputs[textarea.name] = value;
                 if (keep(textarea.name)) controls.set(textarea.name, { name: textarea.name, value });
                 textarea = null;
