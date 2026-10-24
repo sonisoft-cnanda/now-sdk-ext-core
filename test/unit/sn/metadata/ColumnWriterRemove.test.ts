@@ -8,6 +8,16 @@ import { policyRefusal } from '../../../../src/policy/PolicyRefusal';
 
 const APP = 'a'.repeat(32), REC = 'b'.repeat(32), SET = 'c'.repeat(32), OTHER = 'd'.repeat(32), USER = 'e'.repeat(32);
 const ACTION = 'f'.repeat(32), TABLE_ID = '2'.repeat(32), LABEL = '3'.repeat(32), SCRIPT = '4'.repeat(32), POLICY = '5'.repeat(32);
+const DROP_SCRIPT = `if (current.name.nil()) {
+  gs.addInfoMessage('Could not delete column - table name field was empty');
+  gs.print('Could not delete column - table name field was empty');
+} else if (current.element.nil()) {
+  gs.addInfoMessage('Could not delete column - column name field was empty');
+  gs.print('Could not delete column - column name field was empty');
+} else {
+  current.deleteRecord();
+  gs.addInfoMessage('Column deleted');
+}`;
 const TABLE = 'x_app_ticket', COLUMN = 'triage', DICT = `sys_dictionary_${TABLE}_${COLUMN}`, DOC = `sys_documentation_${TABLE}_${COLUMN}_en`;
 type Row = Record<string, string>;
 let state: any;
@@ -44,7 +54,8 @@ const toDelete = (name: string) => {
 
 beforeEach(() => {
     state = { formScope: APP, store: false, scopeName: 'x_app', setApplication: APP, captureSet: SET, captureApplication: APP, apply: true, records: 0,
-        actionTable: 'sys_dictionary', actionName: 'Delete Column' };
+        actionTable: 'sys_dictionary', actionName: 'Delete Column', script: DROP_SCRIPT,
+        versions: [{ sys_id: '0'.repeat(31) + '7', name: `sys_dictionary_x_app_ticket_triage`, source_table: 'sys_update_set', source: 'c'.repeat(32) }] };
     dictionary = [{ sys_id: REC, name: TABLE, element: COLUMN, internal_type: 'string', sys_scope: APP, sys_update_name: DICT }];
     labels = [{ sys_id: LABEL, name: TABLE, element: COLUMN, language: 'en', sys_update_name: DOC }];
     scripts = []; policies = []; deletions = [];
@@ -60,6 +71,8 @@ beforeEach(() => {
             }
             if (r.path.startsWith('/api/now/stats/')) {
                 state.stats = r;
+                state.counts = (state.counts ?? 0) + 1;
+                if (state.recordsLater !== undefined && state.counts > 1) state.records = state.recordsLater;
                 return { status: 200, bodyObject: { result: { stats: { count: String(state.records) } } } };
             }
             const table = r.path.split('/').at(-1), q: string = r.query.sysparm_query, f: string = r.query.sysparm_fields;
@@ -72,14 +85,18 @@ beforeEach(() => {
                     : term('name') === 'sys_choice' ? [{ sys_id: '8'.repeat(32), name: 'sys_choice', super_class: '', sys_scope: 'global' }] : [], f);
                 case 'sys_dictionary': return response(id ? dictionary.filter(row => row.sys_id === id) : dictionary.filter(row => row.name === term('name') && row.element === term('element')), f);
                 case 'sys_documentation': return response(labels, f);
-                case 'sys_script_client': return response(id ? scripts.filter(row => row.sys_id === id) : scripts, f);
+                case 'sys_script_client': {
+                    state.scriptReads = (state.scriptReads ?? 0) + 1;
+                    if (state.scriptsLater && state.scriptReads > 1 && !id) scripts = state.scriptsLater;
+                    return response(id ? scripts.filter(row => row.sys_id === id) : scripts, f);
+                }
                 case 'sys_ui_policy_action': return response(id ? policies.filter(row => row.sys_id === id) : policies, f);
                 case 'sys_update_set': return response([{ sys_id: id!, name: 'SK-10', application: id === SET ? state.setApplication : OTHER, state: 'in progress' }], f);
                 case 'sys_user': return response([{ sys_id: USER }], f);
                 case 'sys_user_preference': state.prefReads = (state.prefReads ?? 0) + 1;
                     return response([{ sys_id: '9'.repeat(32), user: USER, name: `updateSetForScope${APP}`, value: OTHER },
                         ...(state.prefsChange && state.prefReads > (state.prefsChangeAfter ?? 1) ? [{ sys_id: '1'.repeat(32), user: USER, name: 'apps.current_app', value: OTHER }] : [])], f);
-                case 'sys_ui_action': return response([{ sys_id: ACTION, table: state.actionTable, action_name: 'drop_table_element', name: state.actionName, client: 'false' }], f);
+                case 'sys_ui_action': return response([{ sys_id: ACTION, table: state.actionTable, action_name: 'drop_table_element', name: state.actionName, client: 'false', script: state.script }], f);
                 case 'sys_update_xml': {
                     if (id) return response(captures.filter(c => c.sys_id === id), f);
                     const names = q.startsWith('nameIN') ? q.slice(6).split('^')[0].split(',') : [];
@@ -152,6 +169,36 @@ describe('ColumnWriter.removeColumn', () => {
         expect(result.createdInThisSet).toBe(false);
         // The DELETE is a new capture in this set; the other set keeps its INSERT_OR_UPDATE.
         expect(captures.filter(capture => capture.name === DICT).map(capture => [capture.update_set, capture.action])).toEqual([[OTHER, 'INSERT_OR_UPDATE'], [SET, 'DELETE']]);
+    });
+
+    it('does not take a missing version history as created in this set', async () => {
+        state.versions = [];
+        expect((await writer.removeColumn(TABLE, COLUMN, options())).createdInThisSet).toBe(false);
+    });
+
+    it('gates again just before the post: a value saved or a dependent created while the form loaded', async () => {
+        state.recordsLater = 2;
+        expect((await refused('column_has_data')).detail).toEqual({ table: TABLE, field: COLUMN, records: 2 });
+        Object.assign(state, { recordsLater: undefined, records: 0, counts: 0 });
+        state.scriptsLater = [{ sys_id: SCRIPT, table: TABLE, field: COLUMN, sys_scope: APP }];
+        await refused('column_has_dependents');
+        Object.assign(state, { scriptReads: 0 });
+        scripts = [];
+        state.scriptsLater = [{ sys_id: SCRIPT, table: TABLE, field: COLUMN, sys_scope: OTHER }];
+        expect((await refused('column_referenced', { acknowledgeDependentDeletes: true })).detail).toEqual({ table: 'sys_script_client', field: COLUMN });
+        Object.assign(state, { scriptReads: 0 });
+        scripts = [];
+        state.scriptsLater = [{ sys_id: SCRIPT, table: TABLE, field: COLUMN, sys_scope: APP }];
+        // Acknowledged, but not the dependents whose captures were snapshotted.
+        await refused('column_has_dependents', { acknowledgeDependentDeletes: true });
+    });
+
+    it('refuses a Delete Column whose script is not the platform\'s, and a label with an unusable language', async () => {
+        state.script = DROP_SCRIPT.replace('current.deleteRecord();', 'current.deleteRecord(); new GlideRecord(\'x\').deleteMultiple();');
+        await refused('delete_not_supported');
+        state.script = DROP_SCRIPT;
+        labels[0].language = 'en,fr';
+        await refused('evidence_unavailable');
     });
 
     it('says when the column was not created in this set: a version came from elsewhere', async () => {

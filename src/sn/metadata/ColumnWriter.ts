@@ -22,6 +22,10 @@ const COLUMN = /^[a-z][a-z0-9_]*$/;
 const MAX_COLUMN = 80;
 const DICTIONARY = 'sys_dictionary';
 const DROP_ACTION = 'drop_table_element';
+/** The platform's Delete Column script with whitespace removed (seen on dev206299): it only guards empty names and deletes the record. */
+const DROP_SCRIPT = "if(current.name.nil()){gs.addInfoMessage('Couldnotdeletecolumn-tablenamefieldwasempty');gs.print('Couldnotdeletecolumn-tablenamefieldwasempty');}" +
+    "elseif(current.element.nil()){gs.addInfoMessage('Couldnotdeletecolumn-columnnamefieldwasempty');gs.print('Couldnotdeletecolumn-columnnamefieldwasempty');}" +
+    "else{current.deleteRecord();gs.addInfoMessage('Columndeleted');}";
 /**
  * Adds a column to a table through the dictionary form (`sys_dictionary.do`), the path the platform itself uses, and
  * verifies what the platform did:
@@ -260,20 +264,28 @@ export class ColumnWriter {
             if (!set || set.state !== 'in progress' || set.application !== scope.sysId) {
                 throw new MetadataScopeError('invalid_input', set ? { updateSetState: set.state, updateSetApplication: set.application } : undefined);
             }
-            const records = await count(request, table, `${column}ISNOTEMPTY`);
-            if (records > 0 && options.acknowledgeDataLoss !== true) throw new MetadataScopeError('column_has_data', { table, field: column, records });
-            // What Field Deletion Cleanup deletes with the column.
-            const clientScripts = await reader.rows('sys_script_client', `table=${table}^field=${column}^typeINonChange,onCellEdit`, 'sys_id,table,field,sys_scope');
-            const policyActions = await reader.rows('sys_ui_policy_action', `table=${table}^field=${column}`, 'sys_id,table,field,sys_scope');
+            // Data and dependents are read here and again just before the post: a value saved, or a client script or UI policy
+            // action created, while the form loads is gated as well.
+            const gates = async (): Promise<{ records: number; clientScripts: MetadataRow[]; policyActions: MetadataRow[] }> => {
+                const records = await count(request, table, `${column}ISNOTEMPTY`);
+                if (records > 0 && options.acknowledgeDataLoss !== true) throw new MetadataScopeError('column_has_data', { table, field: column, records });
+                // What Field Deletion Cleanup deletes with the column.
+                const clientScripts = await reader.rows('sys_script_client', `table=${table}^field=${column}^typeINonChange,onCellEdit`, 'sys_id,table,field,sys_scope');
+                const policyActions = await reader.rows('sys_ui_policy_action', `table=${table}^field=${column}`, 'sys_id,table,field,sys_scope');
+                const found = [...clientScripts.map(row => ({ row, kind: 'sys_script_client' })), ...policyActions.map(row => ({ row, kind: 'sys_ui_policy_action' }))];
+                if (found.some(({ row }) => row.table !== table || row.field !== column || !ID.test(row.sys_id))) throw new MetadataScopeError('evidence_unavailable');
+                const foreign = found.find(({ row }) => row.sys_scope !== scope.sysId);
+                if (foreign) throw new MetadataScopeError('column_referenced', { table: foreign.kind, field: column });
+                if (found.length && options.acknowledgeDependentDeletes !== true) {
+                    throw new MetadataScopeError('column_has_dependents', { table, field: column, records: found.length });
+                }
+                return { records, clientScripts, policyActions };
+            };
+            const { clientScripts, policyActions } = await gates();
             const dependents = [...clientScripts.map(row => ({ row, kind: 'sys_script_client' })), ...policyActions.map(row => ({ row, kind: 'sys_ui_policy_action' }))];
-            if (dependents.some(({ row }) => row.table !== table || row.field !== column || !ID.test(row.sys_id))) throw new MetadataScopeError('evidence_unavailable');
-            const foreign = dependents.find(({ row }) => row.sys_scope !== scope.sysId);
-            if (foreign) throw new MetadataScopeError('column_referenced', { table: foreign.kind, field: column });
-            if (dependents.length && options.acknowledgeDependentDeletes !== true) {
-                throw new MetadataScopeError('column_has_dependents', { table, field: column, records: dependents.length });
-            }
             const labels = await reader.rows('sys_documentation', `name=${table}^element=${column}`, 'sys_id,name,element,language,sys_update_name');
-            if (labels.some(label => label.name !== table || label.element !== column || label.sys_update_name !== `sys_documentation_${table}_${column}_${label.language}`)) {
+            if (labels.some(label => label.name !== table || label.element !== column || !NAME.test(label.language) ||
+                label.sys_update_name !== `sys_documentation_${table}_${column}_${label.language}`)) {
                 throw new MetadataScopeError('evidence_unavailable');
             }
             const users = await reader.rows('sys_user', 'sys_id=javascript:gs.getUserID()', 'sys_id');
@@ -299,8 +311,9 @@ export class ColumnWriter {
             const actionId = form.actions[DROP_ACTION];
             if (!actionId) throw new MetadataScopeError('column_not_deletable', { table, field: column });
             if (!ID.test(actionId)) throw new MetadataScopeError('delete_not_supported');
-            const action = await reader.exact('sys_ui_action', actionId, 'table,action_name,name,client');
-            if (!action || action.table !== DICTIONARY || action.action_name !== DROP_ACTION || action.name !== 'Delete Column' || action.client !== 'false') {
+            const action = await reader.exact('sys_ui_action', actionId, 'table,action_name,name,client,script');
+            if (!action || action.table !== DICTIONARY || action.action_name !== DROP_ACTION || action.name !== 'Delete Column' || action.client !== 'false' ||
+                action.script.replace(/\s+/g, '') !== DROP_SCRIPT) {
                 throw new MetadataScopeError('delete_not_supported');
             }
             if (!comparePreferences(before, await preferences()).valid) throw new MetadataVerificationError('session_changed', DICTIONARY, recordId, undefined, [], false);
@@ -313,8 +326,16 @@ export class ColumnWriter {
             const dictionaryCaptures = prior.filter(row => row.name === dictionaryName);
             // Created in this set: its only capture is this set's, and no version came from anywhere else.
             const sources = await reader.rows('sys_update_version', `name=${dictionaryName}`, 'sys_id,name,source_table,source');
+            // No version history at all is not evidence of where the column came from.
             const createdInThisSet = dictionaryCaptures.length === 1 && dictionaryCaptures[0].update_set === options.updateSet &&
-                dictionaryCaptures[0].action === 'INSERT_OR_UPDATE' && sources.every(version => version.source_table === 'sys_update_set' && version.source === options.updateSet);
+                dictionaryCaptures[0].action === 'INSERT_OR_UPDATE' && sources.length > 0 &&
+                sources.every(version => version.name === dictionaryName && version.source_table === 'sys_update_set' && version.source === options.updateSet);
+            // The gates again, last thing before the post; the dependents must be the ones whose captures were snapshotted.
+            const recheck = await gates();
+            const ids = (list: MetadataRow[]): string => list.map(row => row.sys_id).sort().join(',');
+            if (ids(recheck.clientScripts) !== ids(clientScripts) || ids(recheck.policyActions) !== ids(policyActions)) {
+                throw new MetadataScopeError('column_has_dependents', { table, field: column, records: recheck.clientScripts.length + recheck.policyActions.length });
+            }
             const started = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
             submitted = true;
@@ -374,7 +395,7 @@ export class ColumnWriter {
             const choiceSets = await reader.rows('sys_choice_set', `name=${table}^element=${column}`, 'sys_id');
             const formElements = await reader.rows('sys_ui_element', `element=${column}^sys_ui_section.name=${table}`, 'sys_id,sys_ui_section');
             const listElements = await reader.rows('sys_ui_list_element', `element=${column}^list_id.name=${table}`, 'sys_id,list_id');
-            return { table, column, sysId: recordId, scope, records, createdInThisSet,
+            return { table, column, sysId: recordId, scope, records: recheck.records, createdInThisSet,
                 deleted: { labels: labels.map(label => label.sys_update_name), clientScripts: clientScripts.map(row => row.sys_id),
                     uiPolicyActions: policyActions.map(row => row.sys_id) },
                 captures: expected,

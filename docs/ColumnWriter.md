@@ -152,10 +152,15 @@ Each of these is checked before anything is posted (`MetadataScopeError`):
   extending it). Any count refuses the removal (`column_has_data`, with `detail.records`) unless
   `acknowledgeDataLoss` is set.
 - The client scripts and UI policy actions the platform would delete are read. Another
-  application's refuse the removal (`column_referenced`, naming their table); the column's own
-  application's need `acknowledgeDependentDeletes` (`column_has_dependents`, with their count).
+  application's refuse the removal (`column_referenced`, with `detail.table` the record's table,
+  `sys_script_client` or `sys_ui_policy_action`); the column's own application's need
+  `acknowledgeDependentDeletes` (`column_has_dependents`, with their count).
+- The row count and the dependents are read again just before the post, so a value saved or a
+  dependent created while the form loaded is gated too; dependents that changed in between refuse
+  the removal (`column_has_dependents`).
 - The form loads for that column in that scope (`scope_not_applied`), offers Delete Column
-  (`column_not_deletable` when not), and that action is the platform's own (`delete_not_supported`).
+  (`column_not_deletable` when not), and that action is the platform's own: its table, name and
+  server script are the ones seen on dev206299 (`delete_not_supported`).
 
 ### After the save
 
@@ -172,8 +177,8 @@ The action is posted once and never replayed. A failure after it throws
 - The user's preferences are unchanged apart from the current set becoming the posted one
   (`session_changed`).
 
-`createdInThisSet` is true when the column's only capture was the given set's, with no version
-from anywhere else: the column was created in this set and the DELETE replaced its capture there.
+`createdInThisSet` is true when the column's only capture was the given set's and its version
+history exists and comes only from that set (no history at all is not taken as evidence): the column was created in this set and the DELETE replaced its capture there.
 That set never needs a DELETE for it. Move the DELETE captures to a set that never ships (and
 Ignore it), or Ignore the set if it holds nothing else, rather than shipping a DELETE for a column
 the target never had.
