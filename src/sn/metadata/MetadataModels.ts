@@ -262,3 +262,52 @@ export interface ChoiceWriteResult {
     capture: CaptureReport;
     messages: string[];
 }
+export interface ColumnRemoveOptions {
+    /** Must name the table and the column exactly as given: a removal deletes the column's data wherever its capture is committed. */
+    confirm: { table: string; column: string };
+    /** Required when rows hold a value in the column (`ColumnRemoveResult.records`): the platform drops it with the column. */
+    acknowledgeDataLoss?: boolean;
+    /**
+     * Required when the platform will also delete the onChange client scripts and UI policy actions that name the column
+     * (its Field Deletion Cleanup rule). They must belong to the column's application; another application's are refused.
+     */
+    acknowledgeDependentDeletes?: boolean;
+    /** The column's application. */
+    scope: MetadataScopeRef;
+    /** In progress set of that application. The DELETE captures follow it; it need not be the user's current set. */
+    updateSet: string;
+    /** Required when the application is an installed Store application. */
+    storeCustomization?: StoreCustomizationOptions;
+}
+/** What the removal left behind: the platform keeps these, pointing at a column that no longer exists. */
+export interface ColumnRemovalLeftovers {
+    /** sys_choice rows of the column on the table, and the list's sys_choice_set. */
+    choices: number;
+    choiceSet?: string;
+    /** Form elements (sys_ui_element) naming the column, with their sections. */
+    formElements: Array<{ sysId: string; section: string }>;
+    /** List elements (sys_ui_list_element) naming the column, with their lists. */
+    listElements: Array<{ sysId: string; list: string }>;
+}
+export interface ColumnRemoveResult {
+    table: string;
+    column: string;
+    /** sys_id of the deleted sys_dictionary record. */
+    sysId: string;
+    scope: { sysId: string; scope: string };
+    /** Rows that held a value in the column when it was removed (the table and the tables extending it). */
+    records: number;
+    /**
+     * True when the column's only capture was the given set's own: it was created in this set and the DELETE replaced it there.
+     * Shipping that set still carries a DELETE; move the DELETE captures to a set that never ships instead.
+     */
+    createdInThisSet: boolean;
+    /** Records the platform deleted with the column, by kind. */
+    deleted: { labels: string[]; clientScripts: string[]; uiPolicyActions: string[] };
+    /** Update names of every DELETE capture verified in the set. */
+    captures: string[];
+    leftovers: ColumnRemovalLeftovers;
+    /** The Dictionary capture. */
+    capture: CaptureReport;
+    messages: string[];
+}
