@@ -180,6 +180,6 @@ The action is posted once and never replayed. A failure after it throws
 `createdInThisSet` is true when the column's only capture was the given set's and its version
 history exists and comes only from that set (no history at all is not taken as evidence): the column was created in this set and the DELETE replaced its capture there.
 That set never needs a DELETE for it. Move the DELETE captures to the application's Default (the
-one move between sets ServiceNow allows), or set the set to Ignore if it holds nothing else, rather
+move between sets KB 172693 allows), or set the set to Ignore if it holds nothing else, rather
 than shipping a DELETE for a column the target never had.
 
