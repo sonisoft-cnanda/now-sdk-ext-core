@@ -178,8 +178,9 @@ The action is posted once and never replayed. A failure after it throws
   (`session_changed`).
 
 `createdInThisSet` is true when the column's only capture was the given set's and its version
-history exists and comes only from that set (no history at all is not taken as evidence): the column was created in this set and the DELETE replaced its capture there.
-That set never needs a DELETE for it. Move the DELETE captures to a set that never ships (and
-Ignore it), or Ignore the set if it holds nothing else, rather than shipping a DELETE for a column
-the target never had.
-
+history exists and comes only from that set (no history at all is not taken as evidence): the
+column was created in this set. It does not say whether the set has left the instance. If it has
+never left (not completed, exported or retrieved), do not ship a DELETE for a column the target
+never had: move the DELETEs that replaced the set's own captures (the Dictionary and Field Label,
+and any dependent created in this set) to the application's Default (the move between sets KB
+172693 allows), or set the set to Ignore if it holds nothing else. If it has left, they ship.
