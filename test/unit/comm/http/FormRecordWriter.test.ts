@@ -82,6 +82,16 @@ describe("FormHtmlParser", () => {
         expect(Object.keys(snapshot.fields).some(n => n.includes("ui_policy_sensitive"))).toBe(false);
     });
 
+    it("drops the newline the platform writes after <textarea>, as a browser does, and only that one", () => {
+        const page = (...texts: string[]) => `<form><input name="sys_target" value="sys_dictionary"><input name="sys_uniqueValue" value="${"a".repeat(32)}">` +
+            texts.map((text, i) => `<textarea name="sys_dictionary.f${i}">${text}</textarea>`).join("") + "</form>";
+        const parsed = parseFormHtml(page("\n", "\nabc", "\r\nabc", "\n\nabc", "abc", "", "\nline 1\nline 2\n"), "sys_dictionary",
+            { captureRenderedInputs: true });
+        expect([0, 1, 2, 3, 4, 5, 6].map(i => parsed.fields[`sys_dictionary.f${i}`].value)).toEqual(["", "abc", "abc", "\nabc", "abc", "", "line 1\nline 2\n"]);
+        expect(parsed.renderedInputs?.["sys_dictionary.f0"]).toBe("");
+        expect(parsed.renderedInputs?.["sys_dictionary.f3"]).toBe("\nabc");
+    });
+
     it("rejects a page that is not the table's form", () => {
         expect(() => parseFormHtml("<html><form action='login.do'><input name='user_name'/></form></html>", "wf_activity"))
             .toThrow(/not a wf_activity form/);
