@@ -253,13 +253,14 @@ class ListLayoutWriter {
 
 ### ColumnWriter
 
-Add a column to a table through the dictionary form, with the column, its label, the platform's form placement and every capture verified. See [ColumnWriter Guide](./ColumnWriter.md).
+Add a column to a table through the dictionary form, with the column, its label, the platform's form placement and every capture verified; or remove one, explicitly confirmed, through the form's Delete Column action. See [ColumnWriter Guide](./ColumnWriter.md).
 
 ```typescript
 class ColumnWriter {
     constructor(instance: ServiceNowInstance)
 
     addColumn(table: string, options: ColumnWriteOptions): Promise<ColumnWriteResult>
+    removeColumn(table: string, column: string, options: ColumnRemoveOptions): Promise<ColumnRemoveResult>
 }
 ```
 

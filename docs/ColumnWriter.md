@@ -54,10 +54,7 @@ field lands after the last one, inside its second column (seen on GRC). A column
 application's table is placed nowhere (`formSections: []`). Moving the field is a form-layout
 change ([FormLayoutWriter](./FormLayoutWriter.md)).
 
-**Removing a column is not part of this writer.** Deleting the dictionary row deletes the column's
-data, turns the Dictionary and Field Label captures into DELETEs, and leaves the field's form
-element behind. A column created in a set that never ships is better taken back by setting that
-set to Ignore.
+**Removing a column** is `removeColumn`, explicitly confirmed: see [Remove a column](#remove-a-column).
 
 ## Before the save
 
@@ -104,3 +101,80 @@ The form is submitted once, with insert-and-stay, and never replayed. A failure 
 For a Store application, `capture.customization` reports `replaceOnUpgrade` and the baseline
 version of the Dictionary capture when they can be read (best effort: a failed read leaves the
 field out rather than failing a verified add).
+
+## Remove a column
+
+`removeColumn` deletes a column through the dictionary form's **Delete Column** action
+(`drop_table_element`), the platform's own path, and verifies what the platform did. It deletes
+the column's data wherever its DELETE capture is committed, so it is gated:
+
+```typescript
+const removed = await columns.removeColumn('x_acme_ticket', 'triage_note', {
+    confirm: { table: 'x_acme_ticket', column: 'triage_note' }, // must name both exactly
+    // acknowledgeDataLoss: true,            // required when rows hold a value (removed.records)
+    // acknowledgeDependentDeletes: true,    // required when the platform will delete client scripts / UI policy actions
+    scope: { scope: 'x_acme' },             // the column's application
+    updateSet: setId,                       // In progress, same application; need not be the working set
+    // storeCustomization: { acknowledgeUpgradeSkip: true }, // a u_ column in an installed Store application
+});
+// removed.records: rows that held a value; removed.createdInThisSet; removed.deleted; removed.leftovers
+```
+
+### What the platform does (seen on dev206299)
+
+- **It drops the column and its data**, deletes its labels (every language), and deletes the
+  onChange and onCellEdit client scripts and the UI policy actions that name the column (its Field
+  Deletion Cleanup rule). Each deletion is captured as a DELETE in the posted set and recorded in
+  `sys_metadata_delete`. A capture already in that set turns into a DELETE in place; a column
+  created in another set gets a new DELETE in the posted set, and the other set keeps its
+  INSERT_OR_UPDATE. The posted set need not be the user's current set.
+- **It leaves behind** the column's choices and choice set, its form elements and its list
+  elements, pointing at a column that no longer exists. `leftovers` lists them; their captures
+  are unchanged.
+- **It offers Delete Column only for a deletable column** (`DictionaryUtils.isDeletable`): a `u_`
+  column (in Global or an installed Store application), or a scoped application's own column
+  loaded in that application. A vendor column (Global or Store without `u_`) has no Delete Column,
+  and neither does an application's own column loaded in another application.
+
+### Before the save
+
+Each of these is checked before anything is posted (`MetadataScopeError`):
+
+- The confirmation names the table and column exactly (`confirmation_required`); the column name
+  and update set are well formed (`invalid_input`).
+- The table is not one of the platform's schema tables (`table_not_supported`); the column is
+  defined on the table itself (`column_not_found`; remove an inherited column from the table that
+  defines it).
+- The scope resolves to one application, with the Store opt-in when needed (`store_scope`); the
+  column belongs to it (`scope_mismatch`); the platform deems it deletable (`column_not_deletable`).
+- The update set is In progress in the same application (`invalid_input`).
+- The rows holding a value are counted (Stats API, `<column>ISNOTEMPTY`, the table and the tables
+  extending it). Any count refuses the removal (`column_has_data`, with `detail.records`) unless
+  `acknowledgeDataLoss` is set.
+- The client scripts and UI policy actions the platform would delete are read. Another
+  application's refuse the removal (`column_referenced`, naming their table); the column's own
+  application's need `acknowledgeDependentDeletes` (`column_has_dependents`, with their count).
+- The form loads for that column in that scope (`scope_not_applied`), offers Delete Column
+  (`column_not_deletable` when not), and that action is the platform's own (`delete_not_supported`).
+
+### After the save
+
+The action is posted once and never replayed. A failure after it throws
+`MetadataVerificationError` with `writeAttempted: true`:
+
+- The dictionary record, the labels and every dependent read before are gone
+  (`delete_not_applied`; `csrf_rejected` when the instance refused the form's token).
+- Exactly one changed capture of each (Dictionary, each Field Label, each deleted dependent), a
+  DELETE in the set and the application (`not_captured`, `captured_elsewhere`,
+  `mixed_scope_capture`, `delete_not_captured`; two changed rows is `verification_unavailable`).
+- A `sys_metadata_delete` row for the dictionary record, in the application, created by this
+  removal (`delete_not_captured`).
+- The user's preferences are unchanged apart from the current set becoming the posted one
+  (`session_changed`).
+
+`createdInThisSet` is true when the column's only capture was the given set's, with no version
+from anywhere else: the column was created in this set and the DELETE replaced its capture there.
+That set never needs a DELETE for it. Move the DELETE captures to a set that never ships (and
+Ignore it), or Ignore the set if it holds nothing else, rather than shipping a DELETE for a column
+the target never had.
+

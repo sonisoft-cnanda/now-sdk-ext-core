@@ -39,7 +39,8 @@ export class MetadataScopeError extends Error {
         'field_not_supported' | 'delete_not_supported' | 'not_permitted' | 'csrf_token_unavailable' |
         'invalid_input' | 'evidence_unavailable' | 'update_set_required' | 'protected_record' | 'form_redirected' |
         'update_set_not_current' | 'section_not_supported' | 'domain_not_supported' | 'column_exists' |
-        'column_not_found' | 'choice_list_inherited' | 'choice_not_found' | 'choice_ambiguous' | 'choice_in_use' | 'choice_unchanged',
+        'column_not_found' | 'choice_list_inherited' | 'choice_not_found' | 'choice_ambiguous' | 'choice_in_use' | 'choice_unchanged' |
+        'confirmation_required' | 'column_not_deletable' | 'column_has_data' | 'column_has_dependents' | 'column_referenced',
         detail?: MetadataErrorDetail) {
         super(`Metadata write refused: ${code}`);
         this.name = 'MetadataScopeError';
