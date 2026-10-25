@@ -14,6 +14,7 @@ import { RequestHandler } from "../../../src/comm/http/RequestHandler";
 import { ServiceNowInstance } from "../../../src/sn/ServiceNowInstance";
 import { MockAuthenticationHandler } from "../__mocks__/servicenow-sdk-mocks";
 import {
+    allowAllLayer,
     denyLayer,
     grantLayer,
     installPolicy,
@@ -120,5 +121,30 @@ describe("with a grant installed", () => {
             .getRequestConfig(request({ method: "POST" }))
             .catch((e: unknown) => e);
         expect(isPolicyRefusal(error) && error.decision.decidingLayer).toBe("env-deny");
+    });
+});
+
+describe("--deny-execute on flow designer runs", () => {
+    // What nex installs for `--deny-execute`: a deny layer above its permissive default.
+    beforeEach(() => installPolicy([denyLayer("deny-execute", ["execute"]), allowAllLayer()]));
+
+    const config = (r: never) =>
+        (handler as never as { getRequestConfig(x: never): Promise<unknown> }).getRequestConfig(r);
+    const PF = "/api/now/processflow";
+    const CTX = "2774cd1398401310e30e42f7cfb620a1";
+
+    it("refuses a flow test run", async () => {
+        await expect(config(request({ method: "POST", path: `${PF}/flow/bfd1455b53001310b6d61901a0490e0c/test` })))
+            .rejects.toThrow(/execute/i);
+    });
+
+    it("refuses starting a debug run and stepping one", async () => {
+        await expect(config(request({ method: "POST", path: `${PF}/debug/start/flow-object` }))).rejects.toThrow(/execute/i);
+        await expect(config(request({ method: "POST", path: `${PF}/debug/command/${CTX}/RESUME` }))).rejects.toThrow(/execute/i);
+    });
+
+    it("still lets a debug run be cancelled and its breakpoints cleared", async () => {
+        await expect(config(request({ method: "POST", path: `${PF}/operations/flow/context/${CTX}/cancel` }))).resolves.toBeDefined();
+        await expect(config(request({ method: "POST", path: `${PF}/debug/breakpoints/${CTX}` }))).resolves.toBeDefined();
     });
 });

@@ -50,6 +50,7 @@ import {
 import { TableAPIRequest } from '../../comm/http/TableAPIRequest';
 import { ProcessFlowRequest } from '../../comm/http/ProcessFlowRequest';
 import { IHttpResponse } from '../../comm/http/IHttpResponse';
+import { isPolicyRefusal } from '../../policy/PolicyRefusal';
 
 const RESULT_MARKER = '___FLOW_EXEC_RESULT___';
 const VALID_TYPES: FlowObjectType[] = ['flow', 'subflow', 'action'];
@@ -1064,6 +1065,9 @@ export class FlowManager {
      * The method fetches the full flow definition from the instance, combines it with
      * the provided outputMap (trigger test values), and submits it to the test endpoint.
      *
+     * A test run really executes the flow, so it needs execute as well as write under an
+     * installed policy: `--deny-execute` refuses it. A refusal is thrown, not returned.
+     *
      * @param options Test flow options including flowId, outputMap, and optional scope/runOnThread
      * @returns FlowTestResult with the execution context sys_id on success
      */
@@ -1141,6 +1145,9 @@ export class FlowManager {
                 rawResponse: apiResult
             };
         } catch (error) {
+            // A refusal is not a failed test: the run never started. Let it reach the
+            // caller as the refusal, so nex and the MCP server report it as one.
+            if (isPolicyRefusal(error)) throw error;
             const err = error as Error;
             this._logger.error(`Error testing flow "${options.flowId}": ${err.message}`);
             return {

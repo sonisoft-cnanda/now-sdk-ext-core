@@ -74,6 +74,58 @@ describe("tier 1 — floor, for mutations the verb hides", () => {
     });
 });
 
+describe("tier 1 — flow designer test and debug runs", () => {
+    const PF = "/api/now/processflow";
+    const ID = "bfd1455b53001310b6d61901a0490e0c";
+    const CTX = "2774cd1398401310e30e42f7cfb620a1";
+
+    // These run the flow for real, so they need execute as well as the default write.
+    it.each([
+        ["flow test", `${PF}/flow/${ID}/test`, "flow designer test run"],
+        ["action test", `${PF}/action/action_types/${ID}/test`, "flow designer test run"],
+        ["debug start", `${PF}/debug/start/flow-object`, "flow designer debug run"],
+        ["step over", `${PF}/debug/command/${CTX}/STEP_OVER`, "flow designer debug run"],
+        ["resume", `${PF}/debug/command/${CTX}/RESUME`, "flow designer debug run"],
+        ["skip all", `${PF}/debug/command/${CTX}/SKIP_ALL`, "flow designer debug run"],
+    ])("requires execute and write for a %s POST", (_name, path, why) => {
+        const r = req({ method: "POST", path });
+        expect(classify(r).verbs.sort()).toEqual(["execute", "write"]);
+        expect(floorFor(r).reasons).toEqual([why]);
+    });
+
+    // The debugger reads its breakpoints over the same paths; a floor must not refuse a GET.
+    it.each([
+        `${PF}/debug/allowed-breakpoints/${CTX}`,
+        `${PF}/debug/breakpoints/${CTX}`,
+        `${PF}/operations/flow/context/${CTX}`,
+        `${PF}/flow/${ID}`,
+        `${PF}/debug/command/${CTX}/STEP_OVER`,
+    ])("needs nothing for GET %s", (path) => {
+        expect(classify(req({ method: "GET", path })).verbs).toEqual([]);
+    });
+
+    // Changing breakpoints and cancelling run nothing new. Cancel has to stay possible
+    // under --deny-execute, so these are only the default write.
+    it.each([
+        ["set breakpoints", `${PF}/debug/breakpoints/${CTX}`],
+        ["cancel", `${PF}/operations/flow/context/${CTX}/cancel`],
+        ["copy", `${PF}/flow/${ID}/copy`],
+    ])("leaves a %s POST at write", (_name, path) => {
+        const r = req({ method: "POST", path });
+        expect(classify(r).verbs).toEqual(["write"]);
+        expect(floorFor(r).reasons).toEqual([]);
+    });
+
+    it("matches the method in any case", () => {
+        expect(classify(req({ method: "post", path: `${PF}/flow/${ID}/test` })).verbs).toContain("execute");
+    });
+
+    it("does not fire on a path that only contains a test segment further up", () => {
+        const r = req({ method: "POST", path: `${PF}/flow/${ID}/test/extra` });
+        expect(classify(r).verbs).toEqual(["write"]);
+    });
+});
+
 describe("tier 2 — declared", () => {
     it("lets a reading POST say so, which is what keeps `nex log` working", () => {
         // SyslogReader tails via a POST to the AJAX processor. Without this the default

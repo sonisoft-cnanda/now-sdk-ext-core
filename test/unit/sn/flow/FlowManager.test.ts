@@ -7,6 +7,7 @@ import { describe, it, expect, beforeEach, jest } from '@jest/globals';
 import { ServiceNowInstance, ServiceNowSettingsInstance } from '../../../../src/sn/ServiceNowInstance';
 import { createGetCredentialsMock, MockAuthenticationHandler } from '../../__mocks__/servicenow-sdk-mocks';
 import { FlowManager } from '../../../../src/sn/flow/FlowManager';
+import { policyRefusal } from '../../../../src/policy/PolicyRefusal';
 import { BackgroundScriptExecutionResult, ScriptExecutionOutputLine } from '../../../../src/sn/BackgroundScriptExecutor';
 import { AuthenticationHandlerFactory } from '../../../../src/auth/AuthenticationHandlerFactory';
 import { RequestHandlerFactory } from '../../../../src/comm/http/RequestHandlerFactory';
@@ -1778,6 +1779,26 @@ describe('FlowManager - Unit Tests', () => {
             expect(result.success).toBe(false);
             expect(result.errorMessage).toContain('invalid trigger data');
             expect(result.errorCode).toBe(1);
+        });
+
+        it('should throw a policy refusal rather than report it as a failed test', async () => {
+            jest.spyOn(flowMgr as any, '_resolveFlowIdentifier').mockResolvedValueOnce({
+                sysId: FLOW_SYS_ID, name: 'global.test_flow'
+            });
+
+            mockRequestHandler.get.mockResolvedValueOnce({
+                data: {
+                    result: { data: MOCK_FLOW_DEF, errorMessage: '', errorCode: 0, integrationsPluginActive: false }
+                }
+            });
+
+            const refusal = policyRefusal({ allowed: false, verbs: ['execute', 'write'], decidingLayer: 'deny-execute' } as any);
+            mockRequestHandler.post.mockRejectedValueOnce(refusal);
+
+            await expect(flowMgr.testFlow({
+                flowId: FLOW_SYS_ID,
+                outputMap: { current: 'rec_id' }
+            })).rejects.toBe(refusal);
         });
 
         it('should handle POST HTTP errors gracefully', async () => {
