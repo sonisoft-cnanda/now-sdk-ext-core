@@ -47,6 +47,10 @@ suite('FlowDebugger - Integration Tests (dev206299 only)', () => {
 
     afterEach(async () => {
         for (const id of started.splice(0)) await dbg.cancel(id).catch(() => undefined);
+        // A call that threw after its run started (runTo, say) never handed back the id: find it.
+        for (const open of await dbg.listSessions().catch(() => [])) {
+            if (open.flowSysId === FIXTURE || open.flowSysId === NESTED) await dbg.cancel(open.contextId).catch(() => undefined);
+        }
         const found = await request.get<{ result: Array<{ sys_id: string }> }>({ path: '/api/now/table/incident', headers: null, body: null,
             query: { sysparm_query: `short_description=${MARK}`, sysparm_fields: 'sys_id', sysparm_limit: '20' } });
         for (const row of found.bodyObject?.result ?? []) {

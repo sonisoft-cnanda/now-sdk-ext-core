@@ -21,8 +21,12 @@ function safeDetail(detail?: FlowDebugErrorDetail): FlowDebugErrorDetail | undef
 export class FlowDebugError extends Error {
     public readonly detail?: FlowDebugErrorDetail;
 
-    public constructor(public readonly code: FlowDebugErrorCode, detail?: FlowDebugErrorDetail) {
-        super(`Flow debugger: ${code}`);
+    /**
+     * @param cause The error that led to this one, when it came from elsewhere: for a run that could
+     *   not be set up after it started, the original failure (a session or policy error, say).
+     */
+    public constructor(public readonly code: FlowDebugErrorCode, detail?: FlowDebugErrorDetail, cause?: unknown) {
+        super(`Flow debugger: ${code}`, cause === undefined ? undefined : { cause });
         this.name = 'FlowDebugError';
         this.detail = safeDetail(detail);
     }

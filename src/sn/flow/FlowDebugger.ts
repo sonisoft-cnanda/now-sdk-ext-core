@@ -2,7 +2,8 @@ import { SessionManager } from '../../comm/http/SessionManager';
 import type { HTTPRequest } from '../../comm/http/HTTPRequest';
 import type { ServiceNowRequest } from '../../comm/http/ServiceNowRequest';
 import { PROCESSFLOW_API_BASE } from '../../constants/ServiceNow';
-import { isPolicyRefusal } from '../../policy/PolicyRefusal';
+import { checkRequirement } from '../../policy/Policy';
+import { isPolicyRefusal, policyRefusal } from '../../policy/PolicyRefusal';
 import { Logger } from '../../util/Logger';
 import type { ServiceNowInstance } from '../ServiceNowInstance';
 import { FlowDebugError } from './FlowDebugError';
@@ -23,7 +24,7 @@ const COMMANDS: readonly FlowDebugCommand[] = ['STEP_INTO', 'STEP_OVER', 'STEP_O
 const ENDED = new Set(['COMPLETE', 'CANCELLED', 'ERROR']);
 const EXECUTING = new Set(['IN_PROGRESS', 'QUEUED', 'STARTING', 'RUNNING']);
 /** Contexts a debug run can still be holding open. */
-const OPEN = ['PAUSED_IN_DEBUG', 'WAITING', 'IN_PROGRESS', 'QUEUED'];
+const OPEN = ['PAUSED_IN_DEBUG', 'WAITING', 'IN_PROGRESS', 'QUEUED', 'STARTING', 'RUNNING'];
 const GLOBAL = { sysparm_transaction_scope: 'global' };
 const HEADERS = { 'Content-Type': 'application/json', Accept: 'application/json' };
 const DEFAULT_TIMEOUT_MS = 60_000;
@@ -83,7 +84,7 @@ export class FlowDebugger {
      * subflow the parent is WAITING before its child context exists, so WAITING only counts as
      * settled once it has lasted this long.
      */
-    protected _poll = { firstMs: 300, maxMs: 2000, factor: 1.5, waitingSettleMs: 2000 };
+    protected _poll = { firstMs: 300, maxMs: 2000, factor: 1.5, waitingSettleMs: 5000 };
 
     public constructor(instance: ServiceNowInstance) {
         this._request = SessionManager.getInstance().getRequest(instance);
@@ -95,7 +96,11 @@ export class FlowDebugger {
      *
      * The flow's current draft is what runs, as in Workflow Studio. Inputs are checked against a
      * subflow's declared inputs before anything is sent. If the run cannot be set up after it
-     * started, it is cancelled again before the error is thrown.
+     * started, it is cancelled again before the error is thrown, and the error carries its
+     * `contextId` and whether the cancel worked.
+     *
+     * Under an installed policy, a run is only started when a cancel would also be permitted:
+     * starting needs execute, and breakpoints and cancel need write.
      *
      * A run normally pauses before its first step. One that fails or finishes first is returned
      * as it ended; check `snapshot.state`.
@@ -111,6 +116,9 @@ export class FlowDebugger {
         const { definition, type } = await this.definition(sysId);
         const outputMap = this.outputMap(definition, type, opts.inputs ?? {});
         const scope = str(definition.scope);
+        // Never start a run this session could not cancel again.
+        const permitted = checkRequirement({ verbs: ['execute', 'write'], target: 'instance' });
+        if (!permitted.allowed) throw policyRefusal(permitted);
 
         let response: Raw;
         try {
@@ -121,7 +129,7 @@ export class FlowDebugger {
                 tracingEnabled: true,
             }, { query: { sysparm_transaction_scope: ID.test(scope) ? scope : 'global' }, sensitive: true });
         } catch (error) {
-            throw this.translate(error, undefined, 'start_failed');
+            throw await this.startFailure(error);
         }
         const result = obj(response.result);
         const contextId = str(result.body);
@@ -145,12 +153,32 @@ export class FlowDebugger {
                 snapshot: first.snapshot,
             };
         } catch (error) {
+            // Whatever failed, the caller gets the context id and whether the run was ended.
             const cancelled = await this.cancel(contextId).then(r => r.cancelled || r.alreadyEnded, () => false);
-            if (isPolicyRefusal(error)) throw error;
             const code = error instanceof FlowDebugError ? error.code : 'start_failed';
             const detail = error instanceof FlowDebugError ? error.detail : undefined;
-            throw new FlowDebugError(code, { ...detail, contextId, cancelled });
+            throw new FlowDebugError(code, { ...detail, contextId, cancelled }, error instanceof FlowDebugError ? undefined : error);
         }
+    }
+
+    /**
+     * Classify a failed start call. Its request is marked sensitive, so only the status survives;
+     * a 400 or 404 is checked against a harmless debugger read to tell an instance without the
+     * debugger from a start it refused.
+     */
+    private async startFailure(error: unknown): Promise<unknown> {
+        const translated = this.translate(error, undefined, 'start_failed');
+        if (!(translated instanceof FlowDebugError) || translated.code !== 'context_not_found' && translated.detail?.status !== 400) {
+            return translated;
+        }
+        const status = translated.detail?.status;
+        try {
+            await this.call('get', `debug/allowed-breakpoints/${'0'.repeat(32)}`);
+        } catch (probe) {
+            const answer = this.translate(probe, undefined, 'unexpected_response');
+            if (answer instanceof FlowDebugError && answer.code === 'release_unsupported') return new FlowDebugError('release_unsupported', { status });
+        }
+        return new FlowDebugError('start_failed', { status });
     }
 
     /** The run as it is now, without moving it. */
@@ -269,16 +297,22 @@ export class FlowDebugger {
      *   this can never cancel someone's real flow run.
      */
     public async cancel(contextId: string): Promise<FlowDebugCancelResult> {
-        const root = this.id(contextId);
+        const root = await this.rootOf(this.id(contextId));
         const first = await this.read(root);
         if (obj(first.flowContext).debugMode !== true) throw new FlowDebugError('not_a_debug_session', { contextId: root, state: first.state });
-        if (ENDED.has(first.state)) {
+        const openBefore = await this.openDescendants(root);
+        if (ENDED.has(first.state) && openBefore.length === 0) {
             return { contextId: root, before: first.state, after: first.state, cancelled: false, alreadyEnded: true };
         }
-        await this.postCancel(root);
-        let after = await this.settleCancel(root);
-        // The cascade to a child has been reliable, but a child left open would hold a worker.
-        for (const child of await this.openChildren(root)) await this.postCancel(child).catch(() => undefined);
+        if (!ENDED.has(first.state)) await this.postCancel(root);
+        let after = ENDED.has(first.state) ? first.state : await this.settleCancel(root);
+        // Cancelling the root has ended its subflow contexts every time it was tried; a child left
+        // open would still hold a worker, so each one is checked, and cancelled itself if needed.
+        for (const child of await this.openDescendants(root)) {
+            await this.postCancel(child);
+            const state = await this.settleCancel(child);
+            if (!ENDED.has(state)) throw new FlowDebugError('cancel_failed', { contextId: child, state });
+        }
         if (!ENDED.has(after)) {
             await this.postCancel(root);
             after = await this.settleCancel(root);
@@ -293,8 +327,8 @@ export class FlowDebugger {
      * then cancelled, so one call leaves nothing open.
      */
     public async runTo(options: FlowDebugRunToOptions): Promise<FlowDebugRunToResult> {
-        const then = options?.then ?? 'cancel';
-        if (!['cancel', 'resume', 'stay'].includes(then)) throw new FlowDebugError('invalid_input');
+        const after = options?.after ?? 'cancel';
+        if (!['cancel', 'resume', 'stay'].includes(after)) throw new FlowDebugError('invalid_input');
         if (!Array.isArray(options?.breakpoints) || options.breakpoints.length === 0) throw new FlowDebugError('invalid_input');
         const session = await this.start(options);
         const root = session.contextId;
@@ -304,8 +338,8 @@ export class FlowDebugger {
             const atBreakpoint = snapshot.state === 'PAUSED' && snapshot.pausedLines.some(l => lines.has(l)) && snapshot.contextId === root;
             if (snapshot.state === 'PAUSED' && !atBreakpoint) snapshot = await this.resume(root, { timeoutMs: options.timeoutMs });
             const result: FlowDebugRunToResult = { session, snapshot };
-            if (then === 'resume' && snapshot.state === 'PAUSED') result.final = await this.skipAll(root, { timeoutMs: options.timeoutMs });
-            if (then === 'cancel') result.cancel = await this.cancel(root);
+            if (after === 'resume' && snapshot.state === 'PAUSED') result.final = await this.skipAll(root, { timeoutMs: options.timeoutMs });
+            if (after === 'cancel') result.cancel = await this.cancel(root);
             return result;
         } catch (error) {
             await this.cancel(root).catch(() => undefined);
@@ -423,8 +457,12 @@ export class FlowDebugger {
         }
         const locations = await this.locationsOf(current.contextId, current.raw).catch(() => [] as FlowDebugLocation[]);
         const snapshot = this.snapshot(root, chain, current, locations);
+        // The engine numbers every instruction it executes (operationsCore.order), so a loop that
+        // pauses at the same line again still changes the fingerprint.
+        const orders = ['actionOperationsReports', 'subflowOperationsReports', 'iterationOperationsReports']
+            .flatMap(bucket => Object.entries(obj(current.report[bucket])).map(([key, entry]) => `${key}:${str(obj(obj(entry).operationsCore).order)}`));
         const fingerprint = JSON.stringify([chain, current.state, snapshot.pausedLines, str(current.flowContext.runTime),
-            snapshot.steps.map(s => `${s.reportKey}:${s.state}`)]);
+            snapshot.steps.map(s => `${s.reportKey}:${s.state}`), orders, str(obj(current.report.operationsCore).order)]);
         return { snapshot, fingerprint, debugMode: obj(rootRead.flowContext).debugMode === true };
     }
 
@@ -623,11 +661,44 @@ export class FlowDebugger {
         return state;
     }
 
-    /** Child subflow contexts of `parent` that are still open, newest first. */
+    /** Child subflow contexts of `parent` that are still open: a paused one first, then newest first. */
     private async openChildren(parent: string): Promise<string[]> {
         const rows = await this.table('sys_flow_context',
-            `source_table=sys_flow_context^source_record=${parent}^stateIN${OPEN.join(',')}^ORDERBYDESCsys_created_on`, 'sys_id', 5);
-        return rows.map(row => str(row.sys_id)).filter(id => ID.test(id));
+            `source_table=sys_flow_context^source_record=${parent}^stateIN${OPEN.join(',')}^ORDERBYDESCsys_created_on`, 'sys_id,state', 10);
+        const open = rows.filter(row => ID.test(str(row.sys_id)));
+        const paused = open.filter(row => str(row.state) === 'PAUSED_IN_DEBUG');
+        return [...paused, ...open.filter(row => !paused.includes(row))].map(row => str(row.sys_id));
+    }
+
+    /** Every open context below `root`, at any depth up to MAX_DEPTH. */
+    private async openDescendants(root: string): Promise<string[]> {
+        const found: string[] = [];
+        let level = [root];
+        for (let depth = 0; depth < MAX_DEPTH && level.length; depth++) {
+            const next: string[] = [];
+            for (const parent of level) {
+                for (const child of await this.openChildren(parent)) {
+                    if (child !== root && !found.includes(child)) {
+                        found.push(child);
+                        next.push(child);
+                    }
+                }
+            }
+            level = next;
+        }
+        return found;
+    }
+
+    /** The root of a subflow context's chain; a root is its own. */
+    private async rootOf(contextId: string): Promise<string> {
+        let current = contextId;
+        for (let depth = 0; depth < MAX_DEPTH; depth++) {
+            const row = (await this.table('sys_flow_context', `sys_id=${current}`, 'source_table,source_record', 1))[0];
+            const parent = str(row?.source_record);
+            if (!row || str(row.source_table) !== 'sys_flow_context' || !ID.test(parent)) return current;
+            current = parent;
+        }
+        return current;
     }
 
     // ----------------------------------------------------------------
@@ -637,7 +708,8 @@ export class FlowDebugger {
     private async read(contextId: string): Promise<ContextRead> {
         let reply: Raw;
         try {
-            reply = await this.call('get', `operations/flow/context/${contextId}`);
+            // Sensitive: the reply holds the run's data, which must not reach a debug log.
+            reply = await this.call('get', `operations/flow/context/${contextId}`, undefined, { sensitive: true });
         } catch (error) {
             throw this.translate(error, contextId, 'unexpected_response');
         }

@@ -163,9 +163,10 @@ export interface FlowDebugRunToOptions extends FlowDebugStartOptions {
     breakpoints: FlowDebugStepRef[];
     /**
      * What to do once paused at the breakpoint (or ended): `cancel` (the default) ends the run,
-     * `resume` lets it finish, `stay` leaves it paused for further commands.
+     * `resume` lets it finish, `stay` leaves it paused for further commands. Not named `then`,
+     * which would make the options object look like a promise.
      */
-    then?: 'cancel' | 'resume' | 'stay';
+    after?: 'cancel' | 'resume' | 'stay';
 }
 
 /** The result of {@link FlowDebugger.runTo}. */
@@ -173,9 +174,9 @@ export interface FlowDebugRunToResult {
     session: FlowDebugSession;
     /** The run as it was at the breakpoint, or at its end if it never reached one. */
     snapshot: FlowDebugSnapshot;
-    /** Set when `then` was `resume`: the run after it finished. */
+    /** Set when `after` was `resume`: the run after it finished. */
     final?: FlowDebugSnapshot;
-    /** Set when `then` was `cancel`. */
+    /** Set when `after` was `cancel`. */
     cancel?: FlowDebugCancelResult;
 }
 

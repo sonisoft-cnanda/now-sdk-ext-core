@@ -2,7 +2,7 @@
 
 `FlowDebugger` drives Workflow Studio's flow debugger (**Test ▸ Debug**) over REST. It starts a run,
 stops at breakpoints, steps over, into and out, and reads each step's runtime inputs and outputs while
-the run is paused. Every run is ended: `runTo` and `withSession` cancel it for you.
+the run is paused. A run you start must be ended: `runTo` (by default) and `withSession` cancel it for you.
 
 ```typescript
 import { FlowDebugger, FlowDebugError } from '@sonisoft/now-sdk-ext-core';
@@ -23,7 +23,8 @@ console.log(snapshot.steps.find(s => s.step?.number === 1)?.outputs.Record);
 and call out, exactly as a Test does. Debug a copy (`FlowManager.copyFlow`) in a scratch application, and
 never on an instance you may not change. Under an installed policy, starting a run and sending a step
 command need **execute**; breakpoint changes and cancel need **write**, so a run started before
-`--deny-execute` can still be cancelled under it.
+`--deny-execute` can still be cancelled under it. `start` refuses up front when write is not permitted,
+so it never starts a run it could not cancel.
 
 ## Driving a run yourself
 
@@ -46,8 +47,8 @@ await dbg.withSession({ flow: FLOW_SYS_ID, inputs }, async (session) => {
 | `command(ctx, name)` | The same, by name. Only the five names above are accepted. |
 | `inspect(ctx)` | The run as it is now, without moving it. |
 | `locations(ctx)` | Where the active context can stop. |
-| `cancel(ctx)` | Ends the run and reads it back. Safe to repeat. |
-| `runTo(options)` | Start, run to the first breakpoint, report, then `cancel` (default), `resume` or `stay`. |
+| `cancel(ctx)` | Ends the run, and every subflow context below it, and reads each one back. Safe to repeat. A child context id is followed up to its root. |
+| `runTo(options)` | Start, run to the first breakpoint, report, then (`after`) `cancel` (the default), `resume` or `stay`. With `resume`, a run that has not finished when the wait ends is left running (`final.timedOut`); with `stay`, it is left as it is. |
 | `withSession(options, work)` | Start, run `work`, cancel afterwards unless the run ended. |
 | `listSessions({ createdBy? })` | Debug runs still open on the instance, newest first: for finding one a crashed process left paused. |
 
@@ -65,8 +66,8 @@ A `FlowDebugSnapshot` is the run at the moment it was read:
   `{value, displayValue}`. A completed step's `error` is "Success": that is the engine's wording.
 - `error` is set when the run ended in `ERROR`. A failing step does not pause; the run goes straight to
   `ERROR`.
-- `timedOut` is set when a wait gave up while the run was still executing. The run is left as it is;
-  wait again with `inspect`, or `cancel` it.
+- `timedOut` is set when a wait ran out before the run visibly moved on: it is usually still executing
+  (`RUNNING`) or waiting. The run is left as it is; look again with `inspect`, or `cancel` it.
 
 ## Step numbers and debugger lines
 
@@ -102,12 +103,12 @@ record trigger: `current` as the record's sys_id, and `table_name`).
 | `invalid_input` | A malformed id, step reference, option or command name. |
 | `flow_not_found` / `not_debuggable` | No such flow or subflow; or an action, which has Test but no Debug. |
 | `unknown_input` / `missing_input` | `detail.inputs` names them. |
-| `start_failed` | The debugger did not start a run. If it started one that then could not be set up, it was cancelled again; `detail.cancelled` says whether that worked. |
-| `not_paused` | A command or breakpoint change while the run is not paused; `detail.state`. |
+| `start_failed` | The debugger did not start a run (`detail.status`). If it started one that then could not be set up, it was cancelled again: `detail.contextId` and `detail.cancelled` say which run and whether that worked, and the error's `cause` is the original failure. |
+| `not_paused` | A command while the run is not paused, or a breakpoint change once it has ended; `detail.state`. |
 | `unknown_breakpoint` / `breakpoint_not_verified` | `detail.validSteps`; or the debugger's `serverMessage`. |
 | `context_not_found` / `not_a_debug_session` | No such context; or one the debugger did not start. `cancel` refuses those, so it can never end a real flow run. |
 | `permission_denied` / `release_unsupported` | The session cannot use the debugger; or the instance has none. |
-| `cancel_failed` | Cancel was sent, but the run is still open; `detail.state`. |
+| `cancel_failed` | Cancel was sent, but the run (or one of its subflow contexts, `detail.contextId`) is still open; `detail.state`. |
 | `unexpected_response` | An answer this library does not understand. |
 
 Policy refusals are not wrapped: check them with `isPolicyRefusal`.
@@ -135,5 +136,10 @@ Behaviour that shapes the implementation:
   five names are ever sent.
 - Cancel answers "cancelled flow" (201) for any id, even one that does not exist, so the result is always
   read back.
-- The start request is marked `sensitive`, because its body holds the whole flow and its inputs: a failed
-  start is not logged with its payload.
+- The start request is marked `sensitive`, because its body holds the whole flow and its inputs, and so
+  are the context reads, whose replies hold the run's data: neither reaches a log. A failed start keeps
+  only its HTTP status; a 400 or 404 is checked with a harmless debugger read to tell an instance without
+  the debugger (`release_unsupported`) from a start it refused.
+- WAITING only counts as settled after 5 seconds, because right after step into a subflow the parent is
+  WAITING before its child context exists. A genuine wait (a timer, Wait For Condition) is therefore
+  reported 5 seconds late.

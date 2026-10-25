@@ -14,6 +14,7 @@ import { FlowManager } from '../../../../src/sn/flow/FlowManager';
 import { SessionManager } from '../../../../src/comm/http/SessionManager';
 import { ServiceNowInstance } from '../../../../src/sn/ServiceNowInstance';
 import { isPolicyRefusal, policyRefusal } from '../../../../src/policy/PolicyRefusal';
+import { allowAllLayer, denyLayer, installPolicy, resetPolicyForTests } from '../../../../src/policy/Policy';
 
 const FLOW = 'bfd1455b53001310b6d61901a0490e0c';
 const NESTED = 'b8cb9ed753005310b6d61901a0490e00';
@@ -52,7 +53,9 @@ interface Ctx {
 let contexts: Map<string, Ctx>;
 let calls: Array<{ method: string; path: string; body?: unknown; query?: Record<string, string>; sensitive?: boolean }>;
 let platform: { startReply?: Record<string, unknown>; startError?: Error; debugError?: Error; neverPause?: boolean;
-    childDelayReads?: number; unverifiedLines?: number[]; dropBreakpointsOnRead?: boolean; flowType?: string; definitionFailure?: string };
+    childDelayReads?: number; unverifiedLines?: number[]; dropBreakpointsOnRead?: boolean; flowType?: string; definitionFailure?: string;
+    noDebugger?: boolean; errorBeforePause?: boolean; childCancelIgnored?: boolean; readError?: Error; frozenRunTime?: boolean };
+let order = 0;
 let serial = 0;
 let now = 0;
 let dbg: TestDebugger;
@@ -82,7 +85,8 @@ const fixtureAllowed = () => [{ flowElementId: UI.assign, line: 4 }, { flowEleme
 const byLine: Record<number, string> = { 1: SNAP.create, 4: SNAP.assign, 6: SNAP.if, 8: SNAP.wait };
 
 function report(id: string, state: string, error = '', outputs: Record<string, unknown> = {}) {
-    return { instanceReference: id, operationsCore: { error, order: '1', startTime: '2026-10-25 16:42:58', runTime: '5', state },
+    // The engine numbers every instruction it executes.
+    return { instanceReference: id, operationsCore: { error, order: String(++order), startTime: '2026-10-25 16:42:58', runTime: '5', state },
         operationsInput: { data: { task_table: { value: 'incident', displayValue: 'incident', inputUsed: false } } },
         operationsOutput: { data: outputs } };
 }
@@ -92,6 +96,7 @@ function newContext(path: number[], extra: Partial<Ctx> = {}): Ctx {
         allowed: fixtureAllowed(), breakpoints: [], flow: fixtureFlow(), reports: { [byLine[path[0]] ?? 'x']: report(byLine[path[0]] ?? 'x', 'NOT_READY') },
         runTime: 0, ...extra };
     if (platform.neverPause) { ctx.state = 'IN_PROGRESS'; ctx.paused = []; }
+    if (platform.errorBeforePause && !extra.parent) { ctx.state = 'ERROR'; ctx.paused = []; ctx.reports = { x: report('x', 'ERROR', 'Cannot read property "length" from undefined') }; }
     contexts.set(ctx.id, ctx);
     return ctx;
 }
@@ -102,7 +107,7 @@ function settle(ctx: Ctx) {
     if (ctx.pending.reads-- > 0) { ctx.state = 'IN_PROGRESS'; return; }
     const { command } = ctx.pending;
     delete ctx.pending;
-    ctx.runTime += 300;
+    if (!platform.frozenRunTime) ctx.runTime += 300;
     const line = ctx.path[ctx.at];
     if (ctx.failAt === line) {
         ctx.reports[byLine[line]] = report(byLine[line], 'ERROR', 'Nonexistent table: nse21_not_a_table');
@@ -111,7 +116,7 @@ function settle(ctx: Ctx) {
         return;
     }
     if (command === 'STEP_INTO' && ctx.subflowAt?.[line]) {
-        const child = newContext(ctx.subflowAt[line], { parent: ctx.id, flow: fixtureFlow('child-'), allowed: [] });
+        const child = newContext(ctx.subflowAt[line], { parent: ctx.id, flow: fixtureFlow('child-'), allowed: [], cancelIgnored: platform.childCancelIgnored });
         child.allowed = ctx.subflowAt[line].map(l => ({ flowElementId: 'child-' + UI.create, line: l }));
         if (platform.childDelayReads) {
             const delay = platform.childDelayReads;
@@ -166,10 +171,18 @@ function table(path: string, query: Record<string, string>) {
     }
     if (name === 'sys_hub_action_type_definition') return { bodyObject: { result: q === `sys_id=${ACTION}` ? [{ sys_id: ACTION }] : [] } };
     if (name === 'sys_flow_context') {
+        const states = /stateIN([A-Z_,]+)/.exec(q)?.[1].split(',') ?? [];
+        const row = /^sys_id=([a-f0-9]{32})$/.exec(q)?.[1];
+        if (row) {
+            const ctx = contexts.get(row);
+            return { bodyObject: { result: ctx ? [{ source_table: ctx.parent ? 'sys_flow_context' : '', source_record: ctx.parent ?? '' }] : [] } };
+        }
         const parent = /source_record=([a-f0-9]{32})/.exec(q)?.[1];
         if (parent) {
-            const kids = [...contexts.values()].filter(c => c.parent === parent && ['PAUSED_IN_DEBUG', 'WAITING', 'IN_PROGRESS', 'QUEUED'].includes(c.state));
-            return { bodyObject: { result: kids.map(c => ({ sys_id: c.id })) } };
+            // Only answer the query FlowDebugger must send: children of a flow context, by state.
+            if (!q.startsWith('source_table=sys_flow_context^')) return { bodyObject: { result: [] } };
+            const kids = [...contexts.values()].filter(c => c.parent === parent && states.includes(c.state)).reverse();
+            return { bodyObject: { result: kids.map(c => ({ sys_id: c.id, state: c.state })) } };
         }
         const open = [...contexts.values()].filter(c => !c.parent && ['PAUSED_IN_DEBUG', 'WAITING', 'IN_PROGRESS', 'QUEUED'].includes(c.state));
         return { bodyObject: { result: open.map(c => ({ sys_id: c.id, name: 'NSE21 Debug Copy - Create Task', flow: FLOW, state: c.state,
@@ -190,6 +203,7 @@ function processflow(method: string, path: string, body: unknown) {
             : newContext([1, 4, 6], { failAt: outputMap.table === 'nse21_not_a_table' ? 1 : undefined });
         return debugReply('launch', ctx.id);
     }
+    if (platform.noDebugger && rest.startsWith('debug/')) throw http(400, { error: { message: 'Requested URI does not represent any resource', detail: null }, status: 'failure' });
     if (platform.debugError && rest.startsWith('debug/')) throw platform.debugError;
     if ((m = /^debug\/allowed-breakpoints\/(\w+)$/.exec(rest))) {
         const ctx = contexts.get(m[1]);
@@ -219,7 +233,7 @@ function processflow(method: string, path: string, body: unknown) {
         const ctx = contexts.get(m[1]);
         if (ctx && !ctx.cancelIgnored && !['COMPLETE', 'ERROR', 'CANCELLED'].includes(ctx.state)) {
             ctx.state = 'CANCELLED'; ctx.paused = []; delete ctx.pending;
-            for (const child of contexts.values()) if (child.parent === ctx.id) child.state = 'CANCELLED';
+            for (const child of contexts.values()) if (child.parent === ctx.id && !child.cancelIgnored) child.state = 'CANCELLED';
         }
         return { status: 201, bodyObject: { result: 'cancelled flow' } };
     }
@@ -230,7 +244,15 @@ function processflow(method: string, path: string, body: unknown) {
 async function handle(method: string, r: { path: string; query?: Record<string, string>; json?: unknown; sensitive?: boolean }) {
     calls.push({ method, path: r.path, body: r.json, query: r.query, sensitive: r.sensitive });
     if (r.path.startsWith('/api/now/table/')) return table(r.path, r.query ?? {});
-    return processflow(method, r.path, r.json);
+    if (platform.readError && method === 'get' && r.path.includes('/operations/flow/context/')) throw platform.readError;
+    try {
+        return processflow(method, r.path, r.json);
+    } catch (error) {
+        // RequestHandler keeps only the status of a sensitive request's failure.
+        const status = /Status: (\d{3})/.exec((error as Error).message)?.[1];
+        if (r.sensitive && status) throw new Error(`Sensitive request failed with status ${status}; no payload diagnostics retained`);
+        throw error;
+    }
 }
 
 const inputs = { table: 'incident', field_values: 'short_description=NSE-21 unit', wait: false };
@@ -241,6 +263,7 @@ beforeEach(() => {
     calls = [];
     platform = {};
     serial = 0;
+    order = 0;
     now = 0;
     jest.spyOn(Date, 'now').mockImplementation(() => now);
     jest.spyOn(SessionManager.getInstance(), 'getRequest').mockReturnValue({
@@ -263,7 +286,10 @@ beforeEach(() => {
     dbg = new TestDebugger(new ServiceNowInstance({ alias: 'dev', host: 'dev.service-now.com' }));
 });
 
-afterEach(() => jest.restoreAllMocks());
+afterEach(() => {
+    jest.restoreAllMocks();
+    resetPolicyForTests();
+});
 
 describe('start', () => {
     it('resolves a scoped name, sends the draft and the inputs, and returns the first pause', async () => {
@@ -340,9 +366,42 @@ describe('start', () => {
         await expect(dbg.start({ flow: FLOW, inputs })).rejects.toMatchObject({ code: 'start_failed' });
     });
 
-    it('reports an instance without the debugger as release_unsupported', async () => {
+    it('reports an instance without the debugger as release_unsupported, though the start keeps only its status', async () => {
+        platform.noDebugger = true;
         platform.startError = http(400, { error: { message: 'Requested URI does not represent any resource' } });
         await expect(dbg.start({ flow: FLOW, inputs })).rejects.toMatchObject({ code: 'release_unsupported', detail: { status: 400 } });
+        expect(calls.some(c => c.path.endsWith(`/debug/allowed-breakpoints/${'0'.repeat(32)}`))).toBe(true);
+    });
+
+    it('reports a 400 start on an instance that has the debugger as start_failed', async () => {
+        platform.startError = http(400, { error: { message: 'bad flow' } });
+        await expect(dbg.start({ flow: FLOW, inputs })).rejects.toMatchObject({ code: 'start_failed', detail: { status: 400 } });
+    });
+
+    it('reports a forbidden start as permission_denied', async () => {
+        platform.startError = http(403, { error: { message: 'User Not Authorized' } });
+        await expect(dbg.start({ flow: FLOW, inputs })).rejects.toMatchObject({ code: 'permission_denied', detail: { status: 403 } });
+    });
+
+    it('never starts a run it could not cancel: write denied, execute granted', async () => {
+        installPolicy([denyLayer('env-deny', ['write']), allowAllLayer()]);
+        const error = await dbg.start({ flow: FLOW, inputs }).catch((e: unknown) => e);
+        expect(isPolicyRefusal(error)).toBe(true);
+        expect(posts('debug/start')).toHaveLength(0);
+    });
+
+    it('cancels and reports the context when anything fails after the start, keeping the original as the cause', async () => {
+        const session = new Error('Session authentication failed');
+        session.name = 'SessionAuthError';
+        let reads = 0;
+        jest.spyOn(SessionManager.getInstance().getRequest(undefined as never), 'get').mockImplementation(async (r: any) => {
+            if (r.path.includes('/operations/flow/context/') && ++reads === 1) throw session;
+            return handle('get', r);
+        });
+        const error = await dbg.start({ flow: FLOW, inputs }).catch((e: unknown) => e) as FlowDebugError;
+        expect(error).toMatchObject({ code: 'start_failed', detail: { contextId: 'c'.repeat(31) + '1', cancelled: true } });
+        expect(error.cause).toBe(session);
+        expect(contexts.get('c'.repeat(31) + '1')!.state).toBe('CANCELLED');
     });
 
     it('lets a policy refusal through untouched', async () => {
@@ -359,7 +418,13 @@ describe('start', () => {
     });
 
     it('returns a run that ended before it paused, as it ended', async () => {
-        platform.startReply = undefined;
+        platform.errorBeforePause = true;
+        const session = await dbg.start({ flow: FLOW, inputs });
+        expect(session.snapshot).toMatchObject({ state: 'ERROR', error: 'Cannot read property "length" from undefined' });
+        expect(session.snapshot.timedOut).toBeUndefined();
+    });
+
+    it('reports a failing step: the run does not pause, it ends in ERROR', async () => {
         const session = await dbg.start({ flow: FLOW, inputs: { ...inputs, table: 'nse21_not_a_table' } });
         const failed = await dbg.stepOver(session.contextId);
         expect(failed).toMatchObject({ state: 'ERROR', error: 'Nonexistent table: nse21_not_a_table' });
@@ -489,6 +554,36 @@ describe('step into a subflow', () => {
         expect(inChild.chain).toHaveLength(2);
     });
 
+    it('notices a loop pausing at the same line again, without waiting out the timeout', async () => {
+        const { contextId } = await dbg.start({ flow: NESTED, inputs: { update_set_ids: ['a', 'b'] } });
+        contexts.get(contextId)!.path = [5, 8, 8, 17];
+        contexts.get(contextId)!.subflowAt = {};
+        // Same line, same report keys and states, same runtime: only the engine's order counters move.
+        platform.frozenRunTime = true;
+        expect((await dbg.stepOver(contextId)).pausedLines).toEqual([8]);
+        const before = now;
+        const again = await dbg.stepOver(contextId, { timeoutMs: 30_000 });
+        expect(again).toMatchObject({ state: 'PAUSED', pausedLines: [8] });
+        expect(again.timedOut).toBeUndefined();
+        expect(now - before).toBeLessThan(5000);
+    });
+
+    it('a child context whose cancel does not take is cancel_failed, naming the child', async () => {
+        platform.childCancelIgnored = true;
+        const { contextId } = await dbg.start({ flow: NESTED, inputs: { update_set_ids: ['a'] } });
+        await dbg.stepInto(contextId);
+        const inChild = await dbg.stepInto(contextId);
+        await expect(dbg.cancel(contextId)).rejects.toMatchObject({ code: 'cancel_failed', detail: { contextId: inChild.contextId, state: 'PAUSED_IN_DEBUG' } });
+    });
+
+    it('cancelling by a child context id ends the whole run from its root', async () => {
+        const { contextId } = await dbg.start({ flow: NESTED, inputs: { update_set_ids: ['a'] } });
+        await dbg.stepInto(contextId);
+        const inChild = await dbg.stepInto(contextId);
+        expect(await dbg.cancel(inChild.contextId)).toMatchObject({ contextId, after: 'CANCELLED', cancelled: true });
+        expect(contexts.get(inChild.contextId)!.state).toBe('CANCELLED');
+    });
+
     it('cancelling the root ends the child too', async () => {
         const { contextId } = await dbg.start({ flow: NESTED, inputs: { update_set_ids: ['a'] } });
         await dbg.stepInto(contextId);
@@ -535,19 +630,19 @@ describe('runTo and withSession', () => {
     });
 
     it('does not resume past a breakpoint on the first step', async () => {
-        const result = await dbg.runTo({ flow: FLOW, inputs, breakpoints: [1], then: 'stay' });
+        const result = await dbg.runTo({ flow: FLOW, inputs, breakpoints: [1], after: 'stay' });
         expect(result.snapshot.pausedLines).toEqual([1]);
         expect(posts('debug/command')).toHaveLength(0);
         expect(contexts.get(result.session.contextId)!.state).toBe('PAUSED_IN_DEBUG');
     });
 
     it('can let the run finish instead', async () => {
-        const result = await dbg.runTo({ flow: FLOW, inputs, breakpoints: [2], then: 'resume' });
+        const result = await dbg.runTo({ flow: FLOW, inputs, breakpoints: [2], after: 'resume' });
         expect(result.final?.state).toBe('COMPLETE');
         expect(result.cancel).toBeUndefined();
     });
 
-    it.each([[{ breakpoints: [] }], [{ breakpoints: [3], then: 'later' }]])('refuses %j', async (extra) => {
+    it.each([[{ breakpoints: [] }], [{ breakpoints: [3], after: 'later' }]])('refuses %j', async (extra) => {
         await expect(dbg.runTo({ flow: FLOW, inputs, ...extra } as any)).rejects.toMatchObject({ code: 'invalid_input' });
     });
 
@@ -570,7 +665,7 @@ describe('listSessions', () => {
         const listed = await dbg.listSessions({ createdBy: 'admin' });
         expect(listed).toEqual([expect.objectContaining({ contextId, state: 'PAUSED_IN_DEBUG', flowSysId: FLOW })]);
         const query = calls.find(c => c.path === '/api/now/table/sys_flow_context' && !c.query?.sysparm_query.includes('source_record'))!.query!.sysparm_query;
-        expect(query).toBe('calling_source=DEBUG_BUTTON^stateINPAUSED_IN_DEBUG,WAITING,IN_PROGRESS,QUEUED^sys_created_by=admin^ORDERBYDESCsys_created_on');
+        expect(query).toBe('calling_source=DEBUG_BUTTON^stateINPAUSED_IN_DEBUG,WAITING,IN_PROGRESS,QUEUED,STARTING,RUNNING^sys_created_by=admin^ORDERBYDESCsys_created_on');
     });
 
     it.each([[{ createdBy: 'a^b' }], [{ limit: 0 }], [{ limit: 1.5 }]])('refuses %j', async (opts) => {
