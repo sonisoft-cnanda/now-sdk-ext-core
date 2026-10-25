@@ -9,7 +9,8 @@
  * Follows the shape of InstanceBindingGuard.test.ts, which pins the sibling guard.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from "@jest/globals";
+import { describe, it, expect, beforeEach, afterEach, jest } from "@jest/globals";
+import { Logger } from "../../../src/util/Logger";
 import { RequestHandler } from "../../../src/comm/http/RequestHandler";
 import { ServiceNowInstance } from "../../../src/sn/ServiceNowInstance";
 import { MockAuthenticationHandler } from "../__mocks__/servicenow-sdk-mocks";
@@ -146,5 +147,21 @@ describe("--deny-execute on flow designer runs", () => {
     it("still lets a debug run be cancelled and its breakpoints cleared", async () => {
         await expect(config(request({ method: "POST", path: `${PF}/operations/flow/context/${CTX}/cancel` }))).resolves.toBeDefined();
         await expect(config(request({ method: "POST", path: `${PF}/debug/breakpoints/${CTX}` }))).resolves.toBeDefined();
+    });
+});
+
+describe("logging a refused request", () => {
+    beforeEach(() => installPolicy([denyLayer("deny-execute", ["execute"]), allowAllLayer()]));
+
+    it("does not log the payload of a request that was refused before it was sent", async () => {
+        const logged = jest.spyOn(Logger.prototype, "error");
+        const error = await handler.post(request({
+            method: "POST",
+            path: "/api/now/processflow/flow/bfd1455b53001310b6d61901a0490e0c/test",
+            json: { flow: { name: "secret-flow-definition" }, outputMap: { current: "secret-input" } },
+        })).catch((e: unknown) => e);
+        expect(isPolicyRefusal(error)).toBe(true);
+        expect(JSON.stringify(logged.mock.calls)).not.toContain("secret");
+        logged.mockRestore();
     });
 });

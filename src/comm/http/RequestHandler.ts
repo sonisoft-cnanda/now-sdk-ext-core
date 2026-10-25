@@ -106,7 +106,10 @@ export class RequestHandler implements IRequestHandler{
      */
     private toThrowable(ex: unknown, request?: HTTPRequest): Error {
         if (request?.sensitive && !isPolicyRefusal(ex) && !(ex instanceof SessionAuthError) && !(ex instanceof StaleInstanceError)) {
-            return new Error("Sensitive request failed; no payload diagnostics retained");
+            // The HTTP status carries no payload, and a caller needs it to tell "not found" from
+            // "not permitted"; everything else about the failure is dropped.
+            const status = ex instanceof Error ? /\bstatus (\d{3})\b/i.exec(ex.message)?.[1] : undefined;
+            return new Error(`Sensitive request failed${status ? ` with status ${status}` : ""}; no payload diagnostics retained`);
         }
         if (ex instanceof Error) {
             return stripSecretsFromError(ex);
@@ -345,7 +348,7 @@ export class RequestHandler implements IRequestHandler{
         return response;
        }catch(ex){
 
-        this._logger.error("Error during POST request.", this.diagnostic(request, {error:ex, response: response, request: request}));
+        this.logFailure("POST", request, ex, response);
         throw this.toThrowable(ex, request);
        }
     }
@@ -367,7 +370,7 @@ export class RequestHandler implements IRequestHandler{
             
             return response;
        }catch(ex){
-        this._logger.error("Error during PUT request.", this.diagnostic(request, {error:ex, response: response, request: request}));
+        this.logFailure("PUT", request, ex, response);
         throw this.toThrowable(ex, request);
        }
     }
@@ -390,7 +393,7 @@ export class RequestHandler implements IRequestHandler{
 
         return response;
        }catch(ex){
-            this._logger.error("Error during GET request.", this.diagnostic(request, {error:ex, response: response, request: request}));
+            this.logFailure("GET", request, ex, response);
             throw this.toThrowable(ex, request);
        }
     }
@@ -411,7 +414,7 @@ export class RequestHandler implements IRequestHandler{
 
         return response;
        }catch(ex){
-            this._logger.error("Error during DELETE request.", this.diagnostic(request, {error:ex, response: response, request: request}));
+            this.logFailure("DELETE", request, ex, response);
             throw this.toThrowable(ex, request);
        }
     }
@@ -455,6 +458,17 @@ export class RequestHandler implements IRequestHandler{
         if (request.redirect) (config as { redirect?: HTTPRequest["redirect"] }).redirect = request.redirect;
 
         return {config: config};
+    }
+
+    /**
+     * Log a failed request. A policy refusal is left out: assertPermitted already logged it, with
+     * the path, as a warning, and nothing was sent. Logging the request here as well would write its
+     * whole payload (a flow definition and its inputs, a script) at error level for a request that
+     * never left the process.
+     */
+    private logFailure(verb: string, request: HTTPRequest, ex: unknown, response: unknown): void {
+        if (isPolicyRefusal(ex)) return;
+        this._logger.error(`Error during ${verb} request.`, this.diagnostic(request, { error: ex, response, request }));
     }
 
     private diagnostic(request: HTTPRequest, legacy: unknown, status?: number): unknown {
