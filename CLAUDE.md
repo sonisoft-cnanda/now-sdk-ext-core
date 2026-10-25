@@ -9,7 +9,7 @@ This is the core library used by both the `nex` CLI (`now-sdk-ext-cli`) and the 
 ## Architecture
 
 - **Managers** — each takes a `ServiceNowInstance` and constructs its OWN `ServiceNowRequest` in its constructor. `SNRequestBase` exists and offers that shape, but only `UserRequest` extends it; do not assume a shared base.
-- **`SessionManager`** — caches a `ServiceNowRequest` per instance alias. Only four consumers use it (`TableAPIRequest`, `BackgroundScriptExecutor`, `AMBClient`, `ScriptTracer`); the other ~21 managers bypass it entirely. Internal — deliberately excluded from the public barrel.
+- **`SessionManager`** — caches a `ServiceNowRequest` per instance alias. Used by `TableAPIRequest`, `BackgroundScriptExecutor`, `AMBClient`, `ScriptTracer` and most newer managers (the metadata writers, `FormRecordWriter`, `WorkingSetManager`, `UpdateSetExporter`, `WorkflowManager`, `WorkflowDiagramClient`, `FlowDebugger`); older managers such as `FlowManager` still build their own `ServiceNowRequest`. Internal — deliberately excluded from the public barrel.
 - **ServiceNowInstance** — central connection object holding host, username, alias, and credential. Passed to all manager constructors.
 - **ServiceNowRequest** — HTTP abstraction layer that handles authentication, CSRF tokens, cookies, and session management automatically via `@servicenow/sdk-cli-core`'s `makeRequest`.
 - **Communication Layer**: `RequestHandler` (HTTP with cookie/auth handling), `ATFMessageHandler` (WebSocket), `AuthenticatedWebSocket` (AMB event subscriptions via CometD).

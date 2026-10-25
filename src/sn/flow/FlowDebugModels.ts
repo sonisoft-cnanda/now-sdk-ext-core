@@ -152,7 +152,7 @@ export interface FlowDebugCancelResult {
     before: string;
     /** State read back afterwards. */
     after: string;
-    /** True when this call ended the run. */
+    /** True when this call ended the run, or one of its subflow contexts. */
     cancelled: boolean;
     /** True when the run had already ended, so nothing was sent. */
     alreadyEnded: boolean;
@@ -174,7 +174,10 @@ export interface FlowDebugRunToResult {
     session: FlowDebugSession;
     /** The run as it was at the breakpoint, or at its end if it never reached one. */
     snapshot: FlowDebugSnapshot;
-    /** Set when `after` was `resume`: the run after it finished. */
+    /**
+     * Set when `after` was `resume`: the run as last seen. If its state is not COMPLETE, ERROR or
+     * CANCELLED, it was left running (`timedOut`, or WAITING).
+     */
     final?: FlowDebugSnapshot;
     /** Set when `after` was `cancel`. */
     cancel?: FlowDebugCancelResult;

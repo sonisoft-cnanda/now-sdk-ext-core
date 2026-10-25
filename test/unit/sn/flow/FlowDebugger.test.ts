@@ -54,7 +54,8 @@ let contexts: Map<string, Ctx>;
 let calls: Array<{ method: string; path: string; body?: unknown; query?: Record<string, string>; sensitive?: boolean }>;
 let platform: { startReply?: Record<string, unknown>; startError?: Error; debugError?: Error; neverPause?: boolean;
     childDelayReads?: number; unverifiedLines?: number[]; dropBreakpointsOnRead?: boolean; flowType?: string; definitionFailure?: string;
-    noDebugger?: boolean; errorBeforePause?: boolean; childCancelIgnored?: boolean; readError?: Error; frozenRunTime?: boolean };
+    noDebugger?: boolean; errorBeforePause?: boolean; childCancelIgnored?: boolean; readError?: Error; frozenRunTime?: boolean;
+    grandchild?: boolean };
 let order = 0;
 let serial = 0;
 let now = 0;
@@ -116,7 +117,8 @@ function settle(ctx: Ctx) {
         return;
     }
     if (command === 'STEP_INTO' && ctx.subflowAt?.[line]) {
-        const child = newContext(ctx.subflowAt[line], { parent: ctx.id, flow: fixtureFlow('child-'), allowed: [], cancelIgnored: platform.childCancelIgnored });
+        const child = newContext(ctx.subflowAt[line], { parent: ctx.id, flow: fixtureFlow('child-'), allowed: [], cancelIgnored: platform.childCancelIgnored,
+            ...(platform.grandchild && !ctx.parent ? { subflowAt: { [ctx.subflowAt[line][0]]: [2, 4] } } : {}) });
         child.allowed = ctx.subflowAt[line].map(l => ({ flowElementId: 'child-' + UI.create, line: l }));
         if (platform.childDelayReads) {
             const delay = platform.childDelayReads;
@@ -584,6 +586,26 @@ describe('step into a subflow', () => {
         expect(contexts.get(inChild.contextId)!.state).toBe('CANCELLED');
     });
 
+    it('cancelling the root ends a grandchild too, though the cancel only cascades one level', async () => {
+        platform.grandchild = true;
+        const { contextId } = await dbg.start({ flow: NESTED, inputs: { update_set_ids: ['a'] } });
+        await dbg.stepInto(contextId);
+        await dbg.stepInto(contextId);
+        const inGrandchild = await dbg.stepInto(contextId);
+        expect(inGrandchild.chain).toHaveLength(3);
+        expect(await dbg.cancel(contextId)).toMatchObject({ after: 'CANCELLED', cancelled: true });
+        expect(contexts.get(inGrandchild.contextId)!.state).toBe('CANCELLED');
+    });
+
+    it('a root that already ended with a child still open: the child is cancelled, and that is reported', async () => {
+        const { contextId } = await dbg.start({ flow: NESTED, inputs: { update_set_ids: ['a'] } });
+        await dbg.stepInto(contextId);
+        const inChild = await dbg.stepInto(contextId);
+        contexts.get(contextId)!.state = 'ERROR';
+        expect(await dbg.cancel(contextId)).toMatchObject({ before: 'ERROR', after: 'ERROR', cancelled: true, alreadyEnded: false });
+        expect(contexts.get(inChild.contextId)!.state).toBe('CANCELLED');
+    });
+
     it('cancelling the root ends the child too', async () => {
         const { contextId } = await dbg.start({ flow: NESTED, inputs: { update_set_ids: ['a'] } });
         await dbg.stepInto(contextId);
@@ -634,6 +656,12 @@ describe('runTo and withSession', () => {
         expect(result.snapshot.pausedLines).toEqual([1]);
         expect(posts('debug/command')).toHaveLength(0);
         expect(contexts.get(result.session.contextId)!.state).toBe('PAUSED_IN_DEBUG');
+    });
+
+    it('with after resume, final is the run as last seen even when the resume did not pause', async () => {
+        const result = await dbg.runTo({ flow: FLOW, inputs, breakpoints: [4], after: 'resume' });
+        expect(result.snapshot.state).toBe('COMPLETE');
+        expect(result.final?.state).toBe('COMPLETE');
     });
 
     it('can let the run finish instead', async () => {

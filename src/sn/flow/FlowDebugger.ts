@@ -61,7 +61,8 @@ const str = (value: unknown): string => {
  *
  * A debug run executes the flow or subflow for real, so its actions create and change records,
  * and it holds a flow context open while paused. Every run must be ended: by running it to the
- * end, or with {@link cancel}. {@link withSession} and {@link runTo} do that for you.
+ * end, or with {@link cancel}. {@link withSession}, and {@link runTo} by default, cancel the run
+ * for you; `runTo` with `after: 'resume'` or `'stay'` leaves it running or paused.
  *
  * The APIs are Workflow Studio's own (`/api/now/processflow/debug/…`), not a published REST
  * contract. They work with the ordinary OAuth credential; no UI session is needed.
@@ -300,18 +301,28 @@ export class FlowDebugger {
         const root = await this.rootOf(this.id(contextId));
         const first = await this.read(root);
         if (obj(first.flowContext).debugMode !== true) throw new FlowDebugError('not_a_debug_session', { contextId: root, state: first.state });
+        // Collected before the cancel: once the root's cancel ends a middle context, a walk from the
+        // root no longer reaches the contexts below it.
         const openBefore = await this.openDescendants(root);
         if (ENDED.has(first.state) && openBefore.length === 0) {
             return { contextId: root, before: first.state, after: first.state, cancelled: false, alreadyEnded: true };
         }
+        let endedHere = false;
         if (!ENDED.has(first.state)) await this.postCancel(root);
         let after = ENDED.has(first.state) ? first.state : await this.settleCancel(root);
-        // Cancelling the root has ended its subflow contexts every time it was tried; a child left
-        // open would still hold a worker, so each one is checked, and cancelled itself if needed.
-        for (const child of await this.openDescendants(root)) {
+        // Cancelling the root has ended its subflow contexts every time it was tried; one left open
+        // would still hold a worker, so each is read back, and cancelled itself if needed.
+        const descendants = [...new Set([...openBefore, ...await this.openDescendants(root)])];
+        for (const child of descendants) {
+            const state = (await this.read(child)).state;
+            if (ENDED.has(state)) {
+                endedHere = endedHere || state === 'CANCELLED';
+                continue;
+            }
             await this.postCancel(child);
-            const state = await this.settleCancel(child);
-            if (!ENDED.has(state)) throw new FlowDebugError('cancel_failed', { contextId: child, state });
+            const settled = await this.settleCancel(child);
+            if (!ENDED.has(settled)) throw new FlowDebugError('cancel_failed', { contextId: child, state: settled });
+            endedHere = true;
         }
         if (!ENDED.has(after)) {
             await this.postCancel(root);
@@ -319,7 +330,8 @@ export class FlowDebugger {
         }
         if (!ENDED.has(after)) throw new FlowDebugError('cancel_failed', { contextId: root, state: after });
         this._logger.info('Flow debug run cancelled', { contextId: root, before: first.state, after });
-        return { contextId: root, before: first.state, after, cancelled: after === 'CANCELLED', alreadyEnded: false };
+        const cancelled = (!ENDED.has(first.state) && after === 'CANCELLED') || endedHere;
+        return { contextId: root, before: first.state, after, cancelled, alreadyEnded: false };
     }
 
     /**
@@ -338,7 +350,11 @@ export class FlowDebugger {
             const atBreakpoint = snapshot.state === 'PAUSED' && snapshot.pausedLines.some(l => lines.has(l)) && snapshot.contextId === root;
             if (snapshot.state === 'PAUSED' && !atBreakpoint) snapshot = await this.resume(root, { timeoutMs: options.timeoutMs });
             const result: FlowDebugRunToResult = { session, snapshot };
-            if (after === 'resume' && snapshot.state === 'PAUSED') result.final = await this.skipAll(root, { timeoutMs: options.timeoutMs });
+            if (after === 'resume') {
+                // final is the run as last seen. Not paused means it is already running on (or ended):
+                // a run that has not ended by then is left running, and final says so.
+                result.final = snapshot.state === 'PAUSED' ? await this.skipAll(root, { timeoutMs: options.timeoutMs }) : snapshot;
+            }
             if (after === 'cancel') result.cancel = await this.cancel(root);
             return result;
         } catch (error) {
@@ -347,7 +363,13 @@ export class FlowDebugger {
         }
     }
 
-    /** Start a run, hand it to `work`, and cancel it afterwards unless it has ended. */
+    /**
+     * Start a run, hand it to `work`, and cancel it afterwards unless it has ended.
+     *
+     * If `work` throws, the run is cancelled and `work`'s error is rethrown. If `work` succeeds but
+     * the final cancel fails, the cancel's error is thrown instead of the result: a run that may
+     * still be open matters more than the result.
+     */
     public async withSession<T>(options: FlowDebugStartOptions, work: (session: FlowDebugSession) => Promise<T>): Promise<T> {
         const session = await this.start(options);
         let result: T;
@@ -664,7 +686,7 @@ export class FlowDebugger {
     /** Child subflow contexts of `parent` that are still open: a paused one first, then newest first. */
     private async openChildren(parent: string): Promise<string[]> {
         const rows = await this.table('sys_flow_context',
-            `source_table=sys_flow_context^source_record=${parent}^stateIN${OPEN.join(',')}^ORDERBYDESCsys_created_on`, 'sys_id,state', 10);
+            `source_table=sys_flow_context^source_record=${parent}^stateIN${OPEN.join(',')}^ORDERBYDESCsys_created_on`, 'sys_id,state', 100);
         const open = rows.filter(row => ID.test(str(row.sys_id)));
         const paused = open.filter(row => str(row.state) === 'PAUSED_IN_DEBUG');
         return [...paused, ...open.filter(row => !paused.includes(row))].map(row => str(row.sys_id));

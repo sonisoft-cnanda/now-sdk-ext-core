@@ -48,7 +48,7 @@ await dbg.withSession({ flow: FLOW_SYS_ID, inputs }, async (session) => {
 | `inspect(ctx)` | The run as it is now, without moving it. |
 | `locations(ctx)` | Where the active context can stop. |
 | `cancel(ctx)` | Ends the run, and every subflow context below it, and reads each one back. Safe to repeat. A child context id is followed up to its root. |
-| `runTo(options)` | Start, run to the first breakpoint, report, then (`after`) `cancel` (the default), `resume` or `stay`. With `resume`, a run that has not finished when the wait ends is left running (`final.timedOut`); with `stay`, it is left as it is. |
+| `runTo(options)` | Start, run to the first breakpoint, report, then (`after`) `cancel` (the default), `resume` or `stay`. With `resume`, `final` is the run as last seen, and one that has not ended by then (still running, or waiting) is left running; with `stay`, it is left as it is. |
 | `withSession(options, work)` | Start, run `work`, cancel afterwards unless the run ended. |
 | `listSessions({ createdBy? })` | Debug runs still open on the instance, newest first: for finding one a crashed process left paused. |
 
