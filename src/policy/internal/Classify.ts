@@ -27,11 +27,20 @@ interface FloorRule {
     /** Human-readable, appears in the audit log. */
     readonly why: string;
     readonly verbs: readonly Verb[];
+    /**
+     * HTTP methods the rule applies to, lowercase. Absent means every method. Set it
+     * where the same path is also read with a GET, so the floor does not refuse reads.
+     */
+    readonly methods?: readonly string[];
     matches(path: string, query: Record<string, unknown>): boolean;
 }
 
 const pathIs = (needle: string) => (path: string) => path.split("?")[0].endsWith(needle);
 const pathHas = (needle: string) => (path: string) => path.includes(needle);
+const pathMatches = (pattern: RegExp) => (path: string) => pattern.test(path.split("?")[0]);
+
+/** Every method except GET: the debugger reads its breakpoints over the same paths. */
+const NOT_GET = ["post", "put", "patch", "delete"] as const;
 
 /**
  * Un-lowerable minimums.
@@ -46,6 +55,22 @@ const FLOOR: readonly FloorRule[] = [
         why: "background script execution",
         verbs: ["execute"],
         matches: (p) => pathIs("/sys.scripts.do")(p),
+    },
+    // Flow Designer's Test and Debug run the flow for real: its actions create and
+    // update records and can call out. The tier-3 default only says write, which left
+    // `--deny-execute` letting them through. Breakpoint changes and cancel are not
+    // here: they run nothing new, and cancel must stay possible under deny-execute.
+    {
+        why: "flow designer test run",
+        verbs: ["execute"],
+        methods: NOT_GET,
+        matches: (p) => pathMatches(/\/api\/now\/processflow\/(?:flow|action\/action_types)\/[^/]+\/test\/?$/)(p),
+    },
+    {
+        why: "flow designer debug run",
+        verbs: ["execute"],
+        methods: NOT_GET,
+        matches: (p) => pathMatches(/\/api\/now\/processflow\/debug\/(?:start|command)\//)(p),
     },
     // NOTE: /xmlhttp.do is deliberately NOT a floor rule, even though the most
     // destructive call in the library (Application.uninstall) goes through it. The same
@@ -118,9 +143,14 @@ export function floorFor(request: HTTPRequest): { verbs: Verb[]; reasons: string
     const path = typeof request.path === "string" ? request.path : "";
     const query = normalizeQuery(request);
 
+    const method = (request.method ?? "get").toLowerCase();
+
     const verbs = new Set<Verb>();
     const reasons: string[] = [];
     for (const rule of FLOOR) {
+        if (rule.methods && !rule.methods.includes(method)) {
+            continue;
+        }
         if (rule.matches(path, query)) {
             rule.verbs.forEach((v) => verbs.add(v));
             reasons.push(rule.why);
