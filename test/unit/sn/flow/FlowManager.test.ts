@@ -2173,6 +2173,19 @@ describe('FlowManager - Unit Tests', () => {
             expect(result.flowContext!.executionSource.callingSource).toBe('TEST_BUTTON');
         });
 
+        it('should report where a debug run is paused, and omit it otherwise', async () => {
+            mockRequestHandler.get.mockResolvedValueOnce({
+                data: { result: { ...MOCK_OPERATIONS_RESPONSE, flowContext: { ...MOCK_OPERATIONS_RESPONSE.flowContext,
+                    state: 'PAUSED_IN_DEBUG', debugMode: true, pausedInDebugLocations: [6] } } }
+            });
+            const paused = await flowMgr.getFlowContextDetails(CONTEXT_ID);
+            expect(paused.flowContext!.pausedInDebugLocations).toEqual([6]);
+
+            mockRequestHandler.get.mockResolvedValueOnce({ data: { result: MOCK_OPERATIONS_RESPONSE } });
+            const ended = await flowMgr.getFlowContextDetails(CONTEXT_ID);
+            expect(ended.flowContext).not.toHaveProperty('pausedInDebugLocations');
+        });
+
         it('should return flow execution report with action reports and resolved step labels', async () => {
             mockRequestHandler.get.mockResolvedValueOnce({
                 data: { result: MOCK_OPERATIONS_RESPONSE }

@@ -141,6 +141,15 @@ function exportedNames(): string[] {
         }
     });
 
+    it('exports the flow debugger and its types', () => {
+        const names = exportedNames();
+        for (const name of ['FlowDebugger', 'FlowDebugError', 'FlowDebugCommand', 'FlowDebugState', 'FlowDebugStepRef',
+            'FlowDebugStepInfo', 'FlowDebugLocation', 'FlowDebugBreakpoint', 'FlowDebugValue', 'FlowDebugStepData',
+            'FlowDebugSnapshot', 'FlowDebugStartOptions', 'FlowDebugSession', 'FlowDebugWaitOptions', 'FlowDebugCancelResult',
+            'FlowDebugRunToOptions', 'FlowDebugRunToResult', 'FlowDebugSessionSummary', 'FlowDebugListOptions',
+            'FlowDebugErrorCode', 'FlowDebugErrorDetail']) expect(names).toContain(name);
+    });
+
     it('exports the flow design-time definition contract', () => {
         // getFlowArtifactDefinition/getActionDefinition are unusable from a typed
         // consumer without their result and option types — the same shape of gap

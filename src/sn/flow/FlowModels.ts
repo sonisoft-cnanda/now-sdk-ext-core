@@ -787,6 +787,12 @@ export interface FlowContextInfo {
     /** Whether debug mode was enabled */
     debugMode: boolean;
 
+    /**
+     * Debugger lines a debug run is paused at (Workflow Studio's Test ▸ Debug). Empty unless
+     * `state` is PAUSED_IN_DEBUG. These are the debugger's numbers, not step numbers: see FlowDebugger.
+     */
+    pausedInDebugLocations?: number[];
+
     /** How the flow was triggered */
     executionSource: FlowExecutionSource;
 
