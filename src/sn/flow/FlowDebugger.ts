@@ -692,18 +692,25 @@ export class FlowDebugger {
         return [...paused, ...open.filter(row => !paused.includes(row))].map(row => str(row.sys_id));
     }
 
-    /** Every open context below `root`, at any depth up to MAX_DEPTH. */
+    /**
+     * Every open context below `root`, at any depth up to MAX_DEPTH. Ended contexts are walked
+     * through too: a cancel can end a middle context and leave the one below it paused.
+     */
     private async openDescendants(root: string): Promise<string[]> {
         const found: string[] = [];
+        const seen = new Set([root]);
         let level = [root];
         for (let depth = 0; depth < MAX_DEPTH && level.length; depth++) {
             const next: string[] = [];
             for (const parent of level) {
-                for (const child of await this.openChildren(parent)) {
-                    if (child !== root && !found.includes(child)) {
-                        found.push(child);
-                        next.push(child);
-                    }
+                const rows = await this.table('sys_flow_context',
+                    `source_table=sys_flow_context^source_record=${parent}^ORDERBYDESCsys_created_on`, 'sys_id,state', 100);
+                for (const row of rows) {
+                    const child = str(row.sys_id);
+                    if (!ID.test(child) || seen.has(child)) continue;
+                    seen.add(child);
+                    next.push(child);
+                    if (OPEN.includes(str(row.state))) found.push(child);
                 }
             }
             level = next;

@@ -183,7 +183,7 @@ function table(path: string, query: Record<string, string>) {
         if (parent) {
             // Only answer the query FlowDebugger must send: children of a flow context, by state.
             if (!q.startsWith('source_table=sys_flow_context^')) return { bodyObject: { result: [] } };
-            const kids = [...contexts.values()].filter(c => c.parent === parent && states.includes(c.state)).reverse();
+            const kids = [...contexts.values()].filter(c => c.parent === parent && (states.length === 0 || states.includes(c.state))).reverse();
             return { bodyObject: { result: kids.map(c => ({ sys_id: c.id, state: c.state })) } };
         }
         const open = [...contexts.values()].filter(c => !c.parent && ['PAUSED_IN_DEBUG', 'WAITING', 'IN_PROGRESS', 'QUEUED'].includes(c.state));
@@ -594,6 +594,18 @@ describe('step into a subflow', () => {
         const inGrandchild = await dbg.stepInto(contextId);
         expect(inGrandchild.chain).toHaveLength(3);
         expect(await dbg.cancel(contextId)).toMatchObject({ after: 'CANCELLED', cancelled: true });
+        expect(contexts.get(inGrandchild.contextId)!.state).toBe('CANCELLED');
+    });
+
+    it('a grandchild left paused under a root and child that already ended is still found and cancelled', async () => {
+        platform.grandchild = true;
+        const { contextId } = await dbg.start({ flow: NESTED, inputs: { update_set_ids: ['a'] } });
+        await dbg.stepInto(contextId);
+        const inChild = await dbg.stepInto(contextId);
+        const inGrandchild = await dbg.stepInto(contextId);
+        contexts.get(contextId)!.state = 'CANCELLED';
+        contexts.get(inChild.contextId)!.state = 'CANCELLED';
+        expect(await dbg.cancel(contextId)).toMatchObject({ after: 'CANCELLED', cancelled: true, alreadyEnded: false });
         expect(contexts.get(inGrandchild.contextId)!.state).toBe('CANCELLED');
     });
 
