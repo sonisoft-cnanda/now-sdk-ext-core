@@ -22,6 +22,7 @@ A comprehensive TypeScript library that extends the ServiceNow SDK with powerful
 - 📎 **Attachment Management** - Upload, list, and retrieve file attachments
 - ⚡ **Batch Operations** - Bulk create/update with variable substitution and query-based bulk operations
 - 🔧 **Workflow Management** - Create complete workflows programmatically
+- 🐞 **Flow Debugger** - Step through a flow or subflow with Workflow Studio's debugger: breakpoints, step into subflows, runtime step data
 - 📌 **Task Operations** - Add comments, assign tasks, resolve/close incidents
 - 🔗 **Script Sync** - Bidirectional sync of scripts between local files and instance
 - 📈 **Aggregate Queries** - COUNT, AVG, MIN, MAX, SUM with GROUP BY via Stats API
@@ -572,6 +573,7 @@ console.log('Return value:', result.result);
 ### Workflow & Task
 
 - **`WorkflowManager`** - Create complete workflows with activities, transitions, and conditions
+- **`FlowDebugger`** - Workflow Studio's Test ▸ Debug over REST: breakpoints, stepping, step data, cancel read back
 - **`TaskOperations`** - Add comments, assign tasks, resolve/close incidents, approve changes
 
 ### Scripting
@@ -742,6 +744,7 @@ Comprehensive documentation is available in the `/docs` directory:
 
 **Workflow, Task & Scripting:**
 - **[Workflow Manager](./docs/WorkflowManager.md)** - Programmatic workflow creation
+- **[Flow Debugger](./docs/FlowDebugger.md)** - Step through flows and subflows with the Workflow Studio debugger
 - **[Task Operations](./docs/TaskOperations.md)** - ITSM task management
 - **[Script Sync](./docs/ScriptSync.md)** - Bidirectional script synchronization
 

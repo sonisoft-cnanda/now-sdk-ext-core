@@ -428,6 +428,36 @@ renderFlowPlan(plan: FlowConversionPlan): string
 generateFluentFlow(plan: FlowConversionPlan, options?: FluentGeneratorOptions): FluentSourceFile[]
 ```
 
+### FlowDebugger
+
+Drive Workflow Studio's flow debugger (Test ▸ Debug): breakpoints by step number, step over, into (including into subflows) and out, runtime inputs and outputs while paused, and a cancel that is read back. A debug run executes the flow for real. See [FlowDebugger Guide](./FlowDebugger.md).
+
+```typescript
+class FlowDebugger {
+    constructor(instance: ServiceNowInstance)
+
+    start(options: FlowDebugStartOptions): Promise<FlowDebugSession>
+    runTo(options: FlowDebugRunToOptions): Promise<FlowDebugRunToResult>
+    withSession<T>(options: FlowDebugStartOptions, work: (session: FlowDebugSession) => Promise<T>): Promise<T>
+
+    inspect(contextId: string): Promise<FlowDebugSnapshot>
+    locations(contextId: string): Promise<FlowDebugLocation[]>
+    getBreakpoints(contextId: string): Promise<FlowDebugBreakpoint[]>
+    setBreakpoints(contextId: string, steps: FlowDebugStepRef[]): Promise<FlowDebugBreakpoint[]>
+    clearBreakpoints(contextId: string): Promise<void>
+
+    stepOver(contextId: string, options?: FlowDebugWaitOptions): Promise<FlowDebugSnapshot>
+    stepInto(contextId: string, options?: FlowDebugWaitOptions): Promise<FlowDebugSnapshot>
+    stepOut(contextId: string, options?: FlowDebugWaitOptions): Promise<FlowDebugSnapshot>
+    resume(contextId: string, options?: FlowDebugWaitOptions): Promise<FlowDebugSnapshot>
+    skipAll(contextId: string, options?: FlowDebugWaitOptions): Promise<FlowDebugSnapshot>
+    command(contextId: string, command: FlowDebugCommand, options?: FlowDebugWaitOptions): Promise<FlowDebugSnapshot>
+
+    cancel(contextId: string): Promise<FlowDebugCancelResult>
+    listSessions(options?: FlowDebugListOptions): Promise<FlowDebugSessionSummary[]>
+}
+```
+
 ### FormRecordWriter
 
 Writes a record through its classic UI form, the way a browser does — the path that saves
@@ -826,6 +856,7 @@ enum ProgressStatus {
 - [Attachment Manager](./AttachmentManager.md)
 - [Batch Operations](./BatchOperations.md)
 - [Query Batch Operations](./QueryBatchOperations.md)
+- [Flow Debugger](./FlowDebugger.md)
 - [Workflow Manager](./WorkflowManager.md)
 - [Legacy Workflow Internals](./LegacyWorkflowInternals.md)
 - [FormRecordWriter](./FormRecordWriter.md)

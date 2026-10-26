@@ -1414,6 +1414,9 @@ export class FlowManager {
             flowInitiatedBy: String(raw.flowInitiatedBy ?? ''),
             reporting: String(raw.reporting ?? ''),
             debugMode: raw.debugMode === true,
+            ...(Array.isArray(raw.pausedInDebugLocations)
+                ? { pausedInDebugLocations: (raw.pausedInDebugLocations as unknown[]).map(Number).filter(Number.isFinite) }
+                : {}),
             executionSource: {
                 callingSource: execSource?.callingSource ?? '',
                 executionSourceTable: execSource?.executionSourceTable ?? '',
