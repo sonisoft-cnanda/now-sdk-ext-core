@@ -266,7 +266,7 @@ describe('ApplicationManager store application repair', () => {
         const result = await mgr.repairStoreApplicationAndWait({ app: SCOPE }, 1, 60_000);
         expect(result.success).toBe(true);
         expect(result.repaired).toBe(false);
-        expect(result.warnings).toEqual([expect.stringContaining('still being written')]);
+        expect(result.warnings).toEqual([expect.stringContaining('the repair probably ran')]);
         expect(tableReads.filter(r => r.table === 'sys_upgrade_history' && r.query.includes('sys_created_on>='))).toHaveLength(1 + mgr.REPAIR_HISTORY_ATTEMPTS);
     });
 
@@ -331,7 +331,21 @@ describe('ApplicationManager store application repair', () => {
             ],
         };
         const result = await mgr.repairStoreApplicationAndWait({ app: SCOPE }, 1, 60_000);
-        expect(result.history?.skippedFiles.map(f => f.dispositionLabel)).toEqual(['Skipped Apply Once', 'Fatal Error']);
+        expect(result.history?.skippedFiles.map(f => f.dispositionLabel)).toEqual(['Fatal Error', 'Skipped Apply Once']);
+        expect(result.warnings).toEqual([expect.stringContaining('1 file(s) were not applied')]);
+    });
+
+    it('does not let a long list of apply-once files push a fatal error out of the list or the warning', async () => {
+        const applyOnce = Array.from({ length: STORE_APP_REPAIR_SKIPPED_LIMIT + 10 }, (_, i) => (
+            { upgrade_history: NEW_HISTORY, file_name: `a_${String(i).padStart(3, '0')}`, type: 'T', target_name: 't', disposition: '11' }));
+        world.writes = {
+            history: history(NEW_HISTORY, { skipped_apply_once: String(applyOnce.length) }),
+            logs: [...applyOnce, { upgrade_history: NEW_HISTORY, file_name: 'z_page', type: 'UI Page', target_name: 'p', disposition: '301' }],
+        };
+        const result = await mgr.repairStoreApplicationAndWait({ app: SCOPE }, 1, 60_000);
+        expect(result.history?.skippedFiles[0]).toMatchObject({ fileName: 'z_page', dispositionLabel: 'Fatal Error' });
+        expect(result.history?.skippedFiles).toHaveLength(STORE_APP_REPAIR_SKIPPED_LIMIT);
+        expect(result.history?.skippedFilesTruncated).toBe(true);
         expect(result.warnings).toEqual([expect.stringContaining('1 file(s) were not applied')]);
     });
 

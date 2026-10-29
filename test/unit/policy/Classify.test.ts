@@ -60,6 +60,11 @@ describe("tier 1 — floor, for mutations the verb hides", () => {
         "/api/sn_appclient/appmanager/app/install#x",
         "/api/sn_appclient//appmanager/app//repair",
         "/API/SN_APPCLIENT/V1/APPMANAGER/APP/REPAIR",
+        // Resolved by new URL() before sending, or decoded by the server.
+        "/api/sn_appclient/./appmanager/app/repair",
+        "/api/sn_appclient/v1/../appmanager/app/install?app_id=abc",
+        "/api\\sn_appclient\\appmanager\\app\\repair",
+        "/api/sn_appclient/appmanager/app/%72epair",
     ])("catches the App Client's mutating GET %s, versioned or not", (path) => {
         expect(classify(req({ method: "GET", path })).verbs).toEqual(["write"]);
     });
@@ -73,6 +78,13 @@ describe("tier 1 — floor, for mutations the verb hides", () => {
         "/api/sn_appclient/v1/appmanager/app/repair_info",
     ])("leaves the App Client's reads, such as %s, as reads", (path) => {
         expect(classify(req({ method: "GET", path })).verbs).toEqual([]);
+    });
+
+    it("checks every floor rule against the path as it will be sent, not only as written", () => {
+        expect(classify(req({ method: "POST", path: "/x/../sys.scripts.do" })).verbs).toContain("execute");
+        expect(classify(req({ method: "GET", path: "/api/now/./table/sys_trigger" })).verbs).toEqual(["write"]);
+        // A malformed escape cannot be decoded; the raw and URL-resolved spellings still apply.
+        expect(classify(req({ method: "GET", path: "/api/sn_appclient/./appmanager/app/repair%" })).verbs).toEqual(["write"]);
     });
 
     it("catches sysparm_delete_all wherever it rides", () => {

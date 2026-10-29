@@ -527,8 +527,9 @@ export class ApplicationManager {
     * Wait for a started repair, then read the upgrade history it wrote.
     *
     * `repaired` is true only when the App Client reported success and a new
-    * sys_upgrade_history row appeared for the app: the App Client also reports success
-    * when it decided no reinstall was necessary.
+    * sys_upgrade_history row appeared for the app and finished: the App Client also
+    * reports success when it decided no reinstall was necessary, and its tracker can end
+    * seconds before the row's counts are filled.
     */
    public async waitForStoreApplicationRepair(
        started: StoreAppRepairStart,
@@ -550,7 +551,8 @@ export class ApplicationManager {
            await new Promise(resolve => setTimeout(resolve, this.REPAIR_HISTORY_SETTLE_MS));
            row = await this._repairHistoryRow(started);
        }
-       const history = row ? await this._repairHistory(row) : undefined;
+       const read = row ? await this._repairHistory(row) : undefined;
+       const history = read?.history;
 
        const complete = historyComplete(row);
        const warnings: string[] = [];
@@ -558,18 +560,20 @@ export class ApplicationManager {
            warnings.push('The App Client reported success but wrote no upgrade history for this application, so it may not have reinstalled anything.');
        }
        if (row && !complete) {
-           warnings.push('The upgrade history was still being written when the wait ended, so its counts may be incomplete.');
+           warnings.push(final.success
+               ? 'The App Client reported success, but the upgrade history was still being written when the wait ended, so the repair probably ran and its counts may be incomplete. Check the history before repairing again.'
+               : 'The upgrade history was still being written when the wait ended, so its counts may be incomplete.');
        }
-       if (history) {
+       if (read) {
            // The counts leave out Table Not Found, Fatal Error and Not Loaded; the listed files do not.
            // Apply-once files are expected to be left alone on a reinstall.
-           const c = history.counts;
+           const c = read.history.counts;
            const counted = c.skipped + c.skippedError + c.skippedManualMerge;
-           const listed = history.skippedFiles.filter(file => file.disposition !== '11').length;
-           const notApplied = Math.max(counted, listed);
-           if (notApplied > 0) {
-               const more = history.skippedFilesTruncated && listed >= counted ? ' or more' : '';
-               warnings.push(`${notApplied}${more} file(s) were not applied (skipped ${c.skipped}, errors ${c.skippedError}, manual merge ${c.skippedManualMerge}). See the skipped files and the upgrade history.`);
+           const listed = Math.min(read.notApplied, STORE_APP_REPAIR_SKIPPED_LIMIT);
+           const total = Math.max(counted, listed);
+           if (total > 0) {
+               const more = read.notApplied > STORE_APP_REPAIR_SKIPPED_LIMIT && listed >= counted ? ' or more' : '';
+               warnings.push(`${total}${more} file(s) were not applied (skipped ${c.skipped}, errors ${c.skippedError}, manual merge ${c.skippedManualMerge}). See the skipped files and the upgrade history.`);
            }
        }
 
@@ -658,15 +662,24 @@ export class ApplicationManager {
        return rows.find(row => !started.previousHistoryIds.includes(row.sys_id));
    }
 
-   private async _repairHistory(row: RepairHistoryRow): Promise<StoreAppRepairHistory> {
-       const skippedRows = await this._rows<RepairHistoryLogRow>(
-           'sys_upgrade_history_log',
-           `upgrade_history=${row.sys_id}^dispositionIN${Object.keys(SKIPPED_DISPOSITIONS).join(',')}^ORDERBYfile_name`,
-           'file_name,type,target_name,disposition,reason',
-           STORE_APP_REPAIR_SKIPPED_LIMIT + 1
-       );
+   /**
+    * The repair's history row, with the files it did not apply. Files that were not applied
+    * for a reason other than apply-once are read first, so a long list of apply-once files
+    * cannot push a fatal error out of the list. `notApplied` counts those, up to the limit + 1.
+    */
+   private async _repairHistory(row: RepairHistoryRow): Promise<{ history: StoreAppRepairHistory; notApplied: number }> {
+       const fields = 'file_name,type,target_name,disposition,reason';
+       const problems = Object.keys(SKIPPED_DISPOSITIONS).filter(code => code !== APPLY_ONCE_DISPOSITION).join(',');
+       const notApplied = await this._rows<RepairHistoryLogRow>(
+           'sys_upgrade_history_log', `upgrade_history=${row.sys_id}^dispositionIN${problems}^ORDERBYfile_name`, fields, STORE_APP_REPAIR_SKIPPED_LIMIT + 1);
+       const room = STORE_APP_REPAIR_SKIPPED_LIMIT + 1 - notApplied.length;
+       const applyOnce = room > 0
+           ? await this._rows<RepairHistoryLogRow>(
+               'sys_upgrade_history_log', `upgrade_history=${row.sys_id}^disposition=${APPLY_ONCE_DISPOSITION}^ORDERBYfile_name`, fields, room)
+           : [];
+       const skippedRows = [...notApplied, ...applyOnce];
        const count = (value: string | undefined) => Number.parseInt(value ?? '', 10) || 0;
-       return {
+       const history: StoreAppRepairHistory = {
            sysId: row.sys_id,
            started: row.upgrade_started || undefined,
            finished: row.upgrade_finished || undefined,
@@ -691,6 +704,7 @@ export class ApplicationManager {
            })),
            skippedFilesTruncated: skippedRows.length > STORE_APP_REPAIR_SKIPPED_LIMIT
        };
+       return { history, notApplied: notApplied.length };
    }
 
    private _repairStartFailure(error: unknown, app: StoreAppRepairTarget): unknown {
@@ -830,6 +844,8 @@ const SKIPPED_DISPOSITIONS: Record<string, string> = {
     "301": "Fatal Error",
     "302": "Not Loaded"
 };
+
+const APPLY_ONCE_DISPOSITION = "11";
 
 /** A history row is finished once it has an end time and its summary is complete. */
 function historyComplete(row: RepairHistoryRow | undefined): boolean {

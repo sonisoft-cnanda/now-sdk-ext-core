@@ -166,10 +166,12 @@ export interface StoreAppRepairTarget {
 
 /**
  * Which App Client endpoint started the repair.
- * - `repair`: GET appmanager/app/repair, used when queued installation is on (the default).
- * - `install`: GET appmanager/app/install with isReinstall=true. With queued installation
- *   off, the repair endpoint passes its reinstall flag on as a boolean where a string is
- *   compared, and the repair silently becomes "no upgrade necessary"; this path does not.
+ * - `repair`: GET appmanager/app/repair, used when the property
+ *   sn_appclient.use_queued_installation is "true".
+ * - `install`: GET appmanager/app/install with isReinstall=true, used otherwise (the App
+ *   Client treats a missing property as off). With queued installation off, the repair
+ *   endpoint passes its reinstall flag on as a boolean where a string is compared, and the
+ *   repair silently becomes "no upgrade necessary"; this path does not.
  */
 export type StoreAppRepairEndpoint = 'repair' | 'install';
 
