@@ -73,6 +73,13 @@ constructor(instance: ServiceNowInstance)
 **installBatch(batchDefinitionPath: string): Promise<boolean>**
 - Install all applications in batch
 
+**repairStoreApplication(options: StoreAppRepairOptions): Promise<StoreAppRepairStart>**
+**repairStoreApplicationAndWait(options, pollIntervalMs?, timeoutMs?, onProgress?): Promise<StoreAppRepairResult>**
+**waitForStoreApplicationRepair(started, pollIntervalMs?, timeoutMs?, onProgress?): Promise<StoreAppRepairResult>**
+- Repair an installed store or company app (Repair Application): reinstall its installed version from the repository
+  without uninstalling it. `repaired` is true only when a new upgrade history row was written and finished; `history`
+  lists skipped files. Refusals throw `StoreAppRepairError`. See [ApplicationManager](./ApplicationManager.md#repairstoreapplication)
+
 ### AppRepoApplication
 
 #### Constructor

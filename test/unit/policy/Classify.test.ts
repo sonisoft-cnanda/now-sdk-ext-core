@@ -44,6 +44,51 @@ describe("tier 1 — floor, for mutations the verb hides", () => {
         expect(classify(r).verbs).toEqual(["write"]);
     });
 
+    it.each([
+        "/api/sn_appclient/appmanager/app/repair",
+        "/api/sn_appclient/v1/appmanager/app/repair",
+        "/api/sn_appclient/v1/appmanager/app/install",
+        "/api/sn_appclient/v1/appmanager/app/update",
+        "/api/sn_appclient/v1/appmanager/plugin/activate",
+        "/api/sn_appclient/appmanager/plugin/repair",
+        "/api/sn_appclient/v1/appmanager/plugin/rollback",
+        "/api/sn_appclient/v1/appmanager/loadDemoData",
+        "/api/sn_appclient/v1/appmanager/sync_apps",
+        "/api/sn_appclient/v1/appmanager/app/repair?app_id=abc&version=1.0.0",
+        "/api/sn_appclient/appmanager/app/install;x=1?app_id=abc",
+        "/api/sn_appclient/appmanager/app/install/",
+        "/api/sn_appclient/appmanager/app/install#x",
+        "/api/sn_appclient//appmanager/app//repair",
+        "/API/SN_APPCLIENT/V1/APPMANAGER/APP/REPAIR",
+        // Resolved by new URL() before sending, or decoded by the server.
+        "/api/sn_appclient/./appmanager/app/repair",
+        "/api/sn_appclient/v1/../appmanager/app/install?app_id=abc",
+        "/api\\sn_appclient\\appmanager\\app\\repair",
+        "/api/sn_appclient/appmanager/app/%72epair",
+        "/api/sn_appclient/appmanager;v=1/app/repair",
+        "/api;x/sn_appclient/appmanager/app/install?app_id=abc",
+    ])("catches the App Client's mutating GET %s, versioned or not", (path) => {
+        expect(classify(req({ method: "GET", path })).verbs).toEqual(["write"]);
+    });
+
+    it.each([
+        "/api/sn_appclient/v1/appmanager/app/abc123",
+        "/api/sn_appclient/v1/appmanager/progress/abc123",
+        "/api/sn_appclient/v1/appmanager/installations",
+        "/api/sn_appclient/v1/appmanager/plugin/com.snc.x",
+        "/api/sn_appclient/v1/appmanager/app/installations",
+        "/api/sn_appclient/v1/appmanager/app/repair_info",
+    ])("leaves the App Client's reads, such as %s, as reads", (path) => {
+        expect(classify(req({ method: "GET", path })).verbs).toEqual([]);
+    });
+
+    it("checks every floor rule against the path as it will be sent, not only as written", () => {
+        expect(classify(req({ method: "POST", path: "/x/../sys.scripts.do" })).verbs).toContain("execute");
+        expect(classify(req({ method: "GET", path: "/api/now/./table/sys_trigger" })).verbs).toEqual(["write"]);
+        // A malformed escape cannot be decoded; the raw and URL-resolved spellings still apply.
+        expect(classify(req({ method: "GET", path: "/api/sn_appclient/./appmanager/app/repair%" })).verbs).toEqual(["write"]);
+    });
+
     it("catches sysparm_delete_all wherever it rides", () => {
         // Application.uninstall sends this in `fields`, not the query string.
         const inFields = req({ method: "POST", path: "/xmlhttp.do", fields: { sysparm_delete_all: "true" } });

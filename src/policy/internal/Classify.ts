@@ -39,6 +39,10 @@ const pathIs = (needle: string) => (path: string) => path.split("?")[0].endsWith
 const pathHas = (needle: string) => (path: string) => path.includes(needle);
 const pathMatches = (pattern: RegExp) => (path: string) => pattern.test(path.split("?")[0]);
 
+/** An sn_appclient appmanager route, versioned or not, followed by anything but more of its name. */
+const appClientRoute = (route: string) =>
+    pathMatches(new RegExp(`/api/+sn_appclient/+(?:v\\d+/+)?appmanager/+${route}(?![\\w-])`, "i"));
+
 /** Every method except GET: the debugger reads its breakpoints over the same paths. */
 const NOT_GET = ["post", "put", "patch", "delete"] as const;
 
@@ -79,15 +83,30 @@ const FLOOR: readonly FloorRule[] = [
     // Coverage instead comes from three narrower places: the sysparm_delete_all rule
     // below catches the uninstall, the tier-3 default makes every other POST a write,
     // and the two callers that read or execute through it declare so explicitly.
+    // The App Client starts installs, updates, repairs and plugin changes with GETs, on
+    // both the unversioned path and /v1/. Matching one spelling left the other a read. The
+    // routes are those of the sn_appclient appmanager REST API (sys_ws_operation, Zurich).
+    // Not anchored at the end, and case-insensitive: these are minimums, so a spelling the
+    // server would still route (a trailing ;param, a doubled slash) must not become a read.
     {
         why: "store application install (issued as a GET)",
         verbs: ["write"],
-        matches: (p) => pathHas("/api/sn_appclient/appmanager/app/install")(p),
+        matches: (p) => appClientRoute("app/+install")(p),
     },
     {
         why: "store application update (issued as a GET)",
         verbs: ["write"],
-        matches: (p) => pathHas("/api/sn_appclient/appmanager/app/update")(p),
+        matches: (p) => appClientRoute("app/+update")(p),
+    },
+    {
+        why: "store application repair (issued as a GET)",
+        verbs: ["write"],
+        matches: (p) => appClientRoute("app/+repair")(p),
+    },
+    {
+        why: "plugin activation, repair or rollback, demo data load or store sync (issued as a GET)",
+        verbs: ["write"],
+        matches: (p) => appClientRoute("(?:plugin/+(?:activate|repair|rollback)|loadDemoData|sync_apps)")(p),
     },
     {
         why: "sys_trigger scheduled job — persisting a job outlives the request that made it",
@@ -138,9 +157,38 @@ function normalizeQuery(request: HTTPRequest): Record<string, unknown> {
     return out;
 }
 
+/**
+ * The spellings of a path a floor rule is checked against: as given, and as it will be sent.
+ * The request goes out as `new URL(path, instanceUrl)`, which resolves `.` and `..` segments
+ * and turns `\` into `/`; the server may decode percent-escapes and drop `;param` path
+ * parameters from any segment. Checking only the raw text
+ * let `/api/sn_appclient/./appmanager/app/install` through as a read. Either spelling
+ * matching is enough, so normalizing can only ever add floor matches, never remove one.
+ */
+function pathSpellings(path: string): string[] {
+    const spellings = new Set([path]);
+    const [pathPart, ...rest] = path.split("?");
+    const suffix = rest.length ? `?${rest.join("?")}` : "";
+    let decoded = pathPart;
+    try {
+        decoded = decodeURIComponent(pathPart);
+    } catch {
+        // A malformed escape is sent as-is; the raw and URL-resolved spellings still apply.
+    }
+    const withoutParams = (text: string) => text.replace(/;[^/]*/g, "");
+    for (const candidate of [pathPart, decoded, withoutParams(pathPart), withoutParams(decoded)]) {
+        try {
+            spellings.add(new URL(candidate.replace(/\\/g, "/"), "http://policy.invalid").pathname + suffix);
+        } catch {
+            // Not resolvable as a URL path; the raw spelling is still checked.
+        }
+    }
+    return [...spellings];
+}
+
 /** Matched floor rules, for the audit log and for tests. */
 export function floorFor(request: HTTPRequest): { verbs: Verb[]; reasons: string[] } {
-    const path = typeof request.path === "string" ? request.path : "";
+    const paths = pathSpellings(typeof request.path === "string" ? request.path : "");
     const query = normalizeQuery(request);
 
     const method = (request.method ?? "get").toLowerCase();
@@ -151,7 +199,7 @@ export function floorFor(request: HTTPRequest): { verbs: Verb[]; reasons: string
         if (rule.methods && !rule.methods.includes(method)) {
             continue;
         }
-        if (rule.matches(path, query)) {
+        if (paths.some((path) => rule.matches(path, query))) {
             rule.verbs.forEach((v) => verbs.add(v));
             reasons.push(rule.why);
         }

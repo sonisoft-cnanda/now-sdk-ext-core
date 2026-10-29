@@ -15,8 +15,17 @@ import {
     StoreAppUpdateOptions,
     StoreAppOperationResponse,
     StoreAppOperationResult,
-    StoreAppFinalResult
+    StoreAppFinalResult,
+    StoreAppRepairEndpoint,
+    StoreAppRepairHistory,
+    StoreAppRepairOptions,
+    StoreAppRepairResult,
+    StoreAppRepairStart,
+    StoreAppRepairTarget,
+    STORE_APP_REPAIR_SKIPPED_LIMIT
 } from "./StoreApplicationModels";
+import { StoreAppRepairError } from "./StoreAppRepairError";
+import { TableAPIRequest } from "../../comm/http/TableAPIRequest";
 import { OperationProgressCallback, createProgressEmitter, toOperationProgress } from "../OperationProgress";
 
 export enum APP_TAB_CONTEXT {
@@ -33,6 +42,10 @@ export class ApplicationManager {
     APP_INSTALL_API_URL = "/api/sn_appclient/appmanager/app/install";
     APP_SEARCH_POST_API_URL = "/api/sn_appclient/appmanager/apps";
     APP_UPDATE_API_URL = "/api/sn_appclient/appmanager/app/update";
+    APP_REPAIR_API_URL = "/api/sn_appclient/appmanager/app/repair";
+    /** Reads of the upgrade history after a repair reports success, and the pause between them. */
+    REPAIR_HISTORY_ATTEMPTS = 15;
+    REPAIR_HISTORY_SETTLE_MS = 2000;
     DEFAULT_INSTALL_TIMEOUT = 1000 * 60 * 30;
     DEFAULT_POLL_INTERVAL = 5000;
     BATCH_INSTALL_TIMEOUT = 1000 * 60 * 30 ;
@@ -46,7 +59,10 @@ export class ApplicationManager {
     public constructor(instance:ServiceNowInstance){
         this._instance = instance;
         this._req = new ServiceNowRequest(instance);
+        this._tableAPI = new TableAPIRequest(instance);
     }
+
+    private _tableAPI: TableAPIRequest;
 
     private _instance:ServiceNowInstance;
 
@@ -438,6 +454,285 @@ export class ApplicationManager {
        );
    }
 
+   // ============================================================
+   // Store Application Repair
+   // ============================================================
+
+   /**
+    * Start a repair of an installed store or company application: the platform's Repair
+    * Application link on sys_store_app. It reinstalls the INSTALLED version from the
+    * application repository without uninstalling the app, reapplying its files and its
+    * customization version, if any.
+    *
+    * Refused before anything is sent, as the platform refuses it, for an inactive app, an
+    * app that contains plugins, an app developed on this instance, and demo data the app
+    * does not have.
+    *
+    * Uses GET /api/sn_appclient/appmanager/app/repair, or app/install with isReinstall=true
+    * when the instance has queued installation off (see StoreAppRepairEndpoint).
+    * @returns The started repair, for waitForStoreApplicationRepair
+    * @throws StoreAppRepairError when the repair is refused or the App Client does not start it
+    */
+   public async repairStoreApplication(options: StoreAppRepairOptions): Promise<StoreAppRepairStart> {
+       const app = await this._repairTarget(options);
+       const previousHistory = await this._historyBefore(app.scope);
+       const endpoint: StoreAppRepairEndpoint = await this._queuedInstallation() ? 'repair' : 'install';
+
+       const query: Record<string, string> = {
+           app_id: app.sysId,
+           version: app.version,
+           load_demo_data: String(options.loadDemoData === true)
+       };
+       if (app.customizationVersion) query.customization_version = app.customizationVersion;
+       if (endpoint === 'install') query.isReinstall = 'true';
+
+       let resp: IHttpResponse<StoreAppOperationResponse>;
+       try {
+           resp = await this._req.get<StoreAppOperationResponse>({
+               path: endpoint === 'repair' ? this.APP_REPAIR_API_URL : this.APP_INSTALL_API_URL,
+               headers: null,
+               query,
+               body: null
+           });
+       } catch (error) {
+           throw this._repairStartFailure(error, app);
+       }
+
+       const operation = resp.bodyObject?.result;
+       const trackerId = operation?.trackerId || operation?.tracker_id || operation?.links?.progress?.id;
+       if (resp.status !== 200 || !operation || !trackerId) {
+           throw new StoreAppRepairError('start_failed', { app: app.sysId, status: resp.status, serverMessage: operation?.message });
+       }
+       this._logger.info(`Repair of ${app.scope} ${app.version} started (${endpoint}), tracker ${trackerId}`);
+       return { app, trackerId, endpoint, ...previousHistory, operation };
+   }
+
+   /**
+    * Repair an installed store or company application and wait for it to finish.
+    * See repairStoreApplication.
+    * @param pollIntervalMs Polling interval in ms (default: 5000)
+    * @param timeoutMs Timeout in ms (default: 30 min). A queued repair can wait minutes before it runs.
+    */
+   public async repairStoreApplicationAndWait(
+       options: StoreAppRepairOptions,
+       pollIntervalMs?: number,
+       timeoutMs?: number,
+       onProgress?: OperationProgressCallback
+   ): Promise<StoreAppRepairResult> {
+       const started = await this.repairStoreApplication(options);
+       return await this.waitForStoreApplicationRepair(started, pollIntervalMs, timeoutMs, onProgress);
+   }
+
+   /**
+    * Wait for a started repair, then read the upgrade history it wrote.
+    *
+    * `repaired` is true only when the App Client reported success and a new
+    * sys_upgrade_history row appeared for the app and finished: the App Client also
+    * reports success when it decided no reinstall was necessary, and its tracker can end
+    * seconds before the row's counts are filled.
+    */
+   public async waitForStoreApplicationRepair(
+       started: StoreAppRepairStart,
+       pollIntervalMs?: number,
+       timeoutMs?: number,
+       onProgress?: OperationProgressCallback
+   ): Promise<StoreAppRepairResult> {
+       const final = await this.waitForInstallationCompletion(
+           started.trackerId,
+           pollIntervalMs || this.DEFAULT_POLL_INTERVAL,
+           timeoutMs || this.DEFAULT_INSTALL_TIMEOUT,
+           onProgress
+       );
+
+       // The tracker can report success before the history row is finished: on dev206299 the
+       // row appeared mid-install and its counts were filled seconds after the tracker ended.
+       let row = await this._repairHistoryRow(started);
+       for (let attempt = 0; final.success && !historyComplete(row) && attempt < this.REPAIR_HISTORY_ATTEMPTS; attempt++) {
+           await new Promise(resolve => setTimeout(resolve, this.REPAIR_HISTORY_SETTLE_MS));
+           row = await this._repairHistoryRow(started);
+       }
+       const read = row ? await this._repairHistory(row) : undefined;
+       const history = read?.history;
+
+       const complete = historyComplete(row);
+       const warnings: string[] = [];
+       if (final.success && !history) {
+           warnings.push('The App Client reported success but wrote no upgrade history for this application, so it may not have reinstalled anything.');
+       }
+       if (row && !complete) {
+           warnings.push(final.success
+               ? 'The App Client reported success, but the upgrade history was still being written when the wait ended, so the repair probably ran and its counts may be incomplete. Check the history before repairing again.'
+               : 'The upgrade history was still being written when the wait ended, so its counts may be incomplete.');
+       }
+       if (read) {
+           // The counts leave out Table Not Found, Fatal Error and Not Loaded; the listed files do not.
+           // Apply-once files are expected to be left alone on a reinstall.
+           const c = read.history.counts;
+           const counted = c.skipped + c.skippedError + c.skippedManualMerge;
+           const listed = Math.min(read.notApplied, STORE_APP_REPAIR_SKIPPED_LIMIT);
+           const total = Math.max(counted, listed);
+           if (total > 0) {
+               const more = read.notApplied > STORE_APP_REPAIR_SKIPPED_LIMIT && listed >= counted ? ' or more' : '';
+               warnings.push(`${total}${more} file(s) were not applied (skipped ${c.skipped}, errors ${c.skippedError}, manual merge ${c.skippedManualMerge}). See the skipped files and the upgrade history.`);
+           }
+       }
+
+       return {
+           ...final,
+           app: started.app,
+           trackerId: started.trackerId,
+           endpoint: started.endpoint,
+           history,
+           repaired: final.success && history !== undefined && complete,
+           warnings
+       };
+   }
+
+   private async _repairTarget(options: StoreAppRepairOptions): Promise<StoreAppRepairTarget> {
+       const given = typeof options?.app === 'string' ? options.app.trim() : '';
+       const bySysId = /^[a-f0-9]{32}$/i.test(given);
+       const key = bySysId ? given.toLowerCase() : given;
+       // Validated before it goes into an encoded query: a ^ would add conditions.
+       if (!bySysId && !/^[a-z0-9_]{1,40}$/i.test(key)) throw new StoreAppRepairError('invalid_app');
+       const match = bySysId ? `sys_id=${key}` : `scope=${key}`;
+
+       const [app] = await this._rows<RepairStoreAppRow>('sys_store_app', match, 'sys_id,name,scope,version,active,contains_plugins,demo_data', 1);
+       if (!app) {
+           const [local] = await this._rows<{ sys_id: string }>('sys_app', match, 'sys_id', 1);
+           throw new StoreAppRepairError(local ? 'not_a_store_app' : 'app_not_found', { app: key });
+       }
+       if (app.active !== 'true') throw new StoreAppRepairError('app_inactive', { app: app.sys_id, scope: app.scope });
+       if (app.contains_plugins === 'true') throw new StoreAppRepairError('contains_plugins', { app: app.sys_id, scope: app.scope });
+       const hasDemoData = app.demo_data !== 'no_demo_data';
+       if (options.loadDemoData && !hasDemoData) throw new StoreAppRepairError('no_demo_data', { app: app.sys_id, scope: app.scope });
+
+       // As the Repair dialog does: an app under source control has no customization to
+       // reapply; otherwise the installed customization version goes with it.
+       let customizationVersion: string | undefined;
+       const [repoConfig] = await this._rows<{ sys_id: string }>('sys_repo_config', `sys_app=${app.sys_id}`, 'sys_id', 1);
+       if (!repoConfig) {
+           const [customization] = await this._rows<{ version: string }>('sys_app_customization', `vendor_app=${app.sys_id}^version!=none`, 'version', 1);
+           if (customization?.version) customizationVersion = customization.version;
+       }
+
+       return {
+           sysId: app.sys_id,
+           name: app.name,
+           scope: app.scope,
+           version: app.version,
+           customizationVersion,
+           hasDemoData
+       };
+   }
+
+   private async _queuedInstallation(): Promise<boolean> {
+       const [property] = await this._rows<{ value: string }>('sys_properties', 'name=sn_appclient.use_queued_installation', 'value', 1);
+       return property?.value === 'true';
+   }
+
+   /**
+    * What the app's upgrade history held before the repair. sys_created_on has whole-second
+    * precision, so every row from the newest second is remembered, not only the first returned.
+    */
+   private async _historyBefore(scope: string): Promise<Pick<StoreAppRepairStart, 'previousHistoryIds' | 'previousHistoryCreated'>> {
+       const [newest] = await this._rows<{ sys_id: string; sys_created_on: string }>(
+           'sys_upgrade_history', `to_version=${scope}^ORDERBYDESCsys_created_on`, 'sys_id,sys_created_on', 1);
+       if (!newest) return { previousHistoryIds: [] };
+       const sameSecond = await this._rows<{ sys_id: string }>(
+           'sys_upgrade_history', `to_version=${scope}^sys_created_on=${newest.sys_created_on}`, 'sys_id', 100);
+       return {
+           previousHistoryIds: [...new Set([newest.sys_id, ...sameSecond.map(row => row.sys_id)])],
+           previousHistoryCreated: newest.sys_created_on
+       };
+   }
+
+   /**
+    * The newest upgrade history row the repair can have written: created no earlier than the
+    * newest row before it, and not one of those. Another install of the same scope while the
+    * repair waited in the queue would be indistinguishable; the history row names no tracker.
+    */
+   private async _repairHistoryRow(started: StoreAppRepairStart): Promise<RepairHistoryRow | undefined> {
+       const since = started.previousHistoryCreated ? `^sys_created_on>=${started.previousHistoryCreated}` : '';
+       const rows = await this._rows<RepairHistoryRow>(
+           'sys_upgrade_history',
+           `to_version=${started.app.scope}${since}^ORDERBYDESCsys_created_on`,
+           'sys_id,sys_created_on,upgrade_started,upgrade_finished,summary_complete_status,added,updated,deleted,unchanged,skipped,skipped_error,skipped_manual_merge,skipped_apply_once',
+           started.previousHistoryIds.length + 1
+       );
+       return rows.find(row => !started.previousHistoryIds.includes(row.sys_id));
+   }
+
+   /**
+    * The repair's history row, with the files it did not apply. Files that were not applied
+    * for a reason other than apply-once are read first, so a long list of apply-once files
+    * cannot push a fatal error out of the list. `notApplied` counts those, up to the limit + 1.
+    */
+   private async _repairHistory(row: RepairHistoryRow): Promise<{ history: StoreAppRepairHistory; notApplied: number }> {
+       const fields = 'file_name,type,target_name,disposition,reason';
+       const problems = Object.keys(SKIPPED_DISPOSITIONS).filter(code => code !== APPLY_ONCE_DISPOSITION).join(',');
+       const notApplied = await this._rows<RepairHistoryLogRow>(
+           'sys_upgrade_history_log', `upgrade_history=${row.sys_id}^dispositionIN${problems}^ORDERBYfile_name`, fields, STORE_APP_REPAIR_SKIPPED_LIMIT + 1);
+       const room = STORE_APP_REPAIR_SKIPPED_LIMIT + 1 - notApplied.length;
+       const applyOnce = room > 0
+           ? await this._rows<RepairHistoryLogRow>(
+               'sys_upgrade_history_log', `upgrade_history=${row.sys_id}^disposition=${APPLY_ONCE_DISPOSITION}^ORDERBYfile_name`, fields, room)
+           : [];
+       const skippedRows = [...notApplied, ...applyOnce];
+       const count = (value: string | undefined) => Number.parseInt(value ?? '', 10) || 0;
+       const history: StoreAppRepairHistory = {
+           sysId: row.sys_id,
+           started: row.upgrade_started || undefined,
+           finished: row.upgrade_finished || undefined,
+           status: row.summary_complete_status || undefined,
+           counts: {
+               added: count(row.added),
+               updated: count(row.updated),
+               deleted: count(row.deleted),
+               unchanged: count(row.unchanged),
+               skipped: count(row.skipped),
+               skippedError: count(row.skipped_error),
+               skippedManualMerge: count(row.skipped_manual_merge),
+               skippedApplyOnce: count(row.skipped_apply_once)
+           },
+           skippedFiles: skippedRows.slice(0, STORE_APP_REPAIR_SKIPPED_LIMIT).map(file => ({
+               fileName: file.file_name,
+               type: file.type,
+               targetName: file.target_name,
+               disposition: file.disposition,
+               dispositionLabel: SKIPPED_DISPOSITIONS[file.disposition] ?? file.disposition,
+               reason: file.reason || undefined
+           })),
+           skippedFilesTruncated: skippedRows.length > STORE_APP_REPAIR_SKIPPED_LIMIT
+       };
+       return { history, notApplied: notApplied.length };
+   }
+
+   private _repairStartFailure(error: unknown, app: StoreAppRepairTarget): unknown {
+       // Policy refusals and session errors say what is wrong themselves.
+       const message = error instanceof Error ? error.message : '';
+       const failed = /^(?:Error during request\. Status: |Request failed with status )(\d{3})/.exec(message);
+       if (!failed) return error;
+       let serverMessage: string | undefined;
+       const body = /Body: (.*)$/s.exec(message)?.[1];
+       try {
+           const parsed = (body ? JSON.parse(body) : undefined) as { error?: { message?: string; detail?: string } } | undefined;
+           serverMessage = parsed?.error?.message || parsed?.error?.detail || undefined;
+       } catch {
+           serverMessage = undefined;
+       }
+       return new StoreAppRepairError('start_failed', { app: app.sysId, status: Number(failed[1]), serverMessage }, error);
+   }
+
+   private async _rows<T>(table: string, query: string, fields: string, limit: number): Promise<T[]> {
+       const resp = await this._tableAPI.get<{ result: T[] }>(table, {
+           sysparm_query: query,
+           sysparm_fields: fields,
+           sysparm_limit: String(limit),
+           sysparm_exclude_reference_link: 'true'
+       });
+       return resp.bodyObject?.result ?? [];
+   }
+
    /**
     * Poll installation progress via ProgressWorker until complete, timed out, or failed.
     * Uses GET /api/sn_cicd/progress/{progressId}
@@ -535,6 +830,59 @@ export class ApplicationManager {
        
        return 0;
    }
+}
+
+/** sys_upgrade_history_log dispositions a repair reports as not applied. */
+const SKIPPED_DISPOSITIONS: Record<string, string> = {
+    "4": "Skipped",
+    "6": "Table Not Found",
+    "9": "Skipped Error",
+    "10": "Skipped Manual Merge",
+    "11": "Skipped Apply Once",
+    "104": "Skipped (second pass)",
+    "106": "Table Not Found (second pass)",
+    "301": "Fatal Error",
+    "302": "Not Loaded"
+};
+
+const APPLY_ONCE_DISPOSITION = "11";
+
+/** A history row is finished once it has an end time and its summary is complete. */
+function historyComplete(row: RepairHistoryRow | undefined): boolean {
+    return !!row?.upgrade_finished && row.summary_complete_status === "complete";
+}
+
+interface RepairStoreAppRow {
+    sys_id: string;
+    name: string;
+    scope: string;
+    version: string;
+    active: string;
+    contains_plugins: string;
+    demo_data: string;
+}
+
+interface RepairHistoryRow {
+    sys_id: string;
+    upgrade_started?: string;
+    upgrade_finished?: string;
+    summary_complete_status?: string;
+    added?: string;
+    updated?: string;
+    deleted?: string;
+    unchanged?: string;
+    skipped?: string;
+    skipped_error?: string;
+    skipped_manual_merge?: string;
+    skipped_apply_once?: string;
+}
+
+interface RepairHistoryLogRow {
+    file_name: string;
+    type: string;
+    target_name: string;
+    disposition: string;
+    reason?: string;
 }
 
 export class BatchInstallResultResponse{
