@@ -61,7 +61,7 @@
     "@servicenow/glide": "^27.0.5",
     "@servicenow/sdk": "4.12.0",
     "@servicenow/sdk-build-core": "4.12.0",
-    "@servicenow/sdk-cli": "4.12.0",
+    "@servicenow/sdk-cli": "4.13.3",
     "@servicenow/sdk-cli-core": "3.0.3",
     "@servicenow/sdk-core": "4.12.0",
     "@ts-morph/common": "^0.24.0",
