@@ -65,6 +65,8 @@ describe("tier 1 — floor, for mutations the verb hides", () => {
         "/api/sn_appclient/v1/../appmanager/app/install?app_id=abc",
         "/api\\sn_appclient\\appmanager\\app\\repair",
         "/api/sn_appclient/appmanager/app/%72epair",
+        "/api/sn_appclient/appmanager;v=1/app/repair",
+        "/api;x/sn_appclient/appmanager/app/install?app_id=abc",
     ])("catches the App Client's mutating GET %s, versioned or not", (path) => {
         expect(classify(req({ method: "GET", path })).verbs).toEqual(["write"]);
     });

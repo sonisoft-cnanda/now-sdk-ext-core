@@ -157,11 +157,11 @@ function normalizeQuery(request: HTTPRequest): Record<string, unknown> {
     return out;
 }
 
-/** Matched floor rules, for the audit log and for tests. */
 /**
  * The spellings of a path a floor rule is checked against: as given, and as it will be sent.
  * The request goes out as `new URL(path, instanceUrl)`, which resolves `.` and `..` segments
- * and turns `\` into `/`; the server may decode percent-escapes. Checking only the raw text
+ * and turns `\` into `/`; the server may decode percent-escapes and drop `;param` path
+ * parameters from any segment. Checking only the raw text
  * let `/api/sn_appclient/./appmanager/app/install` through as a read. Either spelling
  * matching is enough, so normalizing can only ever add floor matches, never remove one.
  */
@@ -175,7 +175,8 @@ function pathSpellings(path: string): string[] {
     } catch {
         // A malformed escape is sent as-is; the raw and URL-resolved spellings still apply.
     }
-    for (const candidate of [pathPart, decoded]) {
+    const withoutParams = (text: string) => text.replace(/;[^/]*/g, "");
+    for (const candidate of [pathPart, decoded, withoutParams(pathPart), withoutParams(decoded)]) {
         try {
             spellings.add(new URL(candidate.replace(/\\/g, "/"), "http://policy.invalid").pathname + suffix);
         } catch {
@@ -185,6 +186,7 @@ function pathSpellings(path: string): string[] {
     return [...spellings];
 }
 
+/** Matched floor rules, for the audit log and for tests. */
 export function floorFor(request: HTTPRequest): { verbs: Verb[]; reasons: string[] } {
     const paths = pathSpellings(typeof request.path === "string" ? request.path : "");
     const query = normalizeQuery(request);
