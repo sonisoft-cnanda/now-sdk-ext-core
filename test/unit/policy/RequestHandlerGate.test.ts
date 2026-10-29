@@ -169,7 +169,10 @@ describe("scheduled jobs at the wire (NSE-28)", () => {
         await expect(config(request({ method: "PATCH", path: `/api/now/table/sysauto_script/${SYS_ID}` })))
             .rejects.toThrow(/execute/i);
         await expect(config(request({ method: "DELETE", path: `${TRIGGER}/${SYS_ID}` }))).resolves.toBeDefined();
-        await expect(config(request({ method: "POST", path: "/api/now/table/discovery_schedule" }))).resolves.toBeDefined();
+        // discovery_schedule extends sysauto_script and inherits its script field.
+        await expect(config(request({ method: "POST", path: "/api/now/table/discovery_schedule" })))
+            .rejects.toThrow(/execute/i);
+        await expect(config(request({ method: "POST", path: "/api/now/table/scheduled_data_import" }))).resolves.toBeDefined();
     });
 });
 

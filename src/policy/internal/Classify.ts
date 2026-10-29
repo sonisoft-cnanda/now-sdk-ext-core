@@ -55,11 +55,13 @@ const tablePath = (tables: string) =>
     pathMatches(new RegExp(`/api/+now/+(?:v\\d+/+)?table/+(?:${tables})(?=[/;?#]|$)`, "i"));
 
 /**
- * Tables that extend `sysauto` (Scheduled Job) without the `sysauto_` prefix, read from
- * sysauto's children on a Zurich instance. Prefixed children are matched by pattern. A
- * table added to the hierarchy later is not caught until it is listed here.
+ * Tables that descend from `sysauto` (Scheduled Job) without the `sysauto_` prefix, read
+ * from sysauto's full descendant tree (34 tables) on a Zurich instance. Prefixed
+ * descendants are matched by pattern. A table added to the hierarchy later is not caught
+ * until it is listed here.
  */
 const SCHEDULED_JOB_TABLES = [
+    "sn_itom_tag_policy",
     "discovery_schedule",
     "wf_workflow_schedule",
     "scheduled_data_import",
@@ -77,6 +79,31 @@ const SCHEDULED_JOB_TABLES = [
     "cmdb_policy_scheduled_job",
     "sn_cmdb_ws_reconcile_duplicate_template_schedule",
     "sys_cs_timer_event",
+] as const;
+
+/**
+ * `sysauto_script` (Scheduled Script Execution) and the tables that extend it, read from
+ * sys_db_object on a Zurich instance. Each inherits its `script` field, so inserting or
+ * changing a row in any of them schedules server-side script. Only sysauto_script and
+ * sys_trigger define a script column themselves.
+ */
+const SCRIPT_SCHEDULE_TABLES = [
+    "sysauto_script",
+    "cert_audit",
+    "cmdb_policy_scheduled_job",
+    "discovery_schedule",
+    "promin_job",
+    "sn_cmdb_ws_reconcile_duplicate_template_schedule",
+    "sn_itom_tag_policy",
+    "sys_api_stats_script",
+    "sys_atf_schedule",
+    "sys_broadcast_message",
+    "sys_error_agg_schedule",
+    "sys_flow_trigger_auto_script",
+    "sysauto_bm_script",
+    "sysauto_kb_assist_job",
+    "sysauto_summary_generator",
+    "wf_workflow_schedule",
 ] as const;
 
 /**
@@ -160,16 +187,17 @@ const FLOOR: readonly FloorRule[] = [
     // schedules arbitrary server-side code, which `--deny-execute` exists to refuse. It
     // also closes BackgroundScriptExecutor's sys_trigger fallback at the wire; that
     // method already asserts execute and write before it POSTs, so nothing it permits is
-    // refused here. sys_trigger runs its own `script`; sysauto_script is Scheduled Script
-    // Execution. The sysauto base table is included because a write through a parent
-    // table can land on a child's record, and a floor errs toward refusing. DELETE stays
+    // refused here. sys_trigger runs its own `script`; SCRIPT_SCHEDULE_TABLES is Scheduled
+    // Script Execution and every table that inherits its script. The sysauto base table is
+    // included because a write through a parent table can land on a child's record, and a
+    // floor errs toward refusing. DELETE stays
     // at write: removing a job runs nothing, and cleaning one up must stay possible under
     // --deny-execute, as cancelling a flow debug run does.
     {
         why: "script-bearing schedule — inserting or changing one schedules server-side script",
         verbs: ["execute"],
         methods: ["post", "put", "patch"],
-        matches: (p) => tablePath("sys_trigger|sysauto|sysauto_script")(p),
+        matches: (p) => tablePath(`sys_trigger|sysauto|${SCRIPT_SCHEDULE_TABLES.join("|")}`)(p),
     },
     {
         why: "sysparm_delete_all",

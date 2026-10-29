@@ -133,8 +133,9 @@ winston logger; `Logger` is only a named facade onto it. Three rules follow:
   lowered, so a rule that matches every method refuses the GET as well — the sys_trigger
   rule once did, and `--read-only` lost InstanceHealth's stuck-job check (NSE-28).
   Scheduled jobs (`sys_trigger`, `sysauto` and its children) are floored at write for any
-  non-GET; inserting or changing a script-bearing one (`sys_trigger`, `sysauto`,
-  `sysauto_script`) also needs execute. Match table paths with `tablePath`, never a
+  non-GET; inserting or changing a script-bearing one (`sys_trigger`, `sysauto`, and
+  `sysauto_script` with every table that inherits its script, `SCRIPT_SCHEDULE_TABLES`)
+  also needs execute. Match table paths with `tablePath`, never a
   substring, or `sys_trigger` also catches `sys_trigger_foo`.
 - **A `requires` declaration can correct a wrong default but never lowers a floor rule**,
   and cannot move a floor match off `target: 'instance'` — otherwise declaring

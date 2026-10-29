@@ -155,6 +155,15 @@ describe("tier 1 — scheduled jobs (NSE-28)", () => {
         ["PATCH", `${T}/sysauto_script/${SYS_ID}`, [DEFINITION_WHY, SCRIPT_WHY]],
         ["POST", `${T}/sysauto`, [DEFINITION_WHY, SCRIPT_WHY]],
         ["PATCH", `${T}/sysauto/${SYS_ID}`, [DEFINITION_WHY, SCRIPT_WHY]],
+        // Tables that extend sysauto_script and inherit its script field.
+        ["POST", `${T}/discovery_schedule`, [DEFINITION_WHY, SCRIPT_WHY]],
+        ["PATCH", `${T}/discovery_schedule/${SYS_ID}`, [DEFINITION_WHY, SCRIPT_WHY]],
+        ["POST", `${T}/sys_atf_schedule`, [DEFINITION_WHY, SCRIPT_WHY]],
+        ["PATCH", `${T}/sys_atf_schedule/${SYS_ID}`, [DEFINITION_WHY, SCRIPT_WHY]],
+        ["POST", `${T}/sn_itom_tag_policy`, [DEFINITION_WHY, SCRIPT_WHY]],
+        ["PATCH", `${T}/sn_itom_tag_policy/${SYS_ID}`, [DEFINITION_WHY, SCRIPT_WHY]],
+        ["PUT", `${T}/sysauto_bm_script/${SYS_ID}`, [DEFINITION_WHY, SCRIPT_WHY]],
+        ["POST", `${T}/sn_cmdb_ws_reconcile_duplicate_template_schedule`, [DEFINITION_WHY, SCRIPT_WHY]],
     ])("floors %s %s at write and execute", (method, path, reasons) => {
         const r = req({ method, path });
         expect(classify(r).verbs.sort()).toEqual(["execute", "write"]);
@@ -167,22 +176,24 @@ describe("tier 1 — scheduled jobs (NSE-28)", () => {
         [`${T}/sys_trigger/${SYS_ID}`, TRIGGER_WHY],
         [`${T}/sysauto_script/${SYS_ID}`, DEFINITION_WHY],
         [`${T}/sysauto/${SYS_ID}`, DEFINITION_WHY],
+        [`${T}/discovery_schedule/${SYS_ID}`, DEFINITION_WHY],
+        [`${T}/sn_itom_tag_policy/${SYS_ID}`, DEFINITION_WHY],
     ])("floors DELETE %s at write alone", (path, why) => {
         const r = req({ method: "DELETE", path });
         expect(floorFor(r).verbs).toEqual(["write"]);
         expect(floorFor(r).reasons).toEqual([why]);
     });
 
-    // Other scheduled-job definitions: a write, not an execute.
+    // Scheduled-job definitions that carry no script: a write, not an execute.
     it.each([
-        ["POST", `${T}/discovery_schedule`],
-        ["PUT", `${T}/discovery_schedule/${SYS_ID}`],
+        ["POST", `${T}/scheduled_data_import`],
         ["PATCH", `${T}/scheduled_data_import/${SYS_ID}`],
-        ["DELETE", `${T}/sys_atf_schedule/${SYS_ID}`],
+        ["PUT", `${T}/scheduled_data_export/${SYS_ID}`],
         ["POST", `${T}/sysauto_template`],
+        ["POST", `${T}/sysauto_report`],
         ["PATCH", `${T}/sysauto_report/${SYS_ID}`],
         ["DELETE", `${T}/sysauto_pa/${SYS_ID}`],
-        ["POST", `${T}/sn_cmdb_ws_reconcile_duplicate_template_schedule`],
+        ["POST", `${T}/sys_cs_timer_event`],
     ])("floors %s %s at write", (method, path) => {
         const r = req({ method, path });
         expect(floorFor(r).verbs).toEqual(["write"]);
@@ -192,7 +203,7 @@ describe("tier 1 — scheduled jobs (NSE-28)", () => {
     it("a declaration cannot talk a scheduled-job insert down to a read", () => {
         const trigger = req({ method: "POST", path: `${T}/sys_trigger`, requires: READ_ONLY });
         expect(classify(trigger).verbs.sort()).toEqual(["execute", "write"]);
-        const definition = req({ method: "POST", path: `${T}/discovery_schedule`, requires: READ_ONLY });
+        const definition = req({ method: "POST", path: `${T}/scheduled_data_import`, requires: READ_ONLY });
         expect(classify(definition).verbs).toEqual(["write"]);
     });
 
@@ -209,13 +220,15 @@ describe("tier 1 — scheduled jobs (NSE-28)", () => {
         "/api/now/v1/table/sys_trigger",
         "/api/now/v2/table/sysauto_script",
         "/api/now/./table/sysauto_script;x=1",
+        "/api/now/table/./discovery_schedule",
+        "/api/now/table/sn_itom_tag_policy;x=1",
     ])("floors the respelled POST %s", (path) => {
         expect(classify(req({ method: "POST", path, requires: READ_ONLY })).verbs.sort()).toEqual(["execute", "write"]);
     });
 
     it.each([
-        "/api/now/table/./discovery_schedule",
-        "/api/now/table/discovery_schedule;x=1",
+        "/api/now/table/./scheduled_data_import",
+        "/api/now/table/scheduled_data_import;x=1",
         "/api/now/table/sysauto_template;x=1",
     ])("floors the respelled definition POST %s", (path) => {
         expect(classify(req({ method: "POST", path, requires: READ_ONLY })).verbs).toEqual(["write"]);
