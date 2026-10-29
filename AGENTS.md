@@ -136,8 +136,10 @@ winston logger; `Logger` is only a named facade onto it. Three rules follow:
   any non-GET, and POST/PUT/PATCH (and a POST to the classic `/<table>.do` form) also
   need execute: `sysauto` defines `condition`, a script, so every schedule can run code.
   The trade-off is that `--deny-execute` cannot disable a job with PATCH `active=false`,
-  since the same PATCH could change its script or condition; DELETE stays write-only, so
-  a job can still be removed. The non-prefixed tables come from one Australia-release
+  since the same PATCH could change its script or condition; a DELETE, through the Table
+  API or a form delete (`sys_action=sysverb_delete`), stays write-only, so a job can still
+  be removed. Not covered: XML import through `/sys_upload.do` (`nex xml import`), which
+  only needs write but can create a scheduled job. The non-prefixed tables come from one Australia-release
   PDI; plugin or customer (`u_`, `x_`) tables under sysauto need adding to
   `SCHEDULED_JOB_TABLES`. Match table paths with `tablePath` or `formPath`, never a
   substring, or `sys_trigger` also catches `sys_trigger_foo`.

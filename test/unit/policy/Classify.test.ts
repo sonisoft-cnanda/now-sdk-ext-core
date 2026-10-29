@@ -231,6 +231,20 @@ describe("tier 1 — scheduled jobs (NSE-28)", () => {
         expect(floorFor(r).reasons).toEqual([FORM_WHY]);
     });
 
+    it("floors a nested form spelling the server might still route", () => {
+        expect(classify(req({ method: "POST", path: "/foo/sysauto_script.do" })).verbs.sort()).toEqual(["execute", "write"]);
+    });
+
+    it("leaves a form delete at write, as a Table API DELETE is, so a job can still be removed under deny-execute", () => {
+        for (const extra of [{ fields: { sys_action: "sysverb_delete" } }, { query: { sys_action: "sysverb_delete" } }]) {
+            const r = req({ method: "POST", path: "/sysauto_script.do", ...extra });
+            expect(classify(r).verbs).toEqual(["write"]);
+        }
+        // Any other form action still needs execute.
+        expect(classify(req({ method: "POST", path: "/sysauto_script.do", fields: { sys_action: "sysverb_update" } })).verbs.sort())
+            .toEqual(["execute", "write"]);
+    });
+
     // Other pages with a scheduled table's name in them, and other tables' forms.
     it.each([
         "/sysauto_script_list.do",
@@ -240,7 +254,6 @@ describe("tier 1 — scheduled jobs (NSE-28)", () => {
         "/u_sys_trigger.do",
         "/sysautomatic.do",
         "/sys_trigger_x.do",
-        "/foo/sysauto_script.do",
         "/sysauto_script.doc",
         "/sys_dictionary.do",
         "/sys_choice.do",

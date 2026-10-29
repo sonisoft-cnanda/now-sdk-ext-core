@@ -55,13 +55,17 @@ const tablePath = (tables: string) =>
     pathMatches(new RegExp(`/api/+now/+(?:v\\d+/+)?table/+(?:${tables})(?=[/;?#]|$)`, "i"));
 
 /**
- * A classic UI form for one of `tables` (a regex alternation): `/<table>.do` at the root,
- * followed by `;`, `#` or the end. FormRecordWriter (`nex metadata insert|update`) posts
- * records this way. The list view (`<table>_list.do`) and a longer name (`x_<table>.do`)
- * are other pages, not this form.
+ * A classic UI form for one of `tables` (a regex alternation): `<table>.do` as a whole path
+ * segment, followed by `;`, `#` or the end. FormRecordWriter (`nex metadata insert|update`)
+ * posts records this way. The list view (`<table>_list.do`) and a longer name
+ * (`x_<table>.do`) are other pages, not this form. Not anchored at the root: these are
+ * minimums, and a nested spelling the server might still route must not slip through.
  */
 const formPath = (tables: string) =>
-    pathMatches(new RegExp(`^/+(?!\\w*_list\\.do)(?:${tables})\\.do(?=[;?#]|$)`, "i"));
+    pathMatches(new RegExp(`(?:^|/)(?!\\w*_list\\.do)(?:${tables})\\.do(?=[;?#]|$)`, "i"));
+
+/** A form submit that deletes the record (MetadataFormWriter.delete): it schedules nothing. */
+const isFormDelete = (q: Record<string, unknown>) => q["sys_action"] === "sysverb_delete";
 
 /**
  * Tables that descend from `sysauto` (Scheduled Job) without the `sysauto_` prefix, read
@@ -187,11 +191,13 @@ const FLOOR: readonly FloorRule[] = [
         matches: (p) => tablePath(SCHEDULED_TABLES)(p),
     },
     // The same tables through their classic form. Only POST: a GET of the form is a read.
+    // A form delete stays at the POST default (write), as a Table API DELETE does, so a
+    // job can still be removed with its update-set capture under --deny-execute.
     {
         why: "scheduled job form submit — inserting or changing one schedules server-side script",
         verbs: ["write", "execute"],
         methods: ["post"],
-        matches: (p) => formPath(SCHEDULED_TABLES)(p),
+        matches: (p, q) => formPath(SCHEDULED_TABLES)(p) && !isFormDelete(q),
     },
     {
         why: "sysparm_delete_all",
