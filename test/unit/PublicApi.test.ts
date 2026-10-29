@@ -150,6 +150,13 @@ function exportedNames(): string[] {
             'FlowDebugErrorCode', 'FlowDebugErrorDetail']) expect(names).toContain(name);
     });
 
+    it('exports store application repair and its types', () => {
+        const names = exportedNames();
+        for (const name of ['StoreAppRepairError', 'StoreAppRepairErrorDetail', 'StoreAppRepairErrorCode', 'StoreAppRepairOptions',
+            'StoreAppRepairTarget', 'StoreAppRepairEndpoint', 'StoreAppRepairStart', 'StoreAppRepairCounts', 'StoreAppRepairSkippedFile',
+            'StoreAppRepairHistory', 'StoreAppRepairResult', 'STORE_APP_REPAIR_SKIPPED_LIMIT']) expect(names).toContain(name);
+    });
+
     it('exports the flow design-time definition contract', () => {
         // getFlowArtifactDefinition/getActionDefinition are unusable from a typed
         // consumer without their result and option types — the same shape of gap

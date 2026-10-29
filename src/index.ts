@@ -61,6 +61,7 @@ export * from './sn/application/BatchDefinition.js';
 export * from './sn/application/BatchInstallation.js';
 export * from './sn/application/CompanyApplications.js';
 export * from './sn/application/StoreApplicationModels.js';
+export * from './sn/application/StoreAppRepairError.js';
 export * from './sn/atf/ATFTest.js';
 export * from './sn/atf/ATFTestExecutor.js';
 export * from './sn/atf/TestFactory.js';

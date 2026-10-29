@@ -14,6 +14,7 @@ The `ApplicationManager` class provides comprehensive application management cap
   - [checkInstalledApplications](#checkinstalledapplications)
   - [getApplicationsNeedingAction](#getapplicationsneedingaction)
   - [installBatch](#installbatch)
+  - [repairStoreApplication](#repairstoreapplication)
 - [Interfaces](#interfaces)
 - [Examples](#examples)
 
@@ -26,6 +27,7 @@ The `ApplicationManager` is your primary tool for managing ServiceNow applicatio
 - **Batch Operations**: Install multiple applications in a single operation
 - **Version Management**: Compare installed versions with required versions
 - **Smart Deployment**: Identify which applications need installation or updates
+- **Repair**: Reinstall an installed store or company application's version from its repository, without uninstalling it
 
 ## Constructor
 
@@ -419,6 +421,72 @@ async function smartDeploy(batchFile: string) {
     await appManager.installBatch(batchFile);
     
     console.log('✓ Deployment complete!');
+}
+```
+
+---
+
+### repairStoreApplication
+
+Repairs an installed store or company application, as the **Repair Application** link on its
+`sys_store_app` record does: the App Client reinstalls the **installed** version from the
+application repository, without uninstalling the app, and reapplies its customization
+version if it has one. Use it when an installed app is broken, or when an install or update
+skipped files it should have applied.
+
+```typescript
+async repairStoreApplication(options: StoreAppRepairOptions): Promise<StoreAppRepairStart>
+async repairStoreApplicationAndWait(options: StoreAppRepairOptions, pollIntervalMs?: number,
+    timeoutMs?: number, onProgress?: OperationProgressCallback): Promise<StoreAppRepairResult>
+async waitForStoreApplicationRepair(started: StoreAppRepairStart, pollIntervalMs?: number,
+    timeoutMs?: number, onProgress?: OperationProgressCallback): Promise<StoreAppRepairResult>
+```
+
+#### Options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `app` | `string` | The installed app's `sys_store_app` sys_id, or its scope |
+| `loadDemoData` | `boolean` | Also load demo data. Refused for an app that has none |
+
+#### What it checks first
+
+As the platform does, it refuses (`StoreAppRepairError`, with a `code`) before sending anything:
+
+| Code | When |
+|------|------|
+| `invalid_app` | `app` is neither a sys_id nor a scope |
+| `app_not_found` | No installed store or company app matches |
+| `not_a_store_app` | The app was developed on this instance (`sys_app`): there is no repository copy |
+| `app_inactive` | The app is not active |
+| `contains_plugins` | The app contains plugins; repair it from the UI, which sends the plugin list |
+| `no_demo_data` | `loadDemoData` for an app without demo data |
+| `start_failed` | The App Client refused or returned no tracker (`detail.status`, `detail.serverMessage`) |
+
+#### How it repairs
+
+- With queued installation on (`sn_appclient.use_queued_installation`, the default) it calls
+  `GET /api/sn_appclient/appmanager/app/repair`. A queued repair can wait several minutes
+  before it runs.
+- With it off, the repair endpoint hands its reinstall flag on as a boolean where the App
+  Client compares a string, and the "repair" becomes *no upgrade necessary*. In that case
+  it calls `app/install` with `isReinstall=true`, which reaches the reinstall. `endpoint` in
+  the result says which was used.
+- The App Client reports success for *no upgrade necessary* as well, so the wait also reads
+  `sys_upgrade_history` (`to_version` = the scope). `repaired` is true only when the
+  tracker succeeded **and** a new history row appeared. `history` carries that row's counts
+  and up to 50 files that were not applied (skipped, errors, manual merge, apply-once), read
+  from `sys_upgrade_history_log` without their payloads.
+
+A repair is a write: `--read-only` / `--deny-write` refuse it at the HTTP layer.
+
+#### Example
+
+```typescript
+const result = await appManager.repairStoreApplicationAndWait({ app: 'x_acme_app' });
+if (!result.repaired) console.warn(result.error ?? result.warnings.join('\n'));
+for (const file of result.history?.skippedFiles ?? []) {
+    console.log(`${file.dispositionLabel}: ${file.type} ${file.targetName} (${file.fileName})`);
 }
 ```
 

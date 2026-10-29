@@ -79,15 +79,27 @@ const FLOOR: readonly FloorRule[] = [
     // Coverage instead comes from three narrower places: the sysparm_delete_all rule
     // below catches the uninstall, the tier-3 default makes every other POST a write,
     // and the two callers that read or execute through it declare so explicitly.
+    // The App Client starts installs, updates, repairs and plugin changes with GETs, on
+    // both the unversioned path and /v1/. Matching one spelling left the other a read.
     {
         why: "store application install (issued as a GET)",
         verbs: ["write"],
-        matches: (p) => pathHas("/api/sn_appclient/appmanager/app/install")(p),
+        matches: (p) => pathMatches(/\/api\/sn_appclient\/(?:v\d+\/)?appmanager\/app\/install\/?$/)(p),
     },
     {
         why: "store application update (issued as a GET)",
         verbs: ["write"],
-        matches: (p) => pathHas("/api/sn_appclient/appmanager/app/update")(p),
+        matches: (p) => pathMatches(/\/api\/sn_appclient\/(?:v\d+\/)?appmanager\/app\/update\/?$/)(p),
+    },
+    {
+        why: "store application repair (issued as a GET)",
+        verbs: ["write"],
+        matches: (p) => pathMatches(/\/api\/sn_appclient\/(?:v\d+\/)?appmanager\/app\/repair\/?$/)(p),
+    },
+    {
+        why: "plugin activation, repair or rollback, demo data load or store sync (issued as a GET)",
+        verbs: ["write"],
+        matches: (p) => pathMatches(/\/api\/sn_appclient\/(?:v\d+\/)?appmanager\/(?:plugin\/(?:activate|repair|rollback)|loadDemoData|sync_apps)\/?$/)(p),
     },
     {
         why: "sys_trigger scheduled job — persisting a job outlives the request that made it",
