@@ -465,18 +465,24 @@ As the platform does, it refuses (`StoreAppRepairError`, with a `code`) before s
 
 #### How it repairs
 
-- With queued installation on (`sn_appclient.use_queued_installation`, the default) it calls
-  `GET /api/sn_appclient/appmanager/app/repair`. A queued repair can wait several minutes
-  before it runs.
-- With it off, the repair endpoint hands its reinstall flag on as a boolean where the App
-  Client compares a string, and the "repair" becomes *no upgrade necessary*. In that case
-  it calls `app/install` with `isReinstall=true`, which reaches the reinstall. `endpoint` in
-  the result says which was used.
+- When the system property `sn_appclient.use_queued_installation` is `true` (it is on the
+  Zurich PDIs we tested) it calls `GET /api/sn_appclient/appmanager/app/repair`. A queued
+  repair can wait several minutes before it runs.
+- When the property is anything else or missing, which the App Client treats as off, the
+  repair endpoint hands its reinstall flag on as a boolean where the App Client compares a
+  string, and the "repair" becomes *no upgrade necessary*. In that case it calls
+  `app/install` with `isReinstall=true`, which reaches the reinstall. `endpoint` in the
+  result says which was used.
 - The App Client reports success for *no upgrade necessary* as well, so the wait also reads
   `sys_upgrade_history` (`to_version` = the scope). `repaired` is true only when the
-  tracker succeeded **and** a new history row appeared. `history` carries that row's counts
-  and up to 50 files that were not applied (skipped, errors, manual merge, apply-once), read
-  from `sys_upgrade_history_log` without their payloads.
+  tracker succeeded **and** a new history row appeared and finished: the tracker can end
+  seconds before the row's counts are filled, so the wait gives it up to 30 seconds.
+  `history` carries that row's counts and up to 50 files that were not applied (skipped,
+  errors, manual merge, apply-once, table not found, fatal error, not loaded), read from
+  `sys_upgrade_history_log` without their payloads. `warnings` says when any of them other
+  than apply-once files were left out.
+- The history row names no tracker. If another install of the same app runs while the
+  repair waits in the queue, its row cannot be told apart from the repair's.
 
 A repair is a write: `--read-only` / `--deny-write` refuse it at the HTTP layer.
 

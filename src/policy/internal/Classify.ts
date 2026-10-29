@@ -39,6 +39,10 @@ const pathIs = (needle: string) => (path: string) => path.split("?")[0].endsWith
 const pathHas = (needle: string) => (path: string) => path.includes(needle);
 const pathMatches = (pattern: RegExp) => (path: string) => pattern.test(path.split("?")[0]);
 
+/** An sn_appclient appmanager route, versioned or not, followed by anything but more of its name. */
+const appClientRoute = (route: string) =>
+    pathMatches(new RegExp(`/api/+sn_appclient/+(?:v\\d+/+)?appmanager/+${route}(?![\\w-])`, "i"));
+
 /** Every method except GET: the debugger reads its breakpoints over the same paths. */
 const NOT_GET = ["post", "put", "patch", "delete"] as const;
 
@@ -80,26 +84,29 @@ const FLOOR: readonly FloorRule[] = [
     // below catches the uninstall, the tier-3 default makes every other POST a write,
     // and the two callers that read or execute through it declare so explicitly.
     // The App Client starts installs, updates, repairs and plugin changes with GETs, on
-    // both the unversioned path and /v1/. Matching one spelling left the other a read.
+    // both the unversioned path and /v1/. Matching one spelling left the other a read. The
+    // routes are those of the sn_appclient appmanager REST API (sys_ws_operation, Zurich).
+    // Not anchored at the end, and case-insensitive: these are minimums, so a spelling the
+    // server would still route (a trailing ;param, a doubled slash) must not become a read.
     {
         why: "store application install (issued as a GET)",
         verbs: ["write"],
-        matches: (p) => pathMatches(/\/api\/sn_appclient\/(?:v\d+\/)?appmanager\/app\/install\/?$/)(p),
+        matches: (p) => appClientRoute("app/+install")(p),
     },
     {
         why: "store application update (issued as a GET)",
         verbs: ["write"],
-        matches: (p) => pathMatches(/\/api\/sn_appclient\/(?:v\d+\/)?appmanager\/app\/update\/?$/)(p),
+        matches: (p) => appClientRoute("app/+update")(p),
     },
     {
         why: "store application repair (issued as a GET)",
         verbs: ["write"],
-        matches: (p) => pathMatches(/\/api\/sn_appclient\/(?:v\d+\/)?appmanager\/app\/repair\/?$/)(p),
+        matches: (p) => appClientRoute("app/+repair")(p),
     },
     {
         why: "plugin activation, repair or rollback, demo data load or store sync (issued as a GET)",
         verbs: ["write"],
-        matches: (p) => pathMatches(/\/api\/sn_appclient\/(?:v\d+\/)?appmanager\/(?:plugin\/(?:activate|repair|rollback)|loadDemoData|sync_apps)\/?$/)(p),
+        matches: (p) => appClientRoute("(?:plugin/+(?:activate|repair|rollback)|loadDemoData|sync_apps)")(p),
     },
     {
         why: "sys_trigger scheduled job — persisting a job outlives the request that made it",

@@ -475,7 +475,7 @@ export class ApplicationManager {
     */
    public async repairStoreApplication(options: StoreAppRepairOptions): Promise<StoreAppRepairStart> {
        const app = await this._repairTarget(options);
-       const previousHistoryId = (await this._latestUpgradeHistory(app.scope))?.sys_id;
+       const previousHistory = await this._historyBefore(app.scope);
        const endpoint: StoreAppRepairEndpoint = await this._queuedInstallation() ? 'repair' : 'install';
 
        const query: Record<string, string> = {
@@ -504,7 +504,7 @@ export class ApplicationManager {
            throw new StoreAppRepairError('start_failed', { app: app.sysId, status: resp.status, serverMessage: operation?.message });
        }
        this._logger.info(`Repair of ${app.scope} ${app.version} started (${endpoint}), tracker ${trackerId}`);
-       return { app, trackerId, endpoint, previousHistoryId, operation };
+       return { app, trackerId, endpoint, ...previousHistory, operation };
    }
 
    /**
@@ -552,18 +552,24 @@ export class ApplicationManager {
        }
        const history = row ? await this._repairHistory(row) : undefined;
 
+       const complete = historyComplete(row);
        const warnings: string[] = [];
        if (final.success && !history) {
            warnings.push('The App Client reported success but wrote no upgrade history for this application, so it may not have reinstalled anything.');
        }
-       if (final.success && row && !historyComplete(row)) {
+       if (row && !complete) {
            warnings.push('The upgrade history was still being written when the wait ended, so its counts may be incomplete.');
        }
        if (history) {
+           // The counts leave out Table Not Found, Fatal Error and Not Loaded; the listed files do not.
+           // Apply-once files are expected to be left alone on a reinstall.
            const c = history.counts;
-           const skipped = c.skipped + c.skippedError + c.skippedManualMerge;
-           if (skipped > 0) {
-               warnings.push(`${skipped} file(s) were not applied (skipped ${c.skipped}, errors ${c.skippedError}, manual merge ${c.skippedManualMerge}). See the skipped files and the upgrade history.`);
+           const counted = c.skipped + c.skippedError + c.skippedManualMerge;
+           const listed = history.skippedFiles.filter(file => file.disposition !== '11').length;
+           const notApplied = Math.max(counted, listed);
+           if (notApplied > 0) {
+               const more = history.skippedFilesTruncated && listed >= counted ? ' or more' : '';
+               warnings.push(`${notApplied}${more} file(s) were not applied (skipped ${c.skipped}, errors ${c.skippedError}, manual merge ${c.skippedManualMerge}). See the skipped files and the upgrade history.`);
            }
        }
 
@@ -573,14 +579,15 @@ export class ApplicationManager {
            trackerId: started.trackerId,
            endpoint: started.endpoint,
            history,
-           repaired: final.success && history !== undefined,
+           repaired: final.success && history !== undefined && complete,
            warnings
        };
    }
 
    private async _repairTarget(options: StoreAppRepairOptions): Promise<StoreAppRepairTarget> {
-       const key = typeof options?.app === 'string' ? options.app.trim() : '';
-       const bySysId = /^[a-f0-9]{32}$/.test(key);
+       const given = typeof options?.app === 'string' ? options.app.trim() : '';
+       const bySysId = /^[a-f0-9]{32}$/i.test(given);
+       const key = bySysId ? given.toLowerCase() : given;
        // Validated before it goes into an encoded query: a ^ would add conditions.
        if (!bySysId && !/^[a-z0-9_]{1,40}$/i.test(key)) throw new StoreAppRepairError('invalid_app');
        const match = bySysId ? `sys_id=${key}` : `scope=${key}`;
@@ -600,8 +607,8 @@ export class ApplicationManager {
        let customizationVersion: string | undefined;
        const [repoConfig] = await this._rows<{ sys_id: string }>('sys_repo_config', `sys_app=${app.sys_id}`, 'sys_id', 1);
        if (!repoConfig) {
-           const [customization] = await this._rows<{ version: string }>('sys_app_customization', `vendor_app=${app.sys_id}`, 'version', 1);
-           if (customization?.version && customization.version !== 'none') customizationVersion = customization.version;
+           const [customization] = await this._rows<{ version: string }>('sys_app_customization', `vendor_app=${app.sys_id}^version!=none`, 'version', 1);
+           if (customization?.version) customizationVersion = customization.version;
        }
 
        return {
@@ -619,20 +626,36 @@ export class ApplicationManager {
        return property?.value === 'true';
    }
 
-   private async _latestUpgradeHistory(scope: string): Promise<RepairHistoryRow | undefined> {
-       const [row] = await this._rows<RepairHistoryRow>(
-           'sys_upgrade_history',
-           `to_version=${scope}^ORDERBYDESCsys_created_on`,
-           'sys_id,upgrade_started,upgrade_finished,summary_complete_status,added,updated,deleted,unchanged,skipped,skipped_error,skipped_manual_merge,skipped_apply_once',
-           1
-       );
-       return row;
+   /**
+    * What the app's upgrade history held before the repair. sys_created_on has whole-second
+    * precision, so every row from the newest second is remembered, not only the first returned.
+    */
+   private async _historyBefore(scope: string): Promise<Pick<StoreAppRepairStart, 'previousHistoryIds' | 'previousHistoryCreated'>> {
+       const [newest] = await this._rows<{ sys_id: string; sys_created_on: string }>(
+           'sys_upgrade_history', `to_version=${scope}^ORDERBYDESCsys_created_on`, 'sys_id,sys_created_on', 1);
+       if (!newest) return { previousHistoryIds: [] };
+       const sameSecond = await this._rows<{ sys_id: string }>(
+           'sys_upgrade_history', `to_version=${scope}^sys_created_on=${newest.sys_created_on}`, 'sys_id', 100);
+       return {
+           previousHistoryIds: [...new Set([newest.sys_id, ...sameSecond.map(row => row.sys_id)])],
+           previousHistoryCreated: newest.sys_created_on
+       };
    }
 
-   /** The app's newest upgrade history row, when the repair wrote it. */
+   /**
+    * The newest upgrade history row the repair can have written: created no earlier than the
+    * newest row before it, and not one of those. Another install of the same scope while the
+    * repair waited in the queue would be indistinguishable; the history row names no tracker.
+    */
    private async _repairHistoryRow(started: StoreAppRepairStart): Promise<RepairHistoryRow | undefined> {
-       const row = await this._latestUpgradeHistory(started.app.scope);
-       return row && row.sys_id !== started.previousHistoryId ? row : undefined;
+       const since = started.previousHistoryCreated ? `^sys_created_on>=${started.previousHistoryCreated}` : '';
+       const rows = await this._rows<RepairHistoryRow>(
+           'sys_upgrade_history',
+           `to_version=${started.app.scope}${since}^ORDERBYDESCsys_created_on`,
+           'sys_id,sys_created_on,upgrade_started,upgrade_finished,summary_complete_status,added,updated,deleted,unchanged,skipped,skipped_error,skipped_manual_merge,skipped_apply_once',
+           started.previousHistoryIds.length + 1
+       );
+       return rows.find(row => !started.previousHistoryIds.includes(row.sys_id));
    }
 
    private async _repairHistory(row: RepairHistoryRow): Promise<StoreAppRepairHistory> {

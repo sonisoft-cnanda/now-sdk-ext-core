@@ -39,6 +39,8 @@ suite('ApplicationManager repair - Integration Tests (dev206299 only)', () => {
         expect(result.repaired).toBe(true);
         expect(result.history?.counts.updated + result.history!.counts.unchanged).toBeGreaterThan(0);
         expect(result.history?.skippedFiles).toEqual([]);
+        expect(result.history?.status).toBe('complete');
+        expect(result.warnings).toEqual([]);
     }, 25 * MINUTE);
 
     it('refuses an app developed on the instance, and demo data the app does not have, without sending anything', async () => {

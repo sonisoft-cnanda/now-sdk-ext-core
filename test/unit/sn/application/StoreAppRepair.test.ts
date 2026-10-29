@@ -24,6 +24,7 @@ const APP = 'dfdf3c79ff4422104e80ffffffffffb7';
 const SCOPE = 'sn_bubble_trend';
 const OLD_HISTORY = 'a'.repeat(32);
 const NEW_HISTORY = 'b'.repeat(32);
+const TIED_HISTORY = 'c'.repeat(32);
 
 interface World {
     tables: Record<string, Row[]>;
@@ -33,6 +34,8 @@ interface World {
     /** Finish the written history row after this many more reads of it: it starts unfinished. */
     finishHistoryAfter?: { reads: number; patch: Row };
     appClient?: (request: HTTPRequest) => Promise<unknown>;
+    /** Return rows tied on the sort field in a different order on every read, as an instance may. */
+    shuffleTies?: boolean;
 }
 
 function matches(row: Row, query: string): boolean {
@@ -40,9 +43,22 @@ function matches(row: Row, query: string): boolean {
         if (term.startsWith('ORDERBY')) return true;
         const inList = /^(\w+)IN(.*)$/.exec(term);
         if (inList) return inList[2].split(',').includes(row[inList[1]]);
+        const atLeast = /^(\w+)>=(.*)$/.exec(term);
+        if (atLeast) return (row[atLeast[1]] ?? '') >= atLeast[2];
+        const not = /^(\w+)!=(.*)$/.exec(term);
+        if (not) return row[not[1]] !== not[2];
         const [field, value] = term.split('=');
         return row[field] === value;
     });
+}
+
+/** Sorts as the encoded query's ORDERBY / ORDERBYDESC says; rows the sort ties keep their order. */
+function ordered(rows: Row[], query: string): Row[] {
+    const term = query.split('^').find(t => t.startsWith('ORDERBY'));
+    if (!term) return rows;
+    const desc = term.startsWith('ORDERBYDESC');
+    const field = term.slice(desc ? 'ORDERBYDESC'.length : 'ORDERBY'.length);
+    return [...rows].sort((a, b) => (a[field] ?? '').localeCompare(b[field] ?? '') * (desc ? -1 : 1));
 }
 
 function storeApp(over: Row = {}): Row {
@@ -51,7 +67,7 @@ function storeApp(over: Row = {}): Row {
 
 function history(sysId: string, over: Row = {}): Row {
     return {
-        sys_id: sysId, to_version: SCOPE, upgrade_started: '2026-10-29 13:30:15', upgrade_finished: '2026-10-29 13:30:26', summary_complete_status: 'complete',
+        sys_id: sysId, to_version: SCOPE, sys_created_on: '2026-10-29 13:30:15', upgrade_started: '2026-10-29 13:30:15', upgrade_finished: '2026-10-29 13:30:26', summary_complete_status: 'complete',
         added: '0', updated: '2', deleted: '0', unchanged: '1', skipped: '0', skipped_error: '0', skipped_manual_merge: '0', skipped_apply_once: '0', ...over,
     };
 }
@@ -70,7 +86,7 @@ describe('ApplicationManager store application repair', () => {
                 sys_repo_config: [],
                 sys_app_customization: [],
                 sys_properties: [{ name: 'sn_appclient.use_queued_installation', value: 'true' }],
-                sys_upgrade_history: [history(OLD_HISTORY, { upgrade_started: '2026-01-01 00:00:00' })],
+                sys_upgrade_history: [history(OLD_HISTORY, { sys_created_on: '2026-01-01 00:00:00', upgrade_started: '2026-01-01 00:00:00' })],
                 sys_upgrade_history_log: [],
             },
             writes: { history: history(NEW_HISTORY), logs: [] },
@@ -90,10 +106,11 @@ describe('ApplicationManager store application repair', () => {
             tableReads.push({ table, query: query.sysparm_query });
             const finish = world.finishHistoryAfter;
             if (table === 'sys_upgrade_history' && finish && !world.writes && finish.reads-- <= 0) {
-                Object.assign(world.tables.sys_upgrade_history[0], finish.patch);
+                Object.assign(world.tables.sys_upgrade_history.find(row => row.sys_id === NEW_HISTORY)!, finish.patch);
                 world.finishHistoryAfter = undefined;
             }
-            const rows = (world.tables[table] ?? []).filter(row => matches(row, query.sysparm_query));
+            if (world.shuffleTies) world.tables[table]?.reverse();
+            const rows = ordered((world.tables[table] ?? []).filter(row => matches(row, query.sysparm_query)), query.sysparm_query);
             const fields = query.sysparm_fields.split(',');
             const result = rows.slice(0, Number(query.sysparm_limit)).map(row => Object.fromEntries(fields.filter(f => f in row).map(f => [f, row[f]])));
             return { status: 200, bodyObject: { result } };
@@ -107,7 +124,7 @@ describe('ApplicationManager store application repair', () => {
         jest.spyOn(ProgressWorker.prototype, 'getProgress').mockImplementation((async () => {
             const progress = world.progress[Math.min(step++, world.progress.length - 1)];
             if (progress.percent_complete === 100 && world.writes) {
-                world.tables.sys_upgrade_history.unshift(world.writes.history);
+                world.tables.sys_upgrade_history.push(world.writes.history);
                 world.tables.sys_upgrade_history_log.push(...world.writes.logs);
                 world.writes = undefined;
             }
@@ -145,9 +162,9 @@ describe('ApplicationManager store application repair', () => {
         expect(result.app.customizationVersion).toBeUndefined();
     });
 
-    it('takes the sys_store_app sys_id as well as the scope', async () => {
-        const started = await mgr.repairStoreApplication({ app: APP });
-        expect(started).toMatchObject({ app: { sysId: APP }, trackerId: 'TRK1', previousHistoryId: OLD_HISTORY, endpoint: 'repair' });
+    it('takes the sys_store_app sys_id, in either case, as well as the scope', async () => {
+        const started = await mgr.repairStoreApplication({ app: APP.toUpperCase() });
+        expect(started).toMatchObject({ app: { sysId: APP }, trackerId: 'TRK1', previousHistoryIds: [OLD_HISTORY], endpoint: 'repair' });
         expect(tableReads[0]).toEqual({ table: 'sys_store_app', query: `sys_id=${APP}` });
     });
 
@@ -155,6 +172,7 @@ describe('ApplicationManager store application repair', () => {
         ['an installed customization version', [{ vendor_app: APP, version: '2.1.0' }], [], '2.1.0'],
         ['no customization version for an app under source control', [{ vendor_app: APP, version: '2.1.0' }], [{ sys_id: 'r', sys_app: APP }], undefined],
         ['no customization version when it is "none"', [{ vendor_app: APP, version: 'none' }], [], undefined],
+        ['the customization version that is not "none", whichever row comes first', [{ vendor_app: APP, version: 'none' }, { vendor_app: APP, version: '3.0.0' }], [], '3.0.0'],
     ])('sends %s, as the Repair dialog does', async (_label, customizations, repoConfigs, expected) => {
         world.tables.sys_app_customization = customizations as Row[];
         world.tables.sys_repo_config = repoConfigs as Row[];
@@ -230,9 +248,9 @@ describe('ApplicationManager store application repair', () => {
         expect(result.repaired).toBe(false);
         expect(result.history).toBeUndefined();
         expect(result.warnings[0]).toContain('may not have reinstalled anything');
-        // One read after the wait, then the settle retries.
-        const historyReads = tableReads.filter(r => r.table === 'sys_upgrade_history');
-        expect(historyReads).toHaveLength(1 + 1 + mgr.REPAIR_HISTORY_ATTEMPTS);
+        // One read for the repair's row after the wait, then the settle retries.
+        const repairRowReads = tableReads.filter(r => r.table === 'sys_upgrade_history' && r.query.includes('sys_created_on>='));
+        expect(repairRowReads).toHaveLength(1 + mgr.REPAIR_HISTORY_ATTEMPTS);
     });
 
     it('waits for the history row to finish: the tracker succeeds before its counts are filled', async () => {
@@ -243,12 +261,37 @@ describe('ApplicationManager store application repair', () => {
         expect(result.warnings).toEqual([]);
     });
 
-    it('says so when the history row is still unfinished when the wait ends', async () => {
+    it('does not call it repaired while the history row is still unfinished when the wait ends', async () => {
         world.writes = { history: history(NEW_HISTORY, { upgrade_finished: '', summary_complete_status: 'in_progress' }), logs: [] };
         const result = await mgr.repairStoreApplicationAndWait({ app: SCOPE }, 1, 60_000);
-        expect(result.repaired).toBe(true);
+        expect(result.success).toBe(true);
+        expect(result.repaired).toBe(false);
         expect(result.warnings).toEqual([expect.stringContaining('still being written')]);
-        expect(tableReads.filter(r => r.table === 'sys_upgrade_history')).toHaveLength(1 + 1 + mgr.REPAIR_HISTORY_ATTEMPTS);
+        expect(tableReads.filter(r => r.table === 'sys_upgrade_history' && r.query.includes('sys_created_on>='))).toHaveLength(1 + mgr.REPAIR_HISTORY_ATTEMPTS);
+    });
+
+    it('does not take an earlier row from the same second for the repair\'s, however the instance orders ties', async () => {
+        world.tables.sys_upgrade_history = [
+            history(OLD_HISTORY, { sys_created_on: '2026-10-01 09:00:00' }),
+            history(TIED_HISTORY, { sys_created_on: '2026-10-01 09:00:00' }),
+            history('d'.repeat(32), { sys_created_on: '2026-09-01 09:00:00' }),
+        ];
+        world.shuffleTies = true;
+        world.writes = undefined;
+        const result = await mgr.repairStoreApplicationAndWait({ app: SCOPE }, 1, 60_000);
+        expect(result.repaired).toBe(false);
+        expect(result.history).toBeUndefined();
+    });
+
+    it('takes the newest row the repair wrote, not an older one sorted first in storage', async () => {
+        world.tables.sys_upgrade_history = [
+            history('d'.repeat(32), { sys_created_on: '2026-09-01 09:00:00' }),
+            history(OLD_HISTORY, { sys_created_on: '2026-10-01 09:00:00' }),
+        ];
+        const result = await mgr.repairStoreApplicationAndWait({ app: SCOPE }, 1, 60_000);
+        expect(result.history?.sysId).toBe(NEW_HISTORY);
+        const before = tableReads.find(r => r.table === 'sys_upgrade_history');
+        expect(before?.query).toBe(`to_version=${SCOPE}^ORDERBYDESCsys_created_on`);
     });
 
     it('also counts an app with no earlier history, whose first row is the repair', async () => {
@@ -279,6 +322,28 @@ describe('ApplicationManager store application repair', () => {
         expect(logRead?.query).toContain(`upgrade_history=${NEW_HISTORY}^dispositionIN`);
     });
 
+    it('warns about files the counts leave out, such as a fatal error, but not apply-once files', async () => {
+        world.writes = {
+            history: history(NEW_HISTORY, { skipped_apply_once: '1' }),
+            logs: [
+                { upgrade_history: NEW_HISTORY, file_name: 'sys_ui_page_9', type: 'UI Page', target_name: 'p', disposition: '301', reason: '' },
+                { upgrade_history: NEW_HISTORY, file_name: 'sys_script_8', type: 'Business Rule', target_name: 'b', disposition: '11', reason: '' },
+            ],
+        };
+        const result = await mgr.repairStoreApplicationAndWait({ app: SCOPE }, 1, 60_000);
+        expect(result.history?.skippedFiles.map(f => f.dispositionLabel)).toEqual(['Skipped Apply Once', 'Fatal Error']);
+        expect(result.warnings).toEqual([expect.stringContaining('1 file(s) were not applied')]);
+    });
+
+    it('apply-once files alone raise no warning', async () => {
+        world.writes = {
+            history: history(NEW_HISTORY, { skipped_apply_once: '1' }),
+            logs: [{ upgrade_history: NEW_HISTORY, file_name: 'sys_script_8', type: 'Business Rule', target_name: 'b', disposition: '11', reason: '' }],
+        };
+        const result = await mgr.repairStoreApplicationAndWait({ app: SCOPE }, 1, 60_000);
+        expect(result).toMatchObject({ repaired: true, warnings: [] });
+    });
+
     it('says when there were more skipped files than it lists', async () => {
         const logs = Array.from({ length: STORE_APP_REPAIR_SKIPPED_LIMIT + 5 }, (_, i) => (
             { upgrade_history: NEW_HISTORY, file_name: `f${i}`, type: 'T', target_name: 't', disposition: '4' }));
@@ -301,6 +366,19 @@ describe('ApplicationManager store application repair', () => {
         const result = await mgr.repairStoreApplicationAndWait({ app: SCOPE }, 1, 5_000);
         expect(result).toMatchObject({ success: false, repaired: false, error: 'Installation timed out' });
         expect(result.warnings).toEqual([]);
+    });
+
+    it('marks the half-written history of a repair still running when the wait ends', async () => {
+        world.progress = [{ percent_complete: 40, status: '1', status_label: 'Running', status_message: '' }];
+        // The row appears once the install is under way.
+        world.appClient = async () => {
+            world.tables.sys_upgrade_history.push(history(NEW_HISTORY, { upgrade_finished: '', summary_complete_status: 'in_progress', updated: '0' }));
+            return { status: 200, bodyObject: { result: { links: { progress: { id: 'TRK1', url: '' } } } } };
+        };
+        jest.spyOn(Date, 'now').mockReturnValueOnce(0).mockReturnValue(10_000);
+        const result = await mgr.repairStoreApplicationAndWait({ app: SCOPE }, 1, 5_000);
+        expect(result.history?.sysId).toBe(NEW_HISTORY);
+        expect(result.warnings).toEqual([expect.stringContaining('still being written')]);
     });
 
     describe('when the App Client will not start it', () => {

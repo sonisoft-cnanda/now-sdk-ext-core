@@ -178,8 +178,10 @@ export interface StoreAppRepairStart {
     app: StoreAppRepairTarget;
     trackerId: string;
     endpoint: StoreAppRepairEndpoint;
-    /** The app's newest sys_upgrade_history row before the repair, to tell the repair's own row apart. */
-    previousHistoryId?: string;
+    /** The app's sys_upgrade_history rows from the newest second before the repair, to tell the repair's own row apart. */
+    previousHistoryIds: string[];
+    /** sys_created_on of the newest of those rows; absent when the app had no history. */
+    previousHistoryCreated?: string;
     /** The App Client's response. */
     operation: StoreAppOperationResult;
 }
@@ -228,8 +230,8 @@ export interface StoreAppRepairResult extends StoreAppFinalResult {
     history?: StoreAppRepairHistory;
     /**
      * True only when the App Client reported success AND a new upgrade history row was
-     * written. The App Client reports success for "no upgrade necessary" too, so success
-     * alone does not show that anything was reinstalled.
+     * written and finished. The App Client reports success for "no upgrade necessary" too,
+     * so success alone does not show that anything was reinstalled.
      */
     repaired: boolean;
     warnings: string[];
