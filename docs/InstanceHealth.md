@@ -67,7 +67,7 @@ async checkHealth(options?: HealthCheckOptions): Promise<HealthCheckResult>
 |----------|------|---------|-------------|
 | `includeVersion` | `boolean` | `true` | Include instance version info from sys_properties |
 | `includeCluster` | `boolean` | `true` | Include cluster node status from sys_cluster_state |
-| `includeStuckJobs` | `boolean` | `true` | Include stuck job detection from sys_trigger |
+| `includeStuckJobs` | `boolean` | `true` | Include stuck job detection from sys_trigger. A read, so it still runs under `--read-only` |
 | `includeSemaphores` | `boolean` | `true` | Include active semaphore count from sys_semaphore |
 | `includeOperationalCounts` | `boolean` | `true` | Include operational counts (incidents, changes, problems) |
 | `stuckJobThresholdMinutes` | `number` | `30` | Threshold in minutes for a job to be considered "stuck" |

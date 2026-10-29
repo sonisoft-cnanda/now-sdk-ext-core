@@ -129,6 +129,20 @@ winston logger; `Logger` is only a named facade onto it. Three rules follow:
   is no static check for this — nothing can know that `/api/sn_appclient/.../install`
   mutates. The audit log ("Permitted by policy", with the deciding layer) is the
   backstop; a write permitted for a surprising reason shows up there.
+- **A floor rule on a path that is also read must set `methods`.** A floor cannot be
+  lowered, so a rule that matches every method refuses the GET as well — the sys_trigger
+  rule once did, and `--read-only` lost InstanceHealth's stuck-job check (NSE-28).
+  Scheduled jobs (`sys_trigger`, `sysauto` and its descendants) are floored at write for
+  any non-GET, and POST/PUT/PATCH (and a POST to the classic `/<table>.do` form) also
+  need execute: `sysauto` defines `condition`, a script, so every schedule can run code.
+  The trade-off is that `--deny-execute` cannot disable a job with PATCH `active=false`,
+  since the same PATCH could change its script or condition; a DELETE, through the Table
+  API or a form delete (`sys_action=sysverb_delete`), stays write-only, so a job can still
+  be removed. Not covered: XML import through `/sys_upload.do` (`nex xml import`), which
+  only needs write but can create a scheduled job. The non-prefixed tables come from one Australia-release
+  PDI; plugin or customer (`u_`, `x_`) tables under sysauto need adding to
+  `SCHEDULED_JOB_TABLES`. Match table paths with `tablePath` or `formPath`, never a
+  substring, or `sys_trigger` also catches `sys_trigger_foo`.
 - **A `requires` declaration can correct a wrong default but never lowers a floor rule**,
   and cannot move a floor match off `target: 'instance'` — otherwise declaring
   `target: 'local'` would be a way to opt out of the gate.

@@ -466,7 +466,7 @@ As the platform does, it refuses (`StoreAppRepairError`, with a `code`) before s
 #### How it repairs
 
 - When the system property `sn_appclient.use_queued_installation` is `true` (it is on the
-  Zurich PDIs we tested) it calls `GET /api/sn_appclient/appmanager/app/repair`. A queued
+  Australia PDI we tested, and on every instance we checked) it calls `GET /api/sn_appclient/appmanager/app/repair`. A queued
   repair can wait several minutes before it runs.
 - When the property is anything else or missing, which the App Client treats as off, the
   repair endpoint hands its reinstall flag on as a boolean where the App Client compares a

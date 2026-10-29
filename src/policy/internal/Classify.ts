@@ -36,7 +36,6 @@ interface FloorRule {
 }
 
 const pathIs = (needle: string) => (path: string) => path.split("?")[0].endsWith(needle);
-const pathHas = (needle: string) => (path: string) => path.includes(needle);
 const pathMatches = (pattern: RegExp) => (path: string) => pattern.test(path.split("?")[0]);
 
 /** An sn_appclient appmanager route, versioned or not, followed by anything but more of its name. */
@@ -45,6 +44,59 @@ const appClientRoute = (route: string) =>
 
 /** Every method except GET: the debugger reads its breakpoints over the same paths. */
 const NOT_GET = ["post", "put", "patch", "delete"] as const;
+
+/**
+ * A Table API path for one of `tables` (a regex alternation), versioned or not, followed
+ * by `/`, `;`, `#` or the end, so `sys_trigger` does not also catch `sys_trigger_foo`.
+ * Case-insensitive and tolerant of doubled slashes, like the App Client routes: these are
+ * minimums, so a spelling the server would still route must not become a read.
+ */
+const tablePath = (tables: string) =>
+    pathMatches(new RegExp(`/api/+now/+(?:v\\d+/+)?table/+(?:${tables})(?=[/;?#]|$)`, "i"));
+
+/**
+ * A classic UI form for one of `tables` (a regex alternation): `<table>.do` as a whole path
+ * segment, followed by `;`, `#` or the end. FormRecordWriter (`nex metadata insert|update`)
+ * posts records this way. The list view (`<table>_list.do`) and a longer name
+ * (`x_<table>.do`) are other pages, not this form. Not anchored at the root: these are
+ * minimums, and a nested spelling the server might still route must not slip through.
+ */
+const formPath = (tables: string) =>
+    pathMatches(new RegExp(`(?:^|/)(?!\\w*_list\\.do)(?:${tables})\\.do(?=[;?#]|$)`, "i"));
+
+/** A form submit that deletes the record (MetadataFormWriter.delete): it schedules nothing. */
+const isFormDelete = (q: Record<string, unknown>) => q["sys_action"] === "sysverb_delete";
+
+/**
+ * Tables that descend from `sysauto` (Scheduled Job) without the `sysauto_` prefix, read
+ * from sysauto's full descendant tree (34 tables) on one Australia-release PDI
+ * (dev206299). Prefixed descendants are matched by pattern. A table added to the
+ * hierarchy later, by a plugin or by a customer (`u_`, `x_`), is not caught until it is
+ * listed here.
+ */
+const SCHEDULED_JOB_TABLES = [
+    "sn_itom_tag_policy",
+    "discovery_schedule",
+    "wf_workflow_schedule",
+    "scheduled_data_import",
+    "scheduled_import_set",
+    "scheduled_data_export",
+    "sys_atf_schedule",
+    "sys_flow_trigger_auto_script",
+    "sys_api_stats_script",
+    "sys_broadcast_message",
+    "cert_audit",
+    "promin_job",
+    "ml_training_request_schedule",
+    "cds_client_schedule",
+    "sys_error_agg_schedule",
+    "cmdb_policy_scheduled_job",
+    "sn_cmdb_ws_reconcile_duplicate_template_schedule",
+    "sys_cs_timer_event",
+] as const;
+
+/** The scheduler's runtime rows, the sysauto base, every `sysauto_*` table and the list above. */
+const SCHEDULED_TABLES = `sys_trigger|sysauto(?:_\\w+)?|${SCHEDULED_JOB_TABLES.join("|")}`;
 
 /**
  * Un-lowerable minimums.
@@ -85,7 +137,7 @@ const FLOOR: readonly FloorRule[] = [
     // and the two callers that read or execute through it declare so explicitly.
     // The App Client starts installs, updates, repairs and plugin changes with GETs, on
     // both the unversioned path and /v1/. Matching one spelling left the other a read. The
-    // routes are those of the sn_appclient appmanager REST API (sys_ws_operation, Zurich).
+    // routes are those of the sn_appclient appmanager REST API (sys_ws_operation, read on an Australia instance).
     // Not anchored at the end, and case-insensitive: these are minimums, so a spelling the
     // server would still route (a trailing ;param, a doubled slash) must not become a read.
     {
@@ -108,10 +160,44 @@ const FLOOR: readonly FloorRule[] = [
         verbs: ["write"],
         matches: (p) => appClientRoute("(?:plugin/+(?:activate|repair|rollback)|loadDemoData|sync_apps)")(p),
     },
+    // Scheduled jobs: sys_trigger, sysauto and every table under it. Persisting or
+    // changing one outlives the request that made it, so any non-GET is a write whatever
+    // a caller declares. Reading them changes nothing: InstanceHealth reads sys_trigger
+    // for stuck jobs, and must keep working read-only.
+    //
+    // Inserting or changing one also needs execute, because every schedule can run
+    // server-side code: sysauto itself defines `condition` (a script) and `conditional`,
+    // so all its descendants inherit a script that runs on the schedule, on top of the
+    // `script` of sys_trigger and sysauto_script and the pre- and post-import scripts of
+    // Scheduled Data Import. Splitting the tables by whether they define a script column
+    // was wrong for that reason. This also closes BackgroundScriptExecutor's sys_trigger
+    // fallback at the wire; that method already asserts execute and write before it
+    // POSTs, so nothing it permits is refused here.
+    //
+    // DELETE stays at write: removing a job runs nothing, and cleaning one up must stay
+    // possible under --deny-execute, as cancelling a flow debug run does. The trade-off:
+    // under --deny-execute a schedule cannot be disabled with PATCH active=false, because
+    // the same PATCH could change its script or condition. It can be deleted instead.
     {
-        why: "sys_trigger scheduled job — persisting a job outlives the request that made it",
+        why: "scheduled job (sys_trigger or a sysauto table) — persisting a job outlives the request that made it",
         verbs: ["write"],
-        matches: (p) => pathHas("/api/now/table/sys_trigger")(p),
+        methods: NOT_GET,
+        matches: (p) => tablePath(SCHEDULED_TABLES)(p),
+    },
+    {
+        why: "scheduled job — inserting or changing one schedules server-side script (its condition or script)",
+        verbs: ["execute"],
+        methods: ["post", "put", "patch"],
+        matches: (p) => tablePath(SCHEDULED_TABLES)(p),
+    },
+    // The same tables through their classic form. Only POST: a GET of the form is a read.
+    // A form delete stays at the POST default (write), as a Table API DELETE does, so a
+    // job can still be removed with its update-set capture under --deny-execute.
+    {
+        why: "scheduled job form submit — inserting or changing one schedules server-side script",
+        verbs: ["write", "execute"],
+        methods: ["post"],
+        matches: (p, q) => formPath(SCHEDULED_TABLES)(p) && !isFormDelete(q),
     },
     {
         why: "sysparm_delete_all",
