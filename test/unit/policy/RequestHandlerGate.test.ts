@@ -163,16 +163,21 @@ describe("scheduled jobs at the wire (NSE-28)", () => {
         await expect(config(request({ method: "POST", path: TRIGGER }))).rejects.toThrow(/write/i);
     });
 
-    it("refuses scheduling a script under --deny-execute, but not deleting a job", async () => {
+    it("refuses inserting or changing any scheduled job under --deny-execute, but not deleting one", async () => {
         installPolicy([denyLayer("deny-execute", ["execute"]), allowAllLayer()]);
         await expect(config(request({ method: "POST", path: TRIGGER }))).rejects.toThrow(/execute/i);
         await expect(config(request({ method: "PATCH", path: `/api/now/table/sysauto_script/${SYS_ID}` })))
             .rejects.toThrow(/execute/i);
-        await expect(config(request({ method: "DELETE", path: `${TRIGGER}/${SYS_ID}` }))).resolves.toBeDefined();
-        // discovery_schedule extends sysauto_script and inherits its script field.
-        await expect(config(request({ method: "POST", path: "/api/now/table/discovery_schedule" })))
+        // Every scheduled job can run code: sysauto defines `condition`, a script.
+        await expect(config(request({ method: "POST", path: "/api/now/table/scheduled_data_import" })))
             .rejects.toThrow(/execute/i);
-        await expect(config(request({ method: "POST", path: "/api/now/table/scheduled_data_import" }))).resolves.toBeDefined();
+        await expect(config(request({ method: "POST", path: "/sysauto_script.do" }))).rejects.toThrow(/execute/i);
+        // Deleting a job runs nothing, and other tables are only the default write.
+        await expect(config(request({ method: "DELETE", path: `${TRIGGER}/${SYS_ID}` }))).resolves.toBeDefined();
+        await expect(config(request({ method: "DELETE", path: `/api/now/table/scheduled_data_import/${SYS_ID}` })))
+            .resolves.toBeDefined();
+        await expect(config(request({ method: "POST", path: "/api/now/table/incident" }))).resolves.toBeDefined();
+        await expect(config(request({ method: "POST", path: "/sys_dictionary.do" }))).resolves.toBeDefined();
     });
 });
 

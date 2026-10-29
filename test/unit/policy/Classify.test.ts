@@ -123,88 +123,71 @@ describe("tier 1 — floor, for mutations the verb hides", () => {
 describe("tier 1 — scheduled jobs (NSE-28)", () => {
     const SYS_ID = "0a1b2c3d4e5f60718293a4b5c6d7e8f9";
     const T = "/api/now/table";
-    const TRIGGER_WHY = "sys_trigger scheduled job — persisting a job outlives the request that made it";
-    const DEFINITION_WHY = "scheduled job definition — persisting a job outlives the request that made it";
-    const SCRIPT_WHY = "script-bearing schedule — inserting or changing one schedules server-side script";
+    const WRITE_WHY = "scheduled job (sys_trigger or a sysauto table) — persisting a job outlives the request that made it";
+    const EXECUTE_WHY = "scheduled job — inserting or changing one schedules server-side script (its condition or script)";
+    const FORM_WHY = "scheduled job form submit — inserting or changing one schedules server-side script";
 
-    // Reading scheduled jobs changes nothing; InstanceHealth reads sys_trigger for stuck jobs.
-    it.each([
-        `${T}/sys_trigger`,
-        `${T}/sys_trigger/${SYS_ID}`,
-        `${T}/sys_trigger?sysparm_query=state=0&sysparm_limit=100`,
-        `${T}/sysauto`,
-        `${T}/sysauto/${SYS_ID}`,
-        `${T}/sysauto_script`,
-        `${T}/sysauto_script/${SYS_ID}`,
-        `${T}/discovery_schedule`,
-        `${T}/discovery_schedule/${SYS_ID}`,
-        "/api/now/v2/table/sys_trigger",
-    ])("needs nothing for GET %s", (path) => {
-        const r = req({ method: "GET", path });
-        expect(classify(r).verbs).toEqual([]);
-        expect(floorFor(r).reasons).toEqual([]);
-    });
+    // sysauto defines `condition`, a script, so every table under it can run code on its
+    // schedule — not only those with a `script` column of their own.
+    const SCHEDULED = [
+        "sys_trigger",
+        "sysauto",
+        "sysauto_script",
+        "sysauto_report",
+        "sysauto_template",
+        "scheduled_data_import",
+        "sys_cs_timer_event",
+        "discovery_schedule",
+        "sn_itom_tag_policy",
+        "sys_atf_schedule",
+        "sn_cmdb_ws_reconcile_duplicate_template_schedule",
+    ];
 
-    // Script-bearing schedules: inserting or changing one schedules code, so execute too.
-    it.each([
-        ["POST", `${T}/sys_trigger`, [TRIGGER_WHY, SCRIPT_WHY]],
-        ["PUT", `${T}/sys_trigger/${SYS_ID}`, [TRIGGER_WHY, SCRIPT_WHY]],
-        ["PATCH", `${T}/sys_trigger/${SYS_ID}`, [TRIGGER_WHY, SCRIPT_WHY]],
-        ["POST", `${T}/sysauto_script`, [DEFINITION_WHY, SCRIPT_WHY]],
-        ["PUT", `${T}/sysauto_script/${SYS_ID}`, [DEFINITION_WHY, SCRIPT_WHY]],
-        ["PATCH", `${T}/sysauto_script/${SYS_ID}`, [DEFINITION_WHY, SCRIPT_WHY]],
-        ["POST", `${T}/sysauto`, [DEFINITION_WHY, SCRIPT_WHY]],
-        ["PATCH", `${T}/sysauto/${SYS_ID}`, [DEFINITION_WHY, SCRIPT_WHY]],
-        // Tables that extend sysauto_script and inherit its script field.
-        ["POST", `${T}/discovery_schedule`, [DEFINITION_WHY, SCRIPT_WHY]],
-        ["PATCH", `${T}/discovery_schedule/${SYS_ID}`, [DEFINITION_WHY, SCRIPT_WHY]],
-        ["POST", `${T}/sys_atf_schedule`, [DEFINITION_WHY, SCRIPT_WHY]],
-        ["PATCH", `${T}/sys_atf_schedule/${SYS_ID}`, [DEFINITION_WHY, SCRIPT_WHY]],
-        ["POST", `${T}/sn_itom_tag_policy`, [DEFINITION_WHY, SCRIPT_WHY]],
-        ["PATCH", `${T}/sn_itom_tag_policy/${SYS_ID}`, [DEFINITION_WHY, SCRIPT_WHY]],
-        ["PUT", `${T}/sysauto_bm_script/${SYS_ID}`, [DEFINITION_WHY, SCRIPT_WHY]],
-        ["POST", `${T}/sn_cmdb_ws_reconcile_duplicate_template_schedule`, [DEFINITION_WHY, SCRIPT_WHY]],
-    ])("floors %s %s at write and execute", (method, path, reasons) => {
-        const r = req({ method, path });
-        expect(classify(r).verbs.sort()).toEqual(["execute", "write"]);
-        expect(floorFor(r).verbs.sort()).toEqual(["execute", "write"]);
-        expect(floorFor(r).reasons).toEqual(reasons);
-    });
+    describe.each(SCHEDULED)("%s", (table) => {
+        // Reading scheduled jobs changes nothing; InstanceHealth reads sys_trigger for stuck jobs.
+        it.each([
+            `${T}/${table}`,
+            `${T}/${table}/${SYS_ID}`,
+            `${T}/${table}?sysparm_query=active=true&sysparm_limit=100`,
+            `/api/now/v2/table/${table}`,
+            `/${table}.do?sys_id=${SYS_ID}`,
+        ])("is a read for GET %s", (path) => {
+            const r = req({ method: "GET", path });
+            expect(classify(r).verbs).toEqual([]);
+            expect(floorFor(r).reasons).toEqual([]);
+        });
 
-    // Deleting a job runs nothing, and cleanup must stay possible under --deny-execute.
-    it.each([
-        [`${T}/sys_trigger/${SYS_ID}`, TRIGGER_WHY],
-        [`${T}/sysauto_script/${SYS_ID}`, DEFINITION_WHY],
-        [`${T}/sysauto/${SYS_ID}`, DEFINITION_WHY],
-        [`${T}/discovery_schedule/${SYS_ID}`, DEFINITION_WHY],
-        [`${T}/sn_itom_tag_policy/${SYS_ID}`, DEFINITION_WHY],
-    ])("floors DELETE %s at write alone", (path, why) => {
-        const r = req({ method: "DELETE", path });
-        expect(floorFor(r).verbs).toEqual(["write"]);
-        expect(floorFor(r).reasons).toEqual([why]);
-    });
+        it.each([
+            ["POST", `${T}/${table}`],
+            ["PUT", `${T}/${table}/${SYS_ID}`],
+            ["PATCH", `${T}/${table}/${SYS_ID}`],
+        ])("is execute and write for %s %s", (method, path) => {
+            const r = req({ method, path });
+            expect(classify(r).verbs.sort()).toEqual(["execute", "write"]);
+            expect(floorFor(r).verbs.sort()).toEqual(["execute", "write"]);
+            expect(floorFor(r).reasons).toEqual([WRITE_WHY, EXECUTE_WHY]);
+        });
 
-    // Scheduled-job definitions that carry no script: a write, not an execute.
-    it.each([
-        ["POST", `${T}/scheduled_data_import`],
-        ["PATCH", `${T}/scheduled_data_import/${SYS_ID}`],
-        ["PUT", `${T}/scheduled_data_export/${SYS_ID}`],
-        ["POST", `${T}/sysauto_template`],
-        ["POST", `${T}/sysauto_report`],
-        ["PATCH", `${T}/sysauto_report/${SYS_ID}`],
-        ["DELETE", `${T}/sysauto_pa/${SYS_ID}`],
-        ["POST", `${T}/sys_cs_timer_event`],
-    ])("floors %s %s at write", (method, path) => {
-        const r = req({ method, path });
-        expect(floorFor(r).verbs).toEqual(["write"]);
-        expect(floorFor(r).reasons).toEqual([DEFINITION_WHY]);
+        // Deleting a job runs nothing, and cleanup must stay possible under --deny-execute.
+        it("is write alone for DELETE", () => {
+            const r = req({ method: "DELETE", path: `${T}/${table}/${SYS_ID}` });
+            expect(classify(r).verbs).toEqual(["write"]);
+            expect(floorFor(r).verbs).toEqual(["write"]);
+            expect(floorFor(r).reasons).toEqual([WRITE_WHY]);
+        });
+
+        it("is execute and write for a POST to its classic form", () => {
+            const r = req({ method: "POST", path: `/${table}.do`, requires: READ_ONLY });
+            expect(classify(r).verbs.sort()).toEqual(["execute", "write"]);
+            expect(floorFor(r).reasons).toEqual([FORM_WHY]);
+        });
     });
 
     it("a declaration cannot talk a scheduled-job insert down to a read", () => {
-        const trigger = req({ method: "POST", path: `${T}/sys_trigger`, requires: READ_ONLY });
-        expect(classify(trigger).verbs.sort()).toEqual(["execute", "write"]);
-        const definition = req({ method: "POST", path: `${T}/scheduled_data_import`, requires: READ_ONLY });
-        expect(classify(definition).verbs).toEqual(["write"]);
+        for (const table of ["sys_trigger", "scheduled_data_import", "sysauto_report"]) {
+            const r = req({ method: "POST", path: `${T}/${table}`, requires: READ_ONLY });
+            expect(classify(r).verbs.sort()).toEqual(["execute", "write"]);
+        }
     });
 
     it.each([
@@ -220,18 +203,53 @@ describe("tier 1 — scheduled jobs (NSE-28)", () => {
         "/api/now/v1/table/sys_trigger",
         "/api/now/v2/table/sysauto_script",
         "/api/now/./table/sysauto_script;x=1",
-        "/api/now/table/./discovery_schedule",
+        "/api/now/table/./scheduled_data_import",
+        "/api/now/table/sysauto_template;x=1",
         "/api/now/table/sn_itom_tag_policy;x=1",
     ])("floors the respelled POST %s", (path) => {
         expect(classify(req({ method: "POST", path, requires: READ_ONLY })).verbs.sort()).toEqual(["execute", "write"]);
     });
 
     it.each([
-        "/api/now/table/./scheduled_data_import",
-        "/api/now/table/scheduled_data_import;x=1",
-        "/api/now/table/sysauto_template;x=1",
-    ])("floors the respelled definition POST %s", (path) => {
-        expect(classify(req({ method: "POST", path, requires: READ_ONLY })).verbs).toEqual(["write"]);
+        "/sysauto_script.do",
+        "/sysauto_script.do?sys_id=-1",
+        "/sysauto_script.do;x=1",
+        "/sysauto_script.do#x",
+        "//sysauto_script.do",
+        "/SYSAUTO_SCRIPT.DO",
+        "/./sysauto_script.do",
+        "/x/../sysauto_script.do",
+        "/sysauto_%73cript.do",
+        "/sys_trigger.do",
+        "/sysauto.do",
+        "/sysauto_report.do",
+        "/scheduled_data_import.do",
+        "/sn_itom_tag_policy.do",
+    ])("floors the form POST %s", (path) => {
+        const r = req({ method: "POST", path, requires: READ_ONLY });
+        expect(classify(r).verbs.sort()).toEqual(["execute", "write"]);
+        expect(floorFor(r).reasons).toEqual([FORM_WHY]);
+    });
+
+    // Other pages with a scheduled table's name in them, and other tables' forms.
+    it.each([
+        "/sysauto_script_list.do",
+        "/sys_trigger_list.do",
+        "/scheduled_data_import_list.do",
+        "/x_sysauto_script.do",
+        "/u_sys_trigger.do",
+        "/sysautomatic.do",
+        "/sys_trigger_x.do",
+        "/foo/sysauto_script.do",
+        "/sysauto_script.doc",
+        "/sys_dictionary.do",
+        "/sys_choice.do",
+        "/sys_script_include.do",
+        "/slushbucket.do",
+        "/v_cluster_transaction_list.do",
+    ])("leaves a POST to %s at the default", (path) => {
+        expect(floorFor(req({ method: "POST", path })).reasons).toEqual([]);
+        expect(classify(req({ method: "POST", path, requires: READ_ONLY })).verbs).toEqual([]);
     });
 
     // Made-up tables that only share a prefix with a scheduled-job table.

@@ -132,10 +132,14 @@ winston logger; `Logger` is only a named facade onto it. Three rules follow:
 - **A floor rule on a path that is also read must set `methods`.** A floor cannot be
   lowered, so a rule that matches every method refuses the GET as well — the sys_trigger
   rule once did, and `--read-only` lost InstanceHealth's stuck-job check (NSE-28).
-  Scheduled jobs (`sys_trigger`, `sysauto` and its children) are floored at write for any
-  non-GET; inserting or changing a script-bearing one (`sys_trigger`, `sysauto`, and
-  `sysauto_script` with every table that inherits its script, `SCRIPT_SCHEDULE_TABLES`)
-  also needs execute. Match table paths with `tablePath`, never a
+  Scheduled jobs (`sys_trigger`, `sysauto` and its descendants) are floored at write for
+  any non-GET, and POST/PUT/PATCH (and a POST to the classic `/<table>.do` form) also
+  need execute: `sysauto` defines `condition`, a script, so every schedule can run code.
+  The trade-off is that `--deny-execute` cannot disable a job with PATCH `active=false`,
+  since the same PATCH could change its script or condition; DELETE stays write-only, so
+  a job can still be removed. The non-prefixed tables come from one Australia-release
+  PDI; plugin or customer (`u_`, `x_`) tables under sysauto need adding to
+  `SCHEDULED_JOB_TABLES`. Match table paths with `tablePath` or `formPath`, never a
   substring, or `sys_trigger` also catches `sys_trigger_foo`.
 - **A `requires` declaration can correct a wrong default but never lowers a floor rule**,
   and cannot move a floor match off `target: 'instance'` — otherwise declaring

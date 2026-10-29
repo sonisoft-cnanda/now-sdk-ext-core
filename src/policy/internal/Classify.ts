@@ -55,10 +55,20 @@ const tablePath = (tables: string) =>
     pathMatches(new RegExp(`/api/+now/+(?:v\\d+/+)?table/+(?:${tables})(?=[/;?#]|$)`, "i"));
 
 /**
+ * A classic UI form for one of `tables` (a regex alternation): `/<table>.do` at the root,
+ * followed by `;`, `#` or the end. FormRecordWriter (`nex metadata insert|update`) posts
+ * records this way. The list view (`<table>_list.do`) and a longer name (`x_<table>.do`)
+ * are other pages, not this form.
+ */
+const formPath = (tables: string) =>
+    pathMatches(new RegExp(`^/+(?!\\w*_list\\.do)(?:${tables})\\.do(?=[;?#]|$)`, "i"));
+
+/**
  * Tables that descend from `sysauto` (Scheduled Job) without the `sysauto_` prefix, read
- * from sysauto's full descendant tree (34 tables) on an Australia instance (dev206299). Prefixed
- * descendants are matched by pattern. A table added to the hierarchy later is not caught
- * until it is listed here.
+ * from sysauto's full descendant tree (34 tables) on one Australia-release PDI
+ * (dev206299). Prefixed descendants are matched by pattern. A table added to the
+ * hierarchy later, by a plugin or by a customer (`u_`, `x_`), is not caught until it is
+ * listed here.
  */
 const SCHEDULED_JOB_TABLES = [
     "sn_itom_tag_policy",
@@ -81,30 +91,8 @@ const SCHEDULED_JOB_TABLES = [
     "sys_cs_timer_event",
 ] as const;
 
-/**
- * `sysauto_script` (Scheduled Script Execution) and the tables that extend it, read from
- * sys_db_object on an Australia instance (dev206299). Each inherits its `script` field, so inserting or
- * changing a row in any of them schedules server-side script. Only sysauto_script and
- * sys_trigger define a script column themselves.
- */
-const SCRIPT_SCHEDULE_TABLES = [
-    "sysauto_script",
-    "cert_audit",
-    "cmdb_policy_scheduled_job",
-    "discovery_schedule",
-    "promin_job",
-    "sn_cmdb_ws_reconcile_duplicate_template_schedule",
-    "sn_itom_tag_policy",
-    "sys_api_stats_script",
-    "sys_atf_schedule",
-    "sys_broadcast_message",
-    "sys_error_agg_schedule",
-    "sys_flow_trigger_auto_script",
-    "sysauto_bm_script",
-    "sysauto_kb_assist_job",
-    "sysauto_summary_generator",
-    "wf_workflow_schedule",
-] as const;
+/** The scheduler's runtime rows, the sysauto base, every `sysauto_*` table and the list above. */
+const SCHEDULED_TABLES = `sys_trigger|sysauto(?:_\\w+)?|${SCHEDULED_JOB_TABLES.join("|")}`;
 
 /**
  * Un-lowerable minimums.
@@ -168,36 +156,42 @@ const FLOOR: readonly FloorRule[] = [
         verbs: ["write"],
         matches: (p) => appClientRoute("(?:plugin/+(?:activate|repair|rollback)|loadDemoData|sync_apps)")(p),
     },
-    // Scheduled jobs. Persisting or changing one outlives the request that made it, so
-    // any non-GET is a write whatever a caller declares. Reading them changes nothing:
-    // InstanceHealth reads sys_trigger for stuck jobs, and must keep working read-only.
+    // Scheduled jobs: sys_trigger, sysauto and every table under it. Persisting or
+    // changing one outlives the request that made it, so any non-GET is a write whatever
+    // a caller declares. Reading them changes nothing: InstanceHealth reads sys_trigger
+    // for stuck jobs, and must keep working read-only.
+    //
+    // Inserting or changing one also needs execute, because every schedule can run
+    // server-side code: sysauto itself defines `condition` (a script) and `conditional`,
+    // so all its descendants inherit a script that runs on the schedule, on top of the
+    // `script` of sys_trigger and sysauto_script and the pre- and post-import scripts of
+    // Scheduled Data Import. Splitting the tables by whether they define a script column
+    // was wrong for that reason. This also closes BackgroundScriptExecutor's sys_trigger
+    // fallback at the wire; that method already asserts execute and write before it
+    // POSTs, so nothing it permits is refused here.
+    //
+    // DELETE stays at write: removing a job runs nothing, and cleaning one up must stay
+    // possible under --deny-execute, as cancelling a flow debug run does. The trade-off:
+    // under --deny-execute a schedule cannot be disabled with PATCH active=false, because
+    // the same PATCH could change its script or condition. It can be deleted instead.
     {
-        why: "sys_trigger scheduled job — persisting a job outlives the request that made it",
+        why: "scheduled job (sys_trigger or a sysauto table) — persisting a job outlives the request that made it",
         verbs: ["write"],
         methods: NOT_GET,
-        matches: (p) => tablePath("sys_trigger")(p),
+        matches: (p) => tablePath(SCHEDULED_TABLES)(p),
     },
     {
-        why: "scheduled job definition — persisting a job outlives the request that made it",
-        verbs: ["write"],
-        methods: NOT_GET,
-        matches: (p) => tablePath(`sysauto(?:_\\w+)?|${SCHEDULED_JOB_TABLES.join("|")}`)(p),
-    },
-    // A schedule that carries a script also needs execute: inserting or changing one
-    // schedules arbitrary server-side code, which `--deny-execute` exists to refuse. It
-    // also closes BackgroundScriptExecutor's sys_trigger fallback at the wire; that
-    // method already asserts execute and write before it POSTs, so nothing it permits is
-    // refused here. sys_trigger runs its own `script`; SCRIPT_SCHEDULE_TABLES is Scheduled
-    // Script Execution and every table that inherits its script. The sysauto base table is
-    // included because a write through a parent table can land on a child's record, and a
-    // floor errs toward refusing. DELETE stays
-    // at write: removing a job runs nothing, and cleaning one up must stay possible under
-    // --deny-execute, as cancelling a flow debug run does.
-    {
-        why: "script-bearing schedule — inserting or changing one schedules server-side script",
+        why: "scheduled job — inserting or changing one schedules server-side script (its condition or script)",
         verbs: ["execute"],
         methods: ["post", "put", "patch"],
-        matches: (p) => tablePath(`sys_trigger|sysauto|${SCRIPT_SCHEDULE_TABLES.join("|")}`)(p),
+        matches: (p) => tablePath(SCHEDULED_TABLES)(p),
+    },
+    // The same tables through their classic form. Only POST: a GET of the form is a read.
+    {
+        why: "scheduled job form submit — inserting or changing one schedules server-side script",
+        verbs: ["write", "execute"],
+        methods: ["post"],
+        matches: (p) => formPath(SCHEDULED_TABLES)(p),
     },
     {
         why: "sysparm_delete_all",
