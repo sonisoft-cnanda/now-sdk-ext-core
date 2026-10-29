@@ -56,7 +56,7 @@ const tablePath = (tables: string) =>
 
 /**
  * Tables that descend from `sysauto` (Scheduled Job) without the `sysauto_` prefix, read
- * from sysauto's full descendant tree (34 tables) on a Zurich instance. Prefixed
+ * from sysauto's full descendant tree (34 tables) on an Australia instance (dev206299). Prefixed
  * descendants are matched by pattern. A table added to the hierarchy later is not caught
  * until it is listed here.
  */
@@ -83,7 +83,7 @@ const SCHEDULED_JOB_TABLES = [
 
 /**
  * `sysauto_script` (Scheduled Script Execution) and the tables that extend it, read from
- * sys_db_object on a Zurich instance. Each inherits its `script` field, so inserting or
+ * sys_db_object on an Australia instance (dev206299). Each inherits its `script` field, so inserting or
  * changing a row in any of them schedules server-side script. Only sysauto_script and
  * sys_trigger define a script column themselves.
  */
@@ -145,7 +145,7 @@ const FLOOR: readonly FloorRule[] = [
     // and the two callers that read or execute through it declare so explicitly.
     // The App Client starts installs, updates, repairs and plugin changes with GETs, on
     // both the unversioned path and /v1/. Matching one spelling left the other a read. The
-    // routes are those of the sn_appclient appmanager REST API (sys_ws_operation, Zurich).
+    // routes are those of the sn_appclient appmanager REST API (sys_ws_operation, read on an Australia instance).
     // Not anchored at the end, and case-insensitive: these are minimums, so a spelling the
     // server would still route (a trailing ;param, a doubled slash) must not become a read.
     {

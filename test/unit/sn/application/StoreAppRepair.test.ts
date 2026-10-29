@@ -10,7 +10,7 @@ import type { HTTPRequest } from '../../../../src/comm/http/HTTPRequest';
 
 /*
  * Repair Application, against a fake instance holding the tables the repair reads and the
- * App Client endpoints it calls. What the fake models was read from dev206299 (Zurich):
+ * App Client endpoints it calls. What the fake models was read from dev206299 (Australia release):
  * - the Repair dialog sends the INSTALLED version and the customization version found in
  *   sys_app_customization, unless the app has a sys_repo_config;
  * - with queued installation off, the repair endpoint drops the reinstall flag, so the
