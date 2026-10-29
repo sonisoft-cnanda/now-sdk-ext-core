@@ -150,6 +150,29 @@ describe("--deny-execute on flow designer runs", () => {
     });
 });
 
+describe("scheduled jobs at the wire (NSE-28)", () => {
+    const config = (r: never) =>
+        (handler as never as { getRequestConfig(x: never): Promise<unknown> }).getRequestConfig(r);
+    const TRIGGER = "/api/now/table/sys_trigger";
+    const SYS_ID = "0a1b2c3d4e5f60718293a4b5c6d7e8f9";
+
+    it("lets --read-only read sys_trigger, as InstanceHealth does for stuck jobs", async () => {
+        installPolicy([denyLayer("read-only", ["write", "execute"]), allowAllLayer()]);
+        await expect(config(request({ method: "GET", path: TRIGGER, query: { sysparm_query: "state=0" } })))
+            .resolves.toBeDefined();
+        await expect(config(request({ method: "POST", path: TRIGGER }))).rejects.toThrow(/write/i);
+    });
+
+    it("refuses scheduling a script under --deny-execute, but not deleting a job", async () => {
+        installPolicy([denyLayer("deny-execute", ["execute"]), allowAllLayer()]);
+        await expect(config(request({ method: "POST", path: TRIGGER }))).rejects.toThrow(/execute/i);
+        await expect(config(request({ method: "PATCH", path: `/api/now/table/sysauto_script/${SYS_ID}` })))
+            .rejects.toThrow(/execute/i);
+        await expect(config(request({ method: "DELETE", path: `${TRIGGER}/${SYS_ID}` }))).resolves.toBeDefined();
+        await expect(config(request({ method: "POST", path: "/api/now/table/discovery_schedule" }))).resolves.toBeDefined();
+    });
+});
+
 describe("logging a refused request", () => {
     beforeEach(() => installPolicy([denyLayer("deny-execute", ["execute"]), allowAllLayer()]));
 

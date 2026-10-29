@@ -129,6 +129,13 @@ winston logger; `Logger` is only a named facade onto it. Three rules follow:
   is no static check for this — nothing can know that `/api/sn_appclient/.../install`
   mutates. The audit log ("Permitted by policy", with the deciding layer) is the
   backstop; a write permitted for a surprising reason shows up there.
+- **A floor rule on a path that is also read must set `methods`.** A floor cannot be
+  lowered, so a rule that matches every method refuses the GET as well — the sys_trigger
+  rule once did, and `--read-only` lost InstanceHealth's stuck-job check (NSE-28).
+  Scheduled jobs (`sys_trigger`, `sysauto` and its children) are floored at write for any
+  non-GET; inserting or changing a script-bearing one (`sys_trigger`, `sysauto`,
+  `sysauto_script`) also needs execute. Match table paths with `tablePath`, never a
+  substring, or `sys_trigger` also catches `sys_trigger_foo`.
 - **A `requires` declaration can correct a wrong default but never lowers a floor rule**,
   and cannot move a floor match off `target: 'instance'` — otherwise declaring
   `target: 'local'` would be a way to opt out of the gate.

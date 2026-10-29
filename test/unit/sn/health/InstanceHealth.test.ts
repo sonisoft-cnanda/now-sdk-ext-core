@@ -3,7 +3,7 @@
  * Tests consolidated health check against multiple ServiceNow tables
  */
 
-import { describe, it, expect, beforeEach, jest } from '@jest/globals';
+import { describe, it, expect, beforeEach, afterEach, jest } from '@jest/globals';
 import { InstanceHealth } from '../../../../src/sn/health/InstanceHealth';
 import { IHttpResponse } from '../../../../src/comm/http/IHttpResponse';
 import { MockAuthenticationHandler, createGetCredentialsMock } from '../../__mocks__/servicenow-sdk-mocks';
@@ -12,6 +12,9 @@ import { RequestHandlerFactory } from '../../../../src/comm/http/RequestHandlerF
 import { SessionManager } from '../../../../src/comm/http/SessionManager';
 import { ServiceNowInstance, ServiceNowSettingsInstance } from '../../../../src/sn/ServiceNowInstance';
 import { AggregateQuery } from '../../../../src/sn/aggregate/AggregateQuery';
+import { classify } from '../../../../src/policy/internal/Classify';
+import { checkRequirement, denyLayer, grantLayer, installPolicy, resetPolicyForTests } from '../../../../src/policy/Policy';
+import { HTTPRequest } from '../../../../src/comm/http/HTTPRequest';
 
 // Mock dependencies
 jest.mock('../../../../src/auth/AuthenticationHandlerFactory');
@@ -292,6 +295,38 @@ describe('InstanceHealth - Unit Tests', () => {
             });
 
             expect(stuckJobCall).toBeDefined();
+        });
+    });
+
+    // NSE-28. The handler is mocked here, so the HTTP gate never runs; instead the exact
+    // request InstanceHealth sends is put through the gate's classifier and policy check.
+    describe('checkHealth - stuck jobs under --read-only', () => {
+        afterEach(() => resetPolicyForTests());
+
+        it('reads sys_trigger without needing write or execute', async () => {
+            mockRequestHandler.get.mockResolvedValue(createMockResponse({ result: [] }));
+            mockAggregateQuery.count.mockResolvedValue(0);
+
+            await health.checkHealth();
+
+            const calls = mockRequestHandler.get.mock.calls as unknown as [HTTPRequest][];
+            const stuckJobRequest = calls
+                .map((call) => call[0])
+                .find((request) => String(request?.path).includes('/sys_trigger'));
+            expect(stuckJobRequest).toBeDefined();
+
+            // What nex installs for --read-only: a deny above its permissive default.
+            installPolicy([
+                denyLayer('command-line flag', ['write', 'execute']),
+                grantLayer('default (changes permitted)', ['write', 'execute']),
+            ]);
+            const requirement = classify(stuckJobRequest!);
+            expect(requirement.verbs).toEqual([]);
+            expect(checkRequirement(requirement).allowed).toBe(true);
+
+            // The same path is still refused when it would schedule something.
+            const insert = classify({ ...stuckJobRequest!, method: 'post', requires: undefined });
+            expect(checkRequirement(insert).allowed).toBe(false);
         });
     });
 });

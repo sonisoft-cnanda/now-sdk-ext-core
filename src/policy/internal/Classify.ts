@@ -36,7 +36,6 @@ interface FloorRule {
 }
 
 const pathIs = (needle: string) => (path: string) => path.split("?")[0].endsWith(needle);
-const pathHas = (needle: string) => (path: string) => path.includes(needle);
 const pathMatches = (pattern: RegExp) => (path: string) => pattern.test(path.split("?")[0]);
 
 /** An sn_appclient appmanager route, versioned or not, followed by anything but more of its name. */
@@ -45,6 +44,40 @@ const appClientRoute = (route: string) =>
 
 /** Every method except GET: the debugger reads its breakpoints over the same paths. */
 const NOT_GET = ["post", "put", "patch", "delete"] as const;
+
+/**
+ * A Table API path for one of `tables` (a regex alternation), versioned or not, followed
+ * by `/`, `;`, `#` or the end, so `sys_trigger` does not also catch `sys_trigger_foo`.
+ * Case-insensitive and tolerant of doubled slashes, like the App Client routes: these are
+ * minimums, so a spelling the server would still route must not become a read.
+ */
+const tablePath = (tables: string) =>
+    pathMatches(new RegExp(`/api/+now/+(?:v\\d+/+)?table/+(?:${tables})(?=[/;?#]|$)`, "i"));
+
+/**
+ * Tables that extend `sysauto` (Scheduled Job) without the `sysauto_` prefix, read from
+ * sysauto's children on a Zurich instance. Prefixed children are matched by pattern. A
+ * table added to the hierarchy later is not caught until it is listed here.
+ */
+const SCHEDULED_JOB_TABLES = [
+    "discovery_schedule",
+    "wf_workflow_schedule",
+    "scheduled_data_import",
+    "scheduled_import_set",
+    "scheduled_data_export",
+    "sys_atf_schedule",
+    "sys_flow_trigger_auto_script",
+    "sys_api_stats_script",
+    "sys_broadcast_message",
+    "cert_audit",
+    "promin_job",
+    "ml_training_request_schedule",
+    "cds_client_schedule",
+    "sys_error_agg_schedule",
+    "cmdb_policy_scheduled_job",
+    "sn_cmdb_ws_reconcile_duplicate_template_schedule",
+    "sys_cs_timer_event",
+] as const;
 
 /**
  * Un-lowerable minimums.
@@ -108,10 +141,35 @@ const FLOOR: readonly FloorRule[] = [
         verbs: ["write"],
         matches: (p) => appClientRoute("(?:plugin/+(?:activate|repair|rollback)|loadDemoData|sync_apps)")(p),
     },
+    // Scheduled jobs. Persisting or changing one outlives the request that made it, so
+    // any non-GET is a write whatever a caller declares. Reading them changes nothing:
+    // InstanceHealth reads sys_trigger for stuck jobs, and must keep working read-only.
     {
         why: "sys_trigger scheduled job — persisting a job outlives the request that made it",
         verbs: ["write"],
-        matches: (p) => pathHas("/api/now/table/sys_trigger")(p),
+        methods: NOT_GET,
+        matches: (p) => tablePath("sys_trigger")(p),
+    },
+    {
+        why: "scheduled job definition — persisting a job outlives the request that made it",
+        verbs: ["write"],
+        methods: NOT_GET,
+        matches: (p) => tablePath(`sysauto(?:_\\w+)?|${SCHEDULED_JOB_TABLES.join("|")}`)(p),
+    },
+    // A schedule that carries a script also needs execute: inserting or changing one
+    // schedules arbitrary server-side code, which `--deny-execute` exists to refuse. It
+    // also closes BackgroundScriptExecutor's sys_trigger fallback at the wire; that
+    // method already asserts execute and write before it POSTs, so nothing it permits is
+    // refused here. sys_trigger runs its own `script`; sysauto_script is Scheduled Script
+    // Execution. The sysauto base table is included because a write through a parent
+    // table can land on a child's record, and a floor errs toward refusing. DELETE stays
+    // at write: removing a job runs nothing, and cleaning one up must stay possible under
+    // --deny-execute, as cancelling a flow debug run does.
+    {
+        why: "script-bearing schedule — inserting or changing one schedules server-side script",
+        verbs: ["execute"],
+        methods: ["post", "put", "patch"],
+        matches: (p) => tablePath("sys_trigger|sysauto|sysauto_script")(p),
     },
     {
         why: "sysparm_delete_all",
