@@ -1,5 +1,6 @@
 import { IServiceNowInstance } from "./IServiceNowInstance";
 import type { CredentialProvider } from "../auth/CredentialProvider";
+import { normalizeRoles } from "../auth/SessionElevation";
 
 /**
  * Monotonic source of instance identity.
@@ -24,6 +25,13 @@ export interface ServiceNowSettingsInstance {
     password?:string;
     credential?:unknown;
     credentialProvider?: CredentialProvider;
+    /**
+     * Elevated privilege roles (e.g. `security_admin`) every session for this instance elevates to
+     * as it logs in. Elevation lasts only for the session, and each ServiceNowRequest may log in its
+     * own, so it is applied at every login. A login fails with RoleElevationError when the user may
+     * not elevate to a role, or the elevation does not hold.
+     */
+    elevatedRoles?: string[];
 }
 
 export class ServiceNowInstance implements IServiceNowInstance{
@@ -36,11 +44,14 @@ export class ServiceNowInstance implements IServiceNowInstance{
     
     private _credential:unknown;
     public readonly credentialProvider: CredentialProvider | undefined;
+    /** Roles every session elevates to at login; empty when none. */
+    public readonly elevatedRoles: readonly string[];
 
     private readonly _instanceId:number = nextInstanceId++;
 
     constructor(snInstanceSettingsObj?:ServiceNowSettingsInstance | null){
         this.credentialProvider = snInstanceSettingsObj?.credentialProvider;
+        this.elevatedRoles = Object.freeze(normalizeRoles(snInstanceSettingsObj?.elevatedRoles));
         if(typeof snInstanceSettingsObj != 'undefined' && snInstanceSettingsObj != null){
             if(snInstanceSettingsObj.host){
                 this._host = snInstanceSettingsObj.host;

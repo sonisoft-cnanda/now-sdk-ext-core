@@ -157,6 +157,14 @@ function exportedNames(): string[] {
             'StoreAppRepairHistory', 'StoreAppRepairResult', 'STORE_APP_REPAIR_SKIPPED_LIMIT']) expect(names).toContain(name);
     });
 
+    it('exports role elevation and access control management', () => {
+        const names = exportedNames();
+        for (const name of ['ELEVATE_ROLE_PATH', 'RoleElevationError', 'RoleElevationErrorCode', 'ElevationStatus', 'ElevatableRole',
+            'elevateSession', 'readElevation', 'normalizeRoles', 'parseElevation', 'RoleElevation', 'AclManager', 'AclError', 'AclErrorCode',
+            'AclRecord', 'AclRole', 'AclListOptions', 'AclWriteTarget', 'AclCreateOptions', 'AclUpdateOptions', 'AclDeleteOptions',
+            'AclWriteResult']) expect(names).toContain(name);
+    });
+
     it('exports the flow design-time definition contract', () => {
         // getFlowArtifactDefinition/getActionDefinition are unusable from a typed
         // consumer without their result and option types — the same shape of gap

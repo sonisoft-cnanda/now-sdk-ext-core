@@ -45,7 +45,8 @@ beforeEach(() => {
         if (t === 'sys_store_app') return response(state.store ? [{ sys_id: S, scope: 'x_test' }] : []);
         if (t === 'sys_db_object') {
             if (q.startsWith('name=')) return response([{ sys_id: '4'.repeat(32), name: q.split('=')[1].split('^')[0], super_class: '5'.repeat(32) }]);
-            return response([{ sys_id: '5'.repeat(32), name: state.ancestry, super_class: state.cycle ? '5'.repeat(32) : '' }]);
+            if (q.startsWith('sys_id=' + '6'.repeat(32))) return response([{ sys_id: '6'.repeat(32), name: 'sys_metadata', super_class: '' }]);
+            return response([{ sys_id: '5'.repeat(32), name: state.ancestry, super_class: state.cycle ? '5'.repeat(32) : state.grandparent ? '6'.repeat(32) : '' }]);
         }
         if (t === 'sys_user') return response([{ sys_id: U }]);
         if (t === 'sys_user_preference') return response(state.incompletePreferences && captured ? [...prefs,prefs[0]] : prefs.map(x => ({...x})));
@@ -117,13 +118,42 @@ describe('MetadataFormWriter', () => {
         expect(req.post).not.toHaveBeenCalled();
         expect(req.get.mock.calls.some(([r]) => r.path.endsWith('.do'))).toBe(false);
     });
-    it.each(['sys_update_set','sys_update_xml','sys_scope','sys_app','sys_store_app','sys_db_object','sys_dictionary','sys_security_acl','sys_user_role'])('denies %s', async table => {
+    it.each(['sys_update_set','sys_update_xml','sys_scope','sys_app','sys_store_app','sys_db_object','sys_dictionary','sys_user_role'])('denies %s', async table => {
         await expect(writer.insert(table, options())).rejects.toMatchObject({code:'table_not_supported'});
         expect(req.post).not.toHaveBeenCalled();
     });
-    it.each(['incident', 'sys_security_acl'])('refuses unsupported ancestry %s', async ancestry => {
+    it.each(['incident'])('refuses unsupported ancestry %s', async ancestry => {
         state.ancestry = ancestry;
         await expect(writer.insert(TABLE, options())).rejects.toMatchObject({code:'table_not_supported'});
+    });
+    describe('access controls', () => {
+        let elevated: string[];
+        beforeEach(() => {
+            elevated = [];
+            jest.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify({ result: {
+                roles: [{ name: 'security_admin', description: '' }], activeRoles: ['admin', ...elevated] } }), { status: 200 }));
+        });
+        it.each(['sys_security_acl', 'sys_security_acl_role'])('refuses %s before loading a form unless security_admin is elevated', async table => {
+            await expect(writer.insert(table, options())).rejects.toMatchObject({ code: 'elevation_required', detail: { table } });
+            expect(req.post).not.toHaveBeenCalled();
+            expect(req.get.mock.calls.some(([r]) => r.path.endsWith('.do'))).toBe(false);
+        });
+        it('writes sys_security_acl on an elevated session', async () => {
+            elevated = ['security_admin'];
+            state.captureName = `sys_security_acl_${R}`;
+            const result = await writer.insert('sys_security_acl', options());
+            expect(result).toMatchObject({ table: 'sys_security_acl', sysId: R, action: 'insert' });
+            expect(req.post).toHaveBeenCalledTimes(1);
+        });
+        it('applies to a table that extends sys_security_acl', async () => {
+            state.ancestry = 'sys_security_acl'; state.grandparent = true;
+            await expect(writer.insert('x_custom_acl', options())).rejects.toMatchObject({ code: 'elevation_required' });
+            expect(req.post).not.toHaveBeenCalled();
+        });
+        it('refuses when the elevation state cannot be read', async () => {
+            jest.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response('', { status: 500 }));
+            await expect(writer.insert('sys_security_acl', options())).rejects.toMatchObject({ code: 'elevation_required' });
+        });
     });
     it('refuses ancestry cycles', async () => {
         state.ancestry = 'extension'; state.cycle = true;

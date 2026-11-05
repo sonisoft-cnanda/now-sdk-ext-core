@@ -31,7 +31,14 @@ a Store file marks it as customized, and upgrades of that application then skip 
 `capture.customization` reports `replaceOnUpgrade` and whether a vendor `baselineVersion` exists.
 Files the vendor locked (`sys_policy` read or protected) are refused with `protected_record`.
 The table must extend `sys_metadata` and must pass the table deny list.
-Caller fields must exist on the form. Caller `sys_*` fields are refused.
+Caller fields must exist on the form. Caller `sys_*` fields are refused, except the two references of an ACL role row
+(`sys_security_acl_role.sys_security_acl` and `.sys_user_role`), which are that table's own data.
+
+Access controls (`sys_security_acl`, `sys_security_acl_role` and any table extending them) need the elevated
+`security_admin` role on the writing session. Unelevated, the platform refuses an insert ("Invalid insert") and turns an
+update into a save that changes nothing, so the writer reads the session's elevation first and refuses with
+`elevation_required` before loading a form. Construct the instance with `elevatedRoles: ['security_admin']`; see
+[AclManager](./AclManager.md), which also handles the platform's rules for ACL roles and deletes.
 An initial query accepts equality terms for ordinary fields. It cannot override system fields.
 
 Pass `initialQuery`, `variables`, `variableField` and `view` as with `FormRecordWriter`.

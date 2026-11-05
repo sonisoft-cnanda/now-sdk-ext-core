@@ -248,8 +248,11 @@ class FormTransport {
         for (const value of [...withheld]) for (const line of value.split(/[\r\n]+/)) if (line) withheld.add(line);
         const clean = (text: string): string => {
             text = text.replace(/\s+/g, " ").trim();
-            for (const value of [...withheld].filter(Boolean).sort((a, b) => b.length - a.length)) {
-                text = text.split(value.replace(/\s+/g, " ").trim()).join("[redacted]");
+            // Normalized like the text; a value that is empty or a few characters once normalized would redact between
+            // every character or every common word, and is no secret anyway.
+            const values = [...new Set([...withheld].map(value => value.replace(/\s+/g, " ").trim()))].filter(value => value.length >= 4);
+            for (const value of values.sort((a, b) => b.length - a.length)) {
+                text = text.split(value).join("[redacted]");
                 text = text.split(encodeURIComponent(value)).join("[redacted]");
             }
             text = redactMessage(text).replace(/https?:\/\/\S+/g, "[url]").replace(/[A-Za-z0-9_+/=.-]{24,}/g, "[redacted]");

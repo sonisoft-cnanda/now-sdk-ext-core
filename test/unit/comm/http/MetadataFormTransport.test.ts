@@ -81,6 +81,12 @@ describe('opt-in form transport', () => {
             tokenSource:'page',landing:'guarded',sensitive:true });
         expect(JSON.stringify(result)).not.toMatch(/secret-script-line|page-token|session-token/);
     });
+    it('keeps messages readable when a posted value is blank or a few characters', async () => {
+        request.post.mockResolvedValue({status:200,headers:{},data:'<div class="outputmsg outputmsg_error notification-danger"><div class="outputmsg_text">A field level Access Control cannot protect an outside field.</div></div>'});
+        const snapshot = await transport.loadForm('sys_script_include','-1',load);
+        const result = await transport.submit(snapshot,'sysverb_insert_and_stay',{ fields:{name:' \n '}, tokenSource:'page',landing:'guarded',sensitive:true });
+        expect(result.errors).toEqual(['A field level Access Control cannot protect an outside field.']);
+    });
     it('keeps public load and submit overrides in the update call path', async () => {
         const {FormRecordWriter}=await import('../../../../src/comm/http/FormRecordWriter');
         const writer=new FormRecordWriter(new ServiceNowInstance({alias:'overrides'}));
