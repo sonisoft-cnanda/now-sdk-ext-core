@@ -75,7 +75,8 @@ function exportedNames(): string[] {
             'ColumnWriter', 'ColumnWriteOptions', 'ColumnWriteResult', 'ColumnRemoveOptions', 'ColumnRemoveResult', 'ColumnRemovalLeftovers', 'ChoiceWriter', 'Choice', 'ChoiceColumn', 'ChoiceSetRef', 'ChoiceList',
             'ChoiceListOptions', 'ChoiceWriteOptions', 'ChoiceRemoveOptions', 'ChoiceWriteResult']) expect(names).toContain(name);
         for (const name of ['updateName', 'updateNameFields', 'parseSlushbucketPage', 'parseSectionChoices', 'joinLayoutValues',
-            'resolveScope', 'customizationEvidence', 'columnName', 'ancestry', 'SCHEMA_TABLES', 'requirePlatformDelete', 'capturedChoices']) expect(names).not.toContain(name);
+            'resolveScope', 'customizationEvidence', 'columnName', 'ancestry', 'SCHEMA_TABLES', 'requirePlatformDelete', 'capturedChoices',
+            'accessControlWriters']) expect(names).not.toContain(name);
     });
 
     it('exports update set export and its typed contracts', () => {

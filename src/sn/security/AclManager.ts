@@ -5,7 +5,7 @@ import type { MetadataWriteResult } from '../metadata/MetadataModels';
 import { MetadataReader, MetadataRow } from '../metadata/internal/MetadataReader';
 import { resolveScope } from '../metadata/internal/MetadataScope';
 import type { ServiceNowInstance } from '../ServiceNowInstance';
-import { AclError, AclPartialError } from './AclError';
+import { AclError, AclPartialError, AclState } from './AclError';
 import type { AclCreateOptions, AclDeleteOptions, AclListOptions, AclRecord, AclRole, AclUpdateOptions, AclWriteResult, AclWriteTarget } from './AclModels';
 import { RoleElevation } from './RoleElevation';
 import { accessControlWriters } from '../metadata/internal/AccessControlWriters';
@@ -104,8 +104,9 @@ export class AclManager {
         try {
             return await this.finishCreate(reader, writer, sysId, roles, staged, target, writes);
         } catch (error) {
-            if (isPolicyRefusal(error)) throw error;
-            throw new AclPartialError(sysId, 'create', await this.activeState(sysId), error);
+            // A refusal stays a refusal (callers recognise it by its brand), carrying the ACL it left behind.
+            if (isPolicyRefusal(error)) throw Object.assign(error, { aclSysId: sysId });
+            throw new AclPartialError(sysId, 'create', await this.state(sysId), error);
         }
     }
 
@@ -161,14 +162,19 @@ export class AclManager {
         const target = this.target(options);
         const writes: MetadataWriteResult[] = [];
         const deactivate = previous.type === 'record' && previous.active;
-        if (deactivate) writes.push(await writer.update(ACL, sysId, { ...target, fields: { active: false } }));
         try {
+            if (deactivate) writes.push(await writer.update(ACL, sysId, { ...target, fields: { active: false } }));
             writes.push(await writer.delete(ACL, sysId, { ...target, confirm: { table: ACL, sysId } }));
         } catch (error) {
-            if (!deactivate || isPolicyRefusal(error)) throw error;
-            // Put the restriction back: a failed delete must not leave the ACL switched off.
-            await writer.update(ACL, sysId, { ...target, fields: { active: true } }).catch(() => undefined);
-            throw new AclPartialError(sysId, 'delete', await this.activeState(sysId), error);
+            if (!deactivate) throw error;
+            // Whatever failed (the deactivation's verification, the delete, a refusal), a delete must not leave the ACL
+            // switched off: when it still exists and is inactive, put the restriction back.
+            if (await this.state(sysId) === 'inactive') {
+                await writer.update(ACL, sysId, { ...target, fields: { active: true } }).catch(() => undefined);
+            }
+            const state = await this.state(sysId);
+            if (isPolicyRefusal(error)) throw Object.assign(error, { aclSysId: sysId, aclState: state });
+            throw new AclPartialError(sysId, 'delete', state, error);
         }
         return { previous, writes, removedAutomaticRoles: [], warnings: [] };
     }
@@ -220,9 +226,11 @@ export class AclManager {
         return writer;
     }
 
-    /** The ACL's active flag read back after a failure; undefined when it cannot be read. */
-    private async activeState(sysId: string): Promise<boolean | undefined> {
-        try { return (await this.get(sysId)).active; } catch { return undefined; }
+    /** The ACL read back after a failure. */
+    private async state(sysId: string): Promise<AclState> {
+        try { return (await this.get(sysId)).active ? 'active' : 'inactive'; } catch (error) {
+            return error instanceof AclError && error.code === 'acl_not_found' ? 'deleted' : 'unknown';
+        }
     }
 
     /** A role row is written in the target application; it must be the ACL's own. */

@@ -177,7 +177,7 @@ describe('AclManager.create', () => {
     it('does not activate when the roles on the ACL are not exactly those asked for', async () => {
         extraRole = true;
         const error = await manager().create({ ...target, operation: 'read', table: 'incident', roles: ['itil'] }).catch(e => e);
-        expect(error).toMatchObject({ name: 'AclPartialError', code: 'partially_applied', operation: 'create', active: false });
+        expect(error).toMatchObject({ name: 'AclPartialError', code: 'partially_applied', operation: 'create', state: 'inactive' });
         expect(error.cause).toMatchObject({ code: 'roles_not_applied' });
         expect(writes.some(w => w.includes('"active":true'))).toBe(false);
     });
@@ -185,7 +185,7 @@ describe('AclManager.create', () => {
     it('reports a create that failed after the insert, with the ACL and its state', async () => {
         failOn = 'insert sys_security_acl_role';
         const error = await manager().create({ ...target, operation: 'read', table: 'incident', roles: ['itil'] }).catch(e => e);
-        expect(error).toMatchObject({ code: 'partially_applied', active: false });
+        expect(error).toMatchObject({ code: 'partially_applied', state: 'inactive' });
         expect(acls.has(error.aclSysId)).toBe(true);
         expect(error.message).toContain('inactive');
     });
@@ -200,6 +200,7 @@ describe('AclManager.create', () => {
         const error = await manager().create({ ...target, operation: 'read', table: 'incident', roles: ['itil'] }).catch(e => e);
         expect(error).toBe(refusal);
         expect(acls.size).toBe(1);
+        expect(error.aclSysId).toBe([...acls.keys()][0]);
     });
 
     it('refuses without elevation, before any write', async () => {
@@ -257,7 +258,25 @@ describe('AclManager changes', () => {
         failOn = 'delete sys_security_acl';
         const error = await manager().delete(acl, { ...target, confirm: acl }).catch(e => e);
         expect(writes).toEqual(['update sys_security_acl {"active":false}', 'update sys_security_acl {"active":true}']);
-        expect(error).toMatchObject({ code: 'partially_applied', operation: 'delete', active: true });
+        expect(error).toMatchObject({ code: 'partially_applied', operation: 'delete', state: 'active' });
+    });
+
+    it('reactivates the ACL when the deactivation applied but failed its verification', async () => {
+        const update = jest.spyOn(MetadataFormWriter.prototype, 'update');
+        const base = update.getMockImplementation()!;
+        update.mockImplementationOnce(async (...args: any[]) => { await (base as any)(...args); throw new Error('session_changed'); });
+        const error = await manager().delete(acl, { ...target, confirm: acl }).catch(e => e);
+        expect(writes).toEqual(['update sys_security_acl {"active":false}', 'update sys_security_acl {"active":true}']);
+        expect(error).toMatchObject({ code: 'partially_applied', state: 'active' });
+    });
+
+    it('reports a delete that applied but failed its verification as deleted', async () => {
+        const del = jest.spyOn(MetadataFormWriter.prototype, 'delete');
+        const base = del.getMockImplementation()!;
+        del.mockImplementationOnce(async (...args: any[]) => { await (base as any)(...args); throw new Error('not_captured'); });
+        const error = await manager().delete(acl, { ...target, confirm: acl }).catch(e => e);
+        expect(error).toMatchObject({ code: 'partially_applied', state: 'deleted' });
+        expect(writes).toEqual(['update sys_security_acl {"active":false}', 'delete sys_security_acl']);
     });
 
     it('refuses a role change written in another application', async () => {

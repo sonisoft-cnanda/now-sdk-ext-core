@@ -88,12 +88,14 @@ Seen on Australia (dev206299, 2026-11-05):
   when the platform put `snc_internal` back.
 - Before activating, `create` reads the role rows again. Unless they are exactly the requested roles it does not
   activate, and fails with `roles_not_applied`.
-- If a step after the insert fails, `create` throws `AclPartialError`. Its `aclSysId` names the ACL, and `active` is
-  the ACL's state as read back (a create activates only as its last step). A policy refusal is re-thrown as it is.
+- If a step after the insert fails, `create` throws `AclPartialError`. Its `aclSysId` names the ACL, and `state`
+  (`active`, `inactive`, `deleted` or `unknown`) is the ACL as read back; a create activates only as its last step. A
+  policy refusal is re-thrown as it is (so `isPolicyRefusal` still recognises it), with `aclSysId` added.
 - **Deleting an ACL deletes its role rows**, each captured as a DELETE.
 - **An active record ACL cannot be deleted from its form.** The ACL table's own Delete is offered for a record ACL only
-  while it is inactive, so `delete` deactivates one first, as a separate captured update. If the delete then fails, it
-  reactivates the ACL and throws `AclPartialError` with the state read back.
+  while it is inactive, so `delete` deactivates one first, as a separate captured update. On any failure after that
+  (the deactivation's own verification, the delete, a refusal) it reactivates the ACL if it still exists inactive, and
+  throws `AclPartialError` with the state read back (a refusal is re-thrown with `aclSysId` and `aclState` added).
 - **A scoped application may not put a field ACL on another application's field.** The platform refuses ("A field level
   Access Control cannot protect an outside field") and the write fails with `write_not_applied`, carrying that message.
   A table ACL on another application's table is allowed.

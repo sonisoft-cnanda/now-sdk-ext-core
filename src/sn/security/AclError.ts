@@ -16,17 +16,20 @@ export class AclError extends Error {
     }
 }
 
+/** An ACL's state read back after a failure. */
+export type AclState = 'active' | 'inactive' | 'deleted' | 'unknown';
+
 /**
- * A create or delete that failed part way, after a write. `active` is the ACL's state read back afterwards (undefined
- * when it could not be read): a create activates only as its last step, and a failed delete is reactivated when it had
- * been deactivated for it. `cause` is the failure.
+ * A create or delete that failed part way, after a write. `state` is the ACL as read back afterwards: a create
+ * activates only as its last step, and a delete that deactivated a record ACL reactivates it on any failure. `cause` is
+ * the failure.
  */
 export class AclPartialError extends AclError {
     public constructor(public readonly aclSysId: string, public readonly operation: 'create' | 'delete',
-        public readonly active: boolean | undefined, public readonly cause: unknown) {
+        public readonly state: AclState, public readonly cause: unknown) {
         super('partially_applied');
         this.name = 'AclPartialError';
-        const state = active === undefined ? 'in an unknown state: read it back' : active ? 'ACTIVE' : 'inactive';
-        this.message = `ACL ${aclSysId}: the ${operation} failed part way; the ACL is ${state}.`;
+        const described = state === 'unknown' ? 'in an unknown state: read it back' : state === 'active' ? 'ACTIVE' : state;
+        this.message = `ACL ${aclSysId}: the ${operation} failed part way; the ACL is ${described}.`;
     }
 }

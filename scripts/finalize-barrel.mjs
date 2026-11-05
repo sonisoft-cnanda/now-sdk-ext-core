@@ -38,7 +38,7 @@ const DROP = ['./comm/http/SessionManager.js', './policy/internal/Classify.js',
     './sn/metadata/internal/MetadataReader.js', './sn/metadata/internal/MetadataPreferences.js',
     './sn/metadata/internal/MetadataUpdateNames.js', './sn/metadata/internal/MetadataScope.js',
     './sn/metadata/internal/SlushbucketPage.js', './sn/metadata/internal/MetadataTables.js',
-    './sn/metadata/internal/MetadataFormActions.js'];
+    './sn/metadata/internal/MetadataFormActions.js', './sn/metadata/internal/AccessControlWriters.js'];
 
 /** Curated exports ctix cannot express, declared in src/PublicApi.ts. */
 const APPEND = './PublicApi.js';

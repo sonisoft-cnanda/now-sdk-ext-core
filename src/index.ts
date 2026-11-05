@@ -139,7 +139,6 @@ export * from './sn/workflow/WorkflowStructure.js';
 export * from './sn/workflow/WorkflowViews.js';
 export * from './sn/xml/XMLRecordManager.js';
 export * from './sn/xml/XMLRecordModels.js';
-export * from './sn/metadata/internal/AccessControlWriters.js';
 export * from './sn/user/factory/UserFactory.js';
 export * from './sn/user/model/IUser.js';
 export * from './sn/user/model/User.js';

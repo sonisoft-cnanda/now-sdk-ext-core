@@ -87,6 +87,12 @@ describe('opt-in form transport', () => {
         const result = await transport.submit(snapshot,'sysverb_insert_and_stay',{ fields:{name:' \n '}, tokenSource:'page',landing:'guarded',sensitive:true });
         expect(result.errors).toEqual(['A field level Access Control cannot protect an outside field.']);
     });
+    it('does not redact the form plumbing or booleans from a message, only record content and tokens', async () => {
+        request.post.mockResolvedValue({status:200,headers:{},data:'<div class="outputmsg outputmsg_error"><div class="outputmsg_text">Table sys_script_include is true to its word, secret-name page-token</div></div>'});
+        const snapshot = await transport.loadForm('sys_script_include','-1',load);
+        const result = await transport.submit(snapshot,'sysverb_insert_and_stay',{ fields:{name:'secret-name'}, tokenSource:'page',landing:'guarded',sensitive:true });
+        expect(result.errors).toEqual(['Table sys_script_include is true to its word, [redacted] [redacted]']);
+    });
     it('keeps public load and submit overrides in the update call path', async () => {
         const {FormRecordWriter}=await import('../../../../src/comm/http/FormRecordWriter');
         const writer=new FormRecordWriter(new ServiceNowInstance({alias:'overrides'}));
