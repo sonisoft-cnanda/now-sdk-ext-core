@@ -270,6 +270,38 @@ describe('AclManager changes', () => {
         expect(error).toMatchObject({ code: 'partially_applied', state: 'active' });
     });
 
+    it('passes on a deactivation refused before any write as the writer\'s own error', async () => {
+        const update = jest.spyOn(MetadataFormWriter.prototype, 'update');
+        update.mockImplementationOnce(async () => { throw Object.assign(new Error('Metadata write refused: store_scope'), { code: 'store_scope' }); });
+        const error = await manager().delete(acl, { ...target, confirm: acl }).catch(e => e);
+        expect(error).toMatchObject({ code: 'store_scope' });
+        expect(writes).toEqual([]);
+    });
+
+    it('reactivates and re-throws a refused delete as a refusal, naming the ACL and its state', async () => {
+        const { policyRefusal, isPolicyRefusal } = await import('../../../../src/policy/PolicyRefusal');
+        const refusal = policyRefusal({ allowed: false, verbs: ['write'], decidingLayer: 'test' } as any);
+        jest.spyOn(MetadataFormWriter.prototype, 'delete').mockImplementationOnce(async () => { throw refusal; });
+        const error = await manager().delete(acl, { ...target, confirm: acl }).catch(e => e);
+        expect(isPolicyRefusal(error)).toBe(true);
+        expect(error).toMatchObject({ aclSysId: acl, aclState: 'active' });
+        expect(writes).toEqual(['update sys_security_acl {"active":false}', 'update sys_security_acl {"active":true}']);
+    });
+
+    it('still tries to reactivate when the state cannot be read', async () => {
+        failOn = 'delete sys_security_acl';
+        const original = AclManager.prototype.get;
+        let calls = 0;
+        jest.spyOn(AclManager.prototype, 'get').mockImplementation(async function (this: AclManager, id: string) {
+            calls++;
+            // The first read (previous) works; the read-back after the failure does not.
+            if (calls === 2) throw new Error('read failed');
+            return original.call(this, id);
+        });
+        await manager().delete(acl, { ...target, confirm: acl }).catch(e => e);
+        expect(writes).toEqual(['update sys_security_acl {"active":false}', 'update sys_security_acl {"active":true}']);
+    });
+
     it('reports a delete that applied but failed its verification as deleted', async () => {
         const del = jest.spyOn(MetadataFormWriter.prototype, 'delete');
         const base = del.getMockImplementation()!;

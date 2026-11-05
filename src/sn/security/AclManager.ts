@@ -167,9 +167,12 @@ export class AclManager {
             writes.push(await writer.delete(ACL, sysId, { ...target, confirm: { table: ACL, sysId } }));
         } catch (error) {
             if (!deactivate) throw error;
-            // Whatever failed (the deactivation's verification, the delete, a refusal), a delete must not leave the ACL
-            // switched off: when it still exists and is inactive, put the restriction back.
-            if (await this.state(sysId) === 'inactive') {
+            const before = await this.state(sysId);
+            // Refused before anything was written: the caller gets the writer's own error.
+            if (!writes.length && before === 'active') throw error;
+            // Whatever failed after that (the deactivation's verification, the delete, a refusal, an unreadable state), a
+            // delete must not leave the ACL switched off: put the restriction back unless it is known active or gone.
+            if (before !== 'active' && before !== 'deleted') {
                 await writer.update(ACL, sysId, { ...target, fields: { active: true } }).catch(() => undefined);
             }
             const state = await this.state(sysId);

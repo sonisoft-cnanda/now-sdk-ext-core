@@ -89,6 +89,8 @@ describe('opt-in form transport', () => {
     });
     it('does not redact the form plumbing or booleans from a message, only record content and tokens', async () => {
         request.post.mockResolvedValue({status:200,headers:{},data:'<div class="outputmsg outputmsg_error"><div class="outputmsg_text">Table sys_script_include is true to its word, secret-name page-token</div></div>'});
+        // A hidden input the form renders, carrying the table name, as classic forms do.
+        request.get.mockResolvedValue({status:200,data:html().replace('</form>','<input type="hidden" name="sysparm_record_target" value="sys_script_include"></form>')});
         const snapshot = await transport.loadForm('sys_script_include','-1',load);
         const result = await transport.submit(snapshot,'sysverb_insert_and_stay',{ fields:{name:'secret-name'}, tokenSource:'page',landing:'guarded',sensitive:true });
         expect(result.errors).toEqual(['Table sys_script_include is true to its word, [redacted] [redacted]']);

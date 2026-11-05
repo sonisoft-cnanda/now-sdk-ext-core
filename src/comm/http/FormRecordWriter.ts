@@ -23,11 +23,6 @@ import { SessionManager } from "./SessionManager";
 const NAME = /^[a-z0-9_]+$/i;
 const SYS_ID = /^[0-9a-f]{32}$/i;
 
-/** Form plumbing posted with every submit: never secret, so never redacted from the platform's messages. */
-const STRUCTURAL_FIELDS = new Set(["sys_target", "sys_uniqueName", "sys_uniqueValue", "sys_row", "sys_modCount",
-    "onLoad_sys_updated_on", "sys_action", "isFormPage", "sysparm_goto_url", "sysparm_view", "sysparm_transaction_scope",
-    "sysparm_transaction_update_set", "sysparm_record_scope", "sysparm_nameofstack", "sysparm_referring_url"]);
-
 /** Where a successful submit lands. Small, and it echoes back the action and sys_id. */
 const GOTO_URL = "modal_dialog_form_response.do?sysparm_returned_action=$action&sysparm_returned_sysid=$sys_id";
 
@@ -248,10 +243,13 @@ class FormTransport {
         headers: Record<string, string>, html: string, fields: Record<string, string>): Promise<FormTransportResult> {
         const session = await this.request().getUserSession() as { instanceUrl?: URL | string; userToken?: string;
             cookie?: { getCookiesSync(url: string): Array<{ value: string }> } };
-        // Record content, tokens and cookies are withheld from messages. The form's own plumbing (table name, action,
-        // flags) and booleans are not secrets, and redacting them would garble the platform's reason.
+        // Record content (the record's fields, their original and display values, variables), the page token, the signed
+        // record, the session token and cookies are withheld from messages. The form's other inputs are plumbing (table
+        // name, action, flags); redacting them, or booleans, would garble the platform's reason.
+        const recordContent = (key: string): boolean => key.includes(`${snapshot.table}.`) || /^sys_(?:original|display)\./.test(key) ||
+            key === "sysparm_ck" || key === "sysparm_encoded_record";
         const withheld = new Set([...Object.entries(fields)
-            .filter(([key, value]) => !STRUCTURAL_FIELDS.has(key) && !/^(?:true|false)$/i.test(value)).map(([, value]) => value),
+            .filter(([key, value]) => recordContent(key) && !/^(?:true|false)$/i.test(value)).map(([, value]) => value),
             session.userToken ?? "",
             ...(session.cookie?.getCookiesSync(String(session.instanceUrl)) ?? []).map(cookie => cookie.value)]);
         for (const value of [...withheld]) for (const line of value.split(/[\r\n]+/)) if (line) withheld.add(line);

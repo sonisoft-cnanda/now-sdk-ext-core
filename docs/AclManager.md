@@ -93,8 +93,9 @@ Seen on Australia (dev206299, 2026-11-05):
   policy refusal is re-thrown as it is (so `isPolicyRefusal` still recognises it), with `aclSysId` added.
 - **Deleting an ACL deletes its role rows**, each captured as a DELETE.
 - **An active record ACL cannot be deleted from its form.** The ACL table's own Delete is offered for a record ACL only
-  while it is inactive, so `delete` deactivates one first, as a separate captured update. On any failure after that
-  (the deactivation's own verification, the delete, a refusal) it reactivates the ACL if it still exists inactive, and
+  while it is inactive, so `delete` deactivates one first, as a separate captured update. A deactivation refused before
+  anything was written throws the writer's own error. On any failure after a write (the deactivation's own
+  verification, the delete, a refusal, an unreadable state) it reactivates the ACL unless it is known active or gone, and
   throws `AclPartialError` with the state read back (a refusal is re-thrown with `aclSysId` and `aclState` added).
 - **A scoped application may not put a field ACL on another application's field.** The platform refuses ("A field level
   Access Control cannot protect an outside field") and the write fails with `write_not_applied`, carrying that message.
