@@ -6,7 +6,7 @@ import { MetadataFormWriter } from '../../../../src/sn/metadata/MetadataFormWrit
 import { SessionManager } from '../../../../src/comm/http/SessionManager';
 import { ServiceNowInstance } from '../../../../src/sn/ServiceNowInstance';
 
-const SCOPE = 'a'.repeat(32), SET = 'c'.repeat(32);
+const SCOPE = 'a'.repeat(32), SET = 'c'.repeat(32), OTHER_SCOPE = 'e'.repeat(32);
 const ROLES: Record<string, string> = { admin: '1'.repeat(32), itil: '2'.repeat(32), snc_internal: '3'.repeat(32), security_admin: '4'.repeat(32) };
 const TABLES: Record<string, string> = { incident: 'task', task: '', x_app_thing: '' };
 const FIELDS: Record<string, string[]> = { task: ['short_description', 'number'], incident: ['caller_id'] };
@@ -16,6 +16,8 @@ let aclRoles: Array<{ sys_id: string; sys_security_acl: string; sys_user_role: s
 let writes: string[];
 let elevated: string[];
 let next: number;
+let failOn: string | undefined;
+let extraRole: boolean;
 const id = () => (next++).toString(16).padStart(32, '0');
 
 function rows(table: string, query: string): Array<Record<string, string>> {
@@ -37,6 +39,8 @@ function rows(table: string, query: string): Array<Record<string, string>> {
             if (sysId) return acls.has(sysId) ? [acls.get(sysId)!] : [];
             return [...acls.values()].filter(acl => q.includes(`name=${acl.name}`) || q.includes(`nameSTARTSWITH${acl.name.split('.')[0]}.`));
         }
+        case 'sys_scope': return [SCOPE, OTHER_SCOPE].includes(eq('sys_id') ?? '') ? [{ sys_id: eq('sys_id')!, scope: eq('sys_id') === SCOPE ? 'x_app' : 'x_other', active: 'true', sys_class_name: 'sys_app' }] : [];
+        case 'sys_store_app': return [];
         case 'sys_security_acl_role': {
             const names = Object.fromEntries(Object.entries(ROLES).map(([name, sysId]) => [sysId, name]));
             return aclRoles.filter(row => inList('sys_security_acl').includes(row.sys_security_acl))
@@ -55,7 +59,7 @@ function aclRow(sysId: string, fields: Record<string, unknown>): Record<string, 
 }
 
 beforeEach(() => {
-    acls = new Map(); aclRoles = []; writes = []; elevated = ['security_admin']; next = 0x100;
+    acls = new Map(); aclRoles = []; writes = []; elevated = ['security_admin']; next = 0x100; failOn = undefined; extraRole = false;
     const request = { get: jest.fn(async (r: any) => {
         const table = r.path.split('/').at(-1);
         const found = rows(table, r.query.sysparm_query);
@@ -68,6 +72,7 @@ beforeEach(() => {
     const result = (table: string, sysId: string, action: 'insert' | 'update' | 'delete') =>
         ({ table, sysId, action, scope: { sysId: SCOPE, scope: 'x_app' }, capture: {} as any, messages: [] });
     jest.spyOn(MetadataFormWriter.prototype, 'insert').mockImplementation(async (table: string, options: any) => {
+        if (failOn === `insert ${table}`) throw new Error('form write failed');
         const sysId = id();
         writes.push(`insert ${table} ${JSON.stringify(options.fields)}`);
         if (table === 'sys_security_acl') {
@@ -76,6 +81,7 @@ beforeEach(() => {
             aclRoles.push({ sys_id: id(), sys_security_acl: sysId, sys_user_role: ROLES.snc_internal });
         } else {
             aclRoles.push({ sys_id: sysId, sys_security_acl: options.fields.sys_security_acl, sys_user_role: options.fields.sys_user_role });
+            if (extraRole) aclRoles.push({ sys_id: id(), sys_security_acl: options.fields.sys_security_acl, sys_user_role: ROLES.snc_internal });
         }
         return result(table, sysId, 'insert');
     });
@@ -86,6 +92,7 @@ beforeEach(() => {
         return result(table, sysId, 'update');
     });
     jest.spyOn(MetadataFormWriter.prototype, 'delete').mockImplementation(async (table: string, sysId: string) => {
+        if (failOn === `delete ${table}`) throw new Error('form write failed');
         writes.push(`delete ${table}`);
         if (table === 'sys_security_acl') { acls.delete(sysId); aclRoles = aclRoles.filter(row => row.sys_security_acl !== sysId); }
         else {
@@ -161,6 +168,40 @@ describe('AclManager.create', () => {
         } else await expect(run).resolves.toBeDefined();
     });
 
+    it('warns that an ACL created without roles lets every internal user pass', async () => {
+        const result = await manager().create({ ...target, operation: 'read', table: 'incident', field: 'caller_id' });
+        expect(result.acl!.roles.map(r => r.role)).toEqual(['snc_internal']);
+        expect(result.warnings.join(' ')).toContain('every internal user passes it');
+    });
+
+    it('does not activate when the roles on the ACL are not exactly those asked for', async () => {
+        extraRole = true;
+        const error = await manager().create({ ...target, operation: 'read', table: 'incident', roles: ['itil'] }).catch(e => e);
+        expect(error).toMatchObject({ name: 'AclPartialError', code: 'partially_applied', operation: 'create', active: false });
+        expect(error.cause).toMatchObject({ code: 'roles_not_applied' });
+        expect(writes.some(w => w.includes('"active":true'))).toBe(false);
+    });
+
+    it('reports a create that failed after the insert, with the ACL and its state', async () => {
+        failOn = 'insert sys_security_acl_role';
+        const error = await manager().create({ ...target, operation: 'read', table: 'incident', roles: ['itil'] }).catch(e => e);
+        expect(error).toMatchObject({ code: 'partially_applied', active: false });
+        expect(acls.has(error.aclSysId)).toBe(true);
+        expect(error.message).toContain('inactive');
+    });
+
+    it('passes a policy refusal through as it is', async () => {
+        const { policyRefusal } = await import('../../../../src/policy/PolicyRefusal');
+        const refusal = policyRefusal({ allowed: false, verbs: ['write'], decidingLayer: 'test' } as any);
+        const insert = jest.spyOn(MetadataFormWriter.prototype, 'insert');
+        const base = insert.getMockImplementation()!;
+        // The ACL insert succeeds; the role insert after it is refused.
+        insert.mockImplementationOnce(base).mockImplementationOnce(async () => { throw refusal; });
+        const error = await manager().create({ ...target, operation: 'read', table: 'incident', roles: ['itil'] }).catch(e => e);
+        expect(error).toBe(refusal);
+        expect(acls.size).toBe(1);
+    });
+
     it('refuses without elevation, before any write', async () => {
         elevated = [];
         await expect(manager().create({ ...target, operation: 'read', table: 'incident', roles: ['itil'] })).rejects.toMatchObject({ code: 'elevation_required' });
@@ -204,11 +245,39 @@ describe('AclManager changes', () => {
         expect(result.warnings[0]).toContain('platform added snc_internal');
     });
 
-    it('deletes only with the sys_id repeated', async () => {
+    it('deletes only with the sys_id repeated, deactivating an active record ACL first', async () => {
         await expect(manager().delete(acl, { ...target, confirm: 'x' })).rejects.toBeInstanceOf(AclError);
         const result = await manager().delete(acl, { ...target, confirm: acl });
+        expect(writes).toEqual(['update sys_security_acl {"active":false}', 'delete sys_security_acl']);
         expect(result.previous!.sysId).toBe(acl);
         expect(acls.size).toBe(0);
+    });
+
+    it('reactivates the ACL when the delete fails after deactivating it', async () => {
+        failOn = 'delete sys_security_acl';
+        const error = await manager().delete(acl, { ...target, confirm: acl }).catch(e => e);
+        expect(writes).toEqual(['update sys_security_acl {"active":false}', 'update sys_security_acl {"active":true}']);
+        expect(error).toMatchObject({ code: 'partially_applied', operation: 'delete', active: true });
+    });
+
+    it('refuses a role change written in another application', async () => {
+        const other = { scope: { sysId: OTHER_SCOPE }, updateSet: SET };
+        await expect(manager().addRole(acl, 'admin', other)).rejects.toMatchObject({ code: 'scope_mismatch' });
+        await expect(manager().removeRole(acl, 'itil', other)).rejects.toMatchObject({ code: 'scope_mismatch' });
+        expect(writes).toEqual([]);
+    });
+
+    it('warns when removing the only role changes nothing', async () => {
+        await manager().removeRole(acl, 'itil', target);
+        const result = await manager().removeRole(acl, 'snc_internal', target);
+        expect(result.acl!.roles.map(r => r.role)).toEqual(['snc_internal']);
+        expect(result.warnings[0]).toContain('still on this ACL');
+    });
+
+    it('refuses a script in a list filter and a non-boolean active', async () => {
+        await expect(manager().list({ name: "javascript:gs.info('x')" })).rejects.toMatchObject({ code: 'invalid_input' });
+        await expect(manager().list({ table: 'incident', active: 'true^ORactive=false' as any })).rejects.toMatchObject({ code: 'invalid_input' });
+        await expect(manager().create({ ...target, type: 'ui_page', name: 'javascript:x', operation: 'read' })).rejects.toMatchObject({ code: 'invalid_input' });
     });
 
     it('lists by table and requires a filter', async () => {

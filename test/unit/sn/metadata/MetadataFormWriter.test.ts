@@ -5,6 +5,7 @@ import { MetadataVerificationError } from '../../../../src/sn/metadata/MetadataV
 import { SessionManager } from '../../../../src/comm/http/SessionManager';
 import { ServiceNowInstance } from '../../../../src/sn/ServiceNowInstance';
 import { policyRefusal } from '../../../../src/policy/PolicyRefusal';
+import { accessControlWriters } from '../../../../src/sn/metadata/internal/AccessControlWriters';
 
 const S = 'a'.repeat(32), R = 'b'.repeat(32), SET = 'c'.repeat(32), OTHER = 'd'.repeat(32), U = 'e'.repeat(32), A = 'f'.repeat(32);
 const TABLE = 'sys_script_include';
@@ -118,18 +119,19 @@ describe('MetadataFormWriter', () => {
         expect(req.post).not.toHaveBeenCalled();
         expect(req.get.mock.calls.some(([r]) => r.path.endsWith('.do'))).toBe(false);
     });
-    it.each(['sys_update_set','sys_update_xml','sys_scope','sys_app','sys_store_app','sys_db_object','sys_dictionary','sys_user_role'])('denies %s', async table => {
+    it.each(['sys_update_set','sys_update_xml','sys_scope','sys_app','sys_store_app','sys_db_object','sys_dictionary','sys_security_acl','sys_security_acl_role','sys_user_role'])('denies %s', async table => {
         await expect(writer.insert(table, options())).rejects.toMatchObject({code:'table_not_supported'});
         expect(req.post).not.toHaveBeenCalled();
     });
-    it.each(['incident'])('refuses unsupported ancestry %s', async ancestry => {
+    it.each(['incident', 'sys_security_acl'])('refuses unsupported ancestry %s', async ancestry => {
         state.ancestry = ancestry;
         await expect(writer.insert(TABLE, options())).rejects.toMatchObject({code:'table_not_supported'});
     });
-    describe('access controls', () => {
+    describe('access controls (AclManager\'s opt-in writer)', () => {
         let elevated: string[];
         beforeEach(() => {
             elevated = [];
+            accessControlWriters.add(writer);
             jest.spyOn(globalThis, 'fetch').mockImplementation(async () => new Response(JSON.stringify({ result: {
                 roles: [{ name: 'security_admin', description: '' }], activeRoles: ['admin', ...elevated] } }), { status: 200 }));
         });
@@ -137,6 +139,18 @@ describe('MetadataFormWriter', () => {
             await expect(writer.insert(table, options())).rejects.toMatchObject({ code: 'elevation_required', detail: { table } });
             expect(req.post).not.toHaveBeenCalled();
             expect(req.get.mock.calls.some(([r]) => r.path.endsWith('.do'))).toBe(false);
+        });
+        it('keeps refusing them in a writer that did not opt in, even elevated', async () => {
+            elevated = ['security_admin'];
+            const generic = new MetadataFormWriter(new ServiceNowInstance({ alias: 'unit-test' }));
+            await expect(generic.insert('sys_security_acl', options())).rejects.toMatchObject({ code: 'table_not_supported' });
+            await expect(generic.insert('sys_security_acl_role', { scope: { sysId: S }, fields: { sys_security_acl: R } })).rejects.toMatchObject({ code: 'table_not_supported' });
+            expect(req.post).not.toHaveBeenCalled();
+        });
+        it('allows the role row\'s two references, and no other sys_ field', async () => {
+            elevated = ['security_admin'];
+            await expect(writer.insert('sys_security_acl_role', { scope: { sysId: S }, fields: { sys_scope: S } as any })).rejects.toMatchObject({ code: 'field_not_supported' });
+            expect(req.post).not.toHaveBeenCalled();
         });
         it('writes sys_security_acl on an elevated session', async () => {
             elevated = ['security_admin'];

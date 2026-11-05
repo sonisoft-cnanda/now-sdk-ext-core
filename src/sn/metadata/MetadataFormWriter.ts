@@ -15,15 +15,18 @@ import { updateName, updateNameFields } from './internal/MetadataUpdateNames';
 import { customizationEvidence, resolveScope } from './internal/MetadataScope';
 import { requirePlatformDelete } from './internal/MetadataFormActions';
 import { readElevation } from '../../auth/SessionElevation';
+import { accessControlWriters } from './internal/AccessControlWriters';
 import type { UserSession } from '@servicenow/sdk-cli-core/dist/auth/index.js';
 
 const ID = /^[a-f0-9]{32}$/i;
 const NAME = /^[a-z0-9_]+$/i;
 const WRITE_DENY = new Set(['sys_update_set', 'sys_update_xml', 'sys_scope', 'sys_app', 'sys_store_app',
-    'sys_db_object', 'sys_dictionary', 'sys_user_role']);
+    'sys_db_object', 'sys_dictionary', 'sys_security_acl', 'sys_security_acl_role', 'sys_user_role']);
 /**
  * Tables only an elevated role may change, with that role. Unelevated, the ACL form refuses an insert ("Invalid insert")
  * and turns an update into a 302 that changes nothing, so the role is checked on the writing session before any POST.
+ * They stay in WRITE_DENY for the generic writer: an ACL written field by field skips AclManager's safeguards (the
+ * platform's snc_internal role on a role-less ACL, staging before activation). Only AclManager opts in.
  */
 const ELEVATED_TABLES: Record<string, string> = { sys_security_acl: 'security_admin', sys_security_acl_role: 'security_admin' };
 /** Columns named sys_* that are a table's own data, not system fields: an ACL role row is nothing but its two references. */
@@ -122,7 +125,8 @@ export class MetadataFormWriter {
         if (rows.length !== 1 || rows[0].name !== table) throw new MetadataScopeError('table_not_supported');
         while (rows.length === 1) {
             const row = rows[0];
-            if (visited.has(row.sys_id) || WRITE_DENY.has(row.name) || (deleting && DELETE_DENY.has(row.name))) {
+            const denied = WRITE_DENY.has(row.name) && !(accessControlWriters.has(this) && ELEVATED_TABLES[row.name]);
+            if (visited.has(row.sys_id) || denied || (deleting && DELETE_DENY.has(row.name))) {
                 throw new MetadataScopeError('table_not_supported');
             }
             visited.add(row.sys_id);

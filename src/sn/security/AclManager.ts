@@ -8,12 +8,16 @@ import type { ServiceNowInstance } from '../ServiceNowInstance';
 import { AclError, AclPartialError } from './AclError';
 import type { AclCreateOptions, AclDeleteOptions, AclListOptions, AclRecord, AclRole, AclUpdateOptions, AclWriteResult, AclWriteTarget } from './AclModels';
 import { RoleElevation } from './RoleElevation';
+import { accessControlWriters } from '../metadata/internal/AccessControlWriters';
+import { isPolicyRefusal } from '../../policy/PolicyRefusal';
 
 const ID = /^[a-f0-9]{32}$/i;
 const IDENT = /^[a-z0-9_]{1,80}$/i;
 const ROLE = /^[a-z][a-z0-9_.]{0,79}$/i;
 /** Free-form ACL names (REST endpoints, UI pages, …) must not break an encoded query. */
 const RESOURCE = /^[^^\p{Cc}]{1,200}$/u;
+/** A query value the instance would evaluate as script. */
+const SCRIPT = /javascript:/i;
 const ACL = 'sys_security_acl';
 const ACL_ROLE = 'sys_security_acl_role';
 const REQUIRED_ROLE = 'security_admin';
@@ -54,14 +58,17 @@ export class AclManager {
             terms.push(`name=${options.table}^ORnameSTARTSWITH${options.table}.`);
         }
         if (options.name !== undefined) {
-            if (!RESOURCE.test(options.name)) throw new AclError('invalid_input', 'name');
+            if (!RESOURCE.test(options.name) || SCRIPT.test(options.name)) throw new AclError('invalid_input', 'name');
             terms.push(`name=${options.name}`);
         }
         if (options.scope !== undefined) terms.push(`sys_scope=${(await resolveScope(reader, options.scope)).sysId}`);
         if (!terms.length) throw new AclError('filter_required');
         if (options.operation !== undefined) terms.push(`operation=${await this.lookup(reader, 'sys_security_operation', options.operation, 'operation_not_found')}`);
         if (options.type !== undefined) terms.push(`type=${await this.lookup(reader, 'sys_security_type', options.type, 'type_not_found')}`);
-        if (options.active !== undefined) terms.push(`active=${options.active}`);
+        if (options.active !== undefined) {
+            if (typeof options.active !== 'boolean') throw new AclError('invalid_input', 'active');
+            terms.push(`active=${options.active ? 'true' : 'false'}`);
+        }
         const rows = await reader.rows(ACL, terms.join('^'), `sys_id,${await this.fields(reader)}`);
         return this.records(reader, rows);
     }
@@ -85,7 +92,7 @@ export class AclManager {
         await this.requireElevation();
         const fields = await this.fieldValues(reader, options);
         const target = this.target(options);
-        const writer = new MetadataFormWriter(this._instance);
+        const writer = this.writer();
         const writes: MetadataWriteResult[] = [];
         const active = options.active !== false;
         // With roles, the ACL stays inactive until they are on it and the platform's own role is gone.
@@ -97,7 +104,8 @@ export class AclManager {
         try {
             return await this.finishCreate(reader, writer, sysId, roles, staged, target, writes);
         } catch (error) {
-            throw new AclPartialError(sysId, error);
+            if (isPolicyRefusal(error)) throw error;
+            throw new AclPartialError(sysId, 'create', await this.activeState(sysId), error);
         }
     }
 
@@ -117,6 +125,11 @@ export class AclManager {
                 removedAutomaticRoles.push(row.role || row.roleSysId);
             }
         }
+        if (roles.length) {
+            // The roles must be exactly those asked for before the ACL goes live: any other row would be one more way to pass.
+            const now = new Set((await this.roleRows(reader, [sysId])).map(row => row.roleSysId));
+            if (now.size !== roles.length || roles.some(role => !now.has(role.sysId))) throw new AclError('roles_not_applied');
+        }
         if (staged) writes.push(await writer.update(ACL, sysId, { ...target, fields: { active: true } }));
         const acl = await this.get(sysId);
         return { acl, writes, removedAutomaticRoles, warnings: this.warnings(acl) };
@@ -131,7 +144,7 @@ export class AclManager {
         if (options.active !== undefined) fields.active = options.active;
         if (!Object.keys(fields).length) throw new AclError('invalid_input', 'nothing_to_change');
         await this.requireElevation();
-        const write = await new MetadataFormWriter(this._instance).update(ACL, sysId, { ...this.target(options), fields });
+        const write = await this.writer().update(ACL, sysId, { ...this.target(options), fields });
         const acl = await this.get(sysId);
         return { acl, previous, writes: [write], removedAutomaticRoles: [], warnings: this.warnings(acl) };
     }
@@ -144,11 +157,19 @@ export class AclManager {
         if (options?.confirm !== sysId) throw new AclError('confirmation_required');
         const previous = await this.get(sysId);
         await this.requireElevation();
-        const writer = new MetadataFormWriter(this._instance);
+        const writer = this.writer();
         const target = this.target(options);
         const writes: MetadataWriteResult[] = [];
-        if (previous.type === 'record' && previous.active) writes.push(await writer.update(ACL, sysId, { ...target, fields: { active: false } }));
-        writes.push(await writer.delete(ACL, sysId, { ...target, confirm: { table: ACL, sysId } }));
+        const deactivate = previous.type === 'record' && previous.active;
+        if (deactivate) writes.push(await writer.update(ACL, sysId, { ...target, fields: { active: false } }));
+        try {
+            writes.push(await writer.delete(ACL, sysId, { ...target, confirm: { table: ACL, sysId } }));
+        } catch (error) {
+            if (!deactivate || isPolicyRefusal(error)) throw error;
+            // Put the restriction back: a failed delete must not leave the ACL switched off.
+            await writer.update(ACL, sysId, { ...target, fields: { active: true } }).catch(() => undefined);
+            throw new AclPartialError(sysId, 'delete', await this.activeState(sysId), error);
+        }
         return { previous, writes, removedAutomaticRoles: [], warnings: [] };
     }
 
@@ -156,8 +177,9 @@ export class AclManager {
         const previous = await this.get(sysId);
         const [resolved] = await this.roles(this.reader(), [role]);
         if (previous.roles.some(row => row.roleSysId === resolved.sysId)) throw new AclError('role_already_present', resolved.name);
+        await this.requireSameScope(previous, target);
         await this.requireElevation();
-        const write = await new MetadataFormWriter(this._instance).insert(ACL_ROLE, { ...this.target(target),
+        const write = await this.writer().insert(ACL_ROLE, { ...this.target(target),
             fields: { sys_security_acl: sysId, sys_user_role: resolved.sysId } });
         const acl = await this.get(sysId);
         return { acl, previous, writes: [write], removedAutomaticRoles: [], warnings: this.warnings(acl) };
@@ -169,13 +191,16 @@ export class AclManager {
         const [resolved] = await this.roles(this.reader(), [role]);
         const rows = previous.roles.filter(row => row.roleSysId === resolved.sysId);
         if (!rows.length) throw new AclError('role_not_present', resolved.name);
+        await this.requireSameScope(previous, target);
         await this.requireElevation();
-        const writer = new MetadataFormWriter(this._instance);
+        const writer = this.writer();
         const writes: MetadataWriteResult[] = [];
         for (const row of rows) writes.push(await writer.delete(ACL_ROLE, row.sysId, { ...this.target(target), confirm: { table: ACL_ROLE, sysId: row.sysId } }));
         const acl = await this.get(sysId);
         const warnings = this.warnings(acl);
-        if (resolved.name !== AUTOMATIC_ROLE && !previous.roles.some(row => row.role === AUTOMATIC_ROLE) && acl.roles.some(row => row.role === AUTOMATIC_ROLE)) {
+        if (acl.roles.some(row => row.roleSysId === resolved.sysId)) {
+            warnings.unshift(`${resolved.name} is still on this ACL: the platform puts ${AUTOMATIC_ROLE} back on an ACL left without a role. Add the role it should have first.`);
+        } else if (!previous.roles.some(row => row.role === AUTOMATIC_ROLE) && acl.roles.some(row => row.role === AUTOMATIC_ROLE)) {
             warnings.unshift(`The platform added ${AUTOMATIC_ROLE} when the last role was removed: every internal user now passes this ACL.`);
         }
         return { acl, previous, writes, removedAutomaticRoles: [], warnings };
@@ -188,6 +213,24 @@ export class AclManager {
             ...(target.storeCustomization ? { storeCustomization: target.storeCustomization } : {}) };
     }
 
+    /** A writer allowed the access-control tables (the generic one refuses them). */
+    private writer(): MetadataFormWriter {
+        const writer = new MetadataFormWriter(this._instance);
+        accessControlWriters.add(writer);
+        return writer;
+    }
+
+    /** The ACL's active flag read back after a failure; undefined when it cannot be read. */
+    private async activeState(sysId: string): Promise<boolean | undefined> {
+        try { return (await this.get(sysId)).active; } catch { return undefined; }
+    }
+
+    /** A role row is written in the target application; it must be the ACL's own. */
+    private async requireSameScope(acl: AclRecord, target: AclWriteTarget): Promise<void> {
+        if (!target?.scope) throw new AclError('invalid_input', 'scope');
+        if ((await resolveScope(this.reader(), target.scope)).sysId !== acl.scope) throw new AclError('scope_mismatch');
+    }
+
     private async requireElevation(): Promise<void> {
         let elevated: string[] = [];
         try { elevated = (await new RoleElevation(this._instance).status()).elevated; } catch { /* unreadable: not elevated */ }
@@ -196,7 +239,9 @@ export class AclManager {
 
     /** decision_type exists from the release that added deny ACLs; read it only where it does. */
     private async fields(reader: MetadataReader): Promise<string> {
-        this._decisionType ??= reader.rows('sys_dictionary', `name=${ACL}^element=decision_type`, 'sys_id,element').then(rows => rows.length > 0);
+        // A failed read is not remembered: the next call asks again.
+        this._decisionType ??= reader.rows('sys_dictionary', `name=${ACL}^element=decision_type`, 'sys_id,element').then(rows => rows.length > 0,
+            (error: unknown) => { this._decisionType = undefined; throw error; });
         return `${BASE_FIELDS}${await this._decisionType ? ',decision_type' : ''}`;
     }
 
@@ -224,7 +269,7 @@ export class AclManager {
     private async aclName(reader: MetadataReader, type: string, options: AclCreateOptions): Promise<string> {
         if (type !== 'record') {
             if (options.table !== undefined || options.field !== undefined) throw new AclError('invalid_input', 'table');
-            if (!RESOURCE.test(options.name ?? '')) throw new AclError('invalid_input', 'name');
+            if (!RESOURCE.test(options.name ?? '') || SCRIPT.test(options.name ?? '')) throw new AclError('invalid_input', 'name');
             return options.name ?? '';
         }
         if (options.name !== undefined) throw new AclError('invalid_input', 'name');
@@ -300,8 +345,9 @@ export class AclManager {
         if (acl.roles.length > 1 && acl.roles.some(role => role.role === AUTOMATIC_ROLE)) {
             warnings.push(`${AUTOMATIC_ROLE} is one of this ACL's roles: any one role passes, so every internal user does.`);
         }
-        if (acl.active && !acl.roles.length && !acl.condition && !(acl.advanced && acl.script.trim())) {
-            warnings.push('This ACL has no role, condition or script: it restricts nothing.');
+        const onlyAutomatic = acl.roles.length > 0 && acl.roles.every(role => role.role === AUTOMATIC_ROLE);
+        if (acl.active && (onlyAutomatic || !acl.roles.length) && !acl.condition && !(acl.advanced && acl.script.trim())) {
+            warnings.push(`This ACL has no role but ${AUTOMATIC_ROLE}, and no condition or script: every internal user passes it.`);
         }
         return warnings;
     }

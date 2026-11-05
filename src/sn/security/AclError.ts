@@ -3,7 +3,7 @@ const IDENTIFIER = /^[a-z0-9_.*]{1,120}$/i;
 export type AclErrorCode =
     'invalid_input' | 'elevation_required' | 'filter_required' | 'acl_not_found' | 'type_not_found' |
     'operation_not_found' | 'table_not_found' | 'field_not_found' | 'role_not_found' | 'role_already_present' |
-    'role_not_present' | 'confirmation_required' | 'partially_applied';
+    'role_not_present' | 'confirmation_required' | 'scope_mismatch' | 'roles_not_applied' | 'partially_applied';
 
 /** A refusal of an ACL operation before anything was written. Detail carries names that passed a strict check only. */
 export class AclError extends Error {
@@ -17,13 +17,16 @@ export class AclError extends Error {
 }
 
 /**
- * A create that failed after the ACL was inserted. The ACL stays inactive (it is activated only as
- * the last step), so it has no effect; `aclSysId` names it for a retry with addRole or a delete.
+ * A create or delete that failed part way, after a write. `active` is the ACL's state read back afterwards (undefined
+ * when it could not be read): a create activates only as its last step, and a failed delete is reactivated when it had
+ * been deactivated for it. `cause` is the failure.
  */
 export class AclPartialError extends AclError {
-    public constructor(public readonly aclSysId: string, public readonly cause: unknown) {
+    public constructor(public readonly aclSysId: string, public readonly operation: 'create' | 'delete',
+        public readonly active: boolean | undefined, public readonly cause: unknown) {
         super('partially_applied');
         this.name = 'AclPartialError';
-        this.message = `ACL ${aclSysId} was created but a later step failed; it is inactive unless it was created without roles.`;
+        const state = active === undefined ? 'in an unknown state: read it back' : active ? 'ACTIVE' : 'inactive';
+        this.message = `ACL ${aclSysId}: the ${operation} failed part way; the ACL is ${state}.`;
     }
 }

@@ -25,7 +25,9 @@ const instance = new ServiceNowInstance({ alias, credential, credentialProvider,
 ```
 
 Every session for that instance then elevates as it logs in, renewals included, and the login checks the roles are
-active. If they are not, the login fails with `RoleElevationError`:
+active. Use one `ServiceNowInstance` per alias in a process: `SessionManager` keys its shared session by alias, so
+alternating two instances of the same alias logs in again at each switch. If the roles are not active, the login fails
+with `RoleElevationError`:
 
 | Code | Meaning |
 | --- | --- |
@@ -84,17 +86,24 @@ Seen on Australia (dev206299, 2026-11-05):
   roles therefore inserts the ACL inactive, adds the roles, removes the platform's `snc_internal` (unless it was asked
   for), and only then activates it. The ACL is never active with less restriction than asked for. `removeRole` warns
   when the platform put `snc_internal` back.
-- If a step after the insert fails, `create` throws `AclPartialError`. Its `aclSysId` names the ACL, which stays
-  inactive.
+- Before activating, `create` reads the role rows again. Unless they are exactly the requested roles it does not
+  activate, and fails with `roles_not_applied`.
+- If a step after the insert fails, `create` throws `AclPartialError`. Its `aclSysId` names the ACL, and `active` is
+  the ACL's state as read back (a create activates only as its last step). A policy refusal is re-thrown as it is.
 - **Deleting an ACL deletes its role rows**, each captured as a DELETE.
 - **An active record ACL cannot be deleted from its form.** The ACL table's own Delete is offered for a record ACL only
-  while it is inactive, so `delete` deactivates one first, as a separate captured update.
+  while it is inactive, so `delete` deactivates one first, as a separate captured update. If the delete then fails, it
+  reactivates the ACL and throws `AclPartialError` with the state read back.
 - **A scoped application may not put a field ACL on another application's field.** The platform refuses ("A field level
   Access Control cannot protect an outside field") and the write fails with `write_not_applied`, carrying that message.
   A table ACL on another application's table is allowed.
 - **The platform writes the description itself** on first save ("Allow read for records in …"). The result shows the
   saved value.
-- An ACL with no role, condition or script inserts (with a warning), and restricts nothing. `warnings` says so.
+- An ACL created without roles, condition or script gets only `snc_internal`, so every internal user passes it.
+  `warnings` says so.
+- `addRole` and `removeRole` write the role row in the target application, which must be the ACL's own
+  (`scope_mismatch` otherwise). Removing an ACL's only role leaves it in place in effect: the platform adds
+  `snc_internal` back, and the result warns.
 
 ### Refusals
 
@@ -103,11 +112,13 @@ Seen on Australia (dev206299, 2026-11-05):
 | Code | Meaning |
 | --- | --- |
 | `elevation_required` | The session does not have `security_admin` elevated. |
-| `invalid_input` | A name, role, field or option failed validation. `detail` names which. |
+| `invalid_input` | A name, role, field or option failed validation (a name containing `javascript:` too). `detail` names which. |
 | `filter_required` | `list` was called without `table`, `name` or `scope`. |
 | `acl_not_found`, `type_not_found`, `operation_not_found`, `table_not_found`, `field_not_found`, `role_not_found` | What it says. |
 | `role_already_present`, `role_not_present` | `addRole` / `removeRole` of a role the ACL already has, or does not have. |
 | `confirmation_required` | `delete` without `confirm` repeating the sys_id. |
+| `scope_mismatch` | `addRole` / `removeRole` with a target application other than the ACL's. |
+| `roles_not_applied` | The ACL's roles did not match the requested roles before activation (thrown as the cause of `AclPartialError`). |
 | `partially_applied` | Thrown as `AclPartialError`, described above. |
 
 The form writes themselves can fail with the metadata writer's errors (`MetadataScopeError`,
