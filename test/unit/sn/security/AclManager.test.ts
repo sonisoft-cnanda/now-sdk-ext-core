@@ -7,6 +7,7 @@ import { SessionManager } from '../../../../src/comm/http/SessionManager';
 import { ServiceNowInstance } from '../../../../src/sn/ServiceNowInstance';
 import { denyLayer, grantLayer, installPolicy, resetPolicyForTests } from '../../../../src/policy/Policy';
 import { isPolicyRefusal } from '../../../../src/policy/PolicyRefusal';
+import { MetadataReader } from '../../../../src/sn/metadata/internal/MetadataReader';
 
 const SCOPE = 'a'.repeat(32), SET = 'c'.repeat(32), OTHER_SCOPE = 'e'.repeat(32);
 const ROLES: Record<string, string> = { admin: '1'.repeat(32), itil: '2'.repeat(32), snc_internal: '3'.repeat(32), security_admin: '4'.repeat(32) };
@@ -388,6 +389,13 @@ describe('AclManager: code on an ACL needs execute', () => {
     });
     afterEach(() => resetPolicyForTests());
 
+    it('refuses a create with code before reading anything', async () => {
+        const rows = jest.spyOn(MetadataReader.prototype, 'rows');
+        await refused(manager().create({ ...target, operation: 'read', table: 'incident', roles: ['itil'], script: 'answer = true;' }));
+        expect(rows).not.toHaveBeenCalled();
+        rows.mockRestore();
+    });
+
     it('refuses a create with a script or a javascript: condition, before any write', async () => {
         await refused(manager().create({ ...target, operation: 'read', table: 'incident', roles: ['itil'], script: 'answer = true;' }));
         await refused(manager().create({ ...target, operation: 'read', table: 'incident', roles: ['itil'], condition: 'sys_id=javascript:gs.getUserID()' }));
@@ -415,6 +423,23 @@ describe('AclManager: code on an ACL needs execute', () => {
         acls.set(acl, { ...acls.get(acl)!, active: 'true' });
         await refused(manager().update(acl, { ...target, operation: 'write' }));
         expect(writes).toEqual([]);
+    });
+
+    it('refuses a switch on given as text, and admin overrides turned off on an ACL with code', async () => {
+        acls.set(acl, { ...acls.get(acl)!, active: 'false', script: 'answer = true;' });
+        await expect(manager().update(acl, { ...target, active: 'true' as any })).rejects.toMatchObject({ code: 'invalid_input', detail: 'active' });
+        acls.set(acl, { ...acls.get(acl)!, active: 'true', admin_overrides: 'true' });
+        await refused(manager().update(acl, { ...target, adminOverrides: false }));
+        acls.set(acl, { ...acls.get(acl)!, active: 'false', script: '', condition: 'caller_id=javascript:gs.getUserID()' });
+        await refused(manager().update(acl, { ...target, active: true }));
+        expect(writes).toEqual([]);
+    });
+
+    it('lets write alone switch on an ACL without code, or re-point an inactive one with code', async () => {
+        acls.set(acl, { ...acls.get(acl)!, active: 'false' });
+        await expect(manager().update(acl, { ...target, active: true })).resolves.toBeDefined();
+        acls.set(acl, { ...acls.get(acl)!, active: 'false', script: 'answer = true;' });
+        await expect(manager().update(acl, { ...target, operation: 'write' })).resolves.toBeDefined();
     });
 
     it('lets write alone clear code, switch it off, or change what does not touch it', async () => {

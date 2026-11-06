@@ -71,9 +71,13 @@ because the platform runs it at every check of the ACL: its script, whether or n
 `javascript:` value in its condition. `AclManager` checks that before any write (on `create`, before any read too):
 
 - `create` or `update` that sets a non-blank script or a `javascript:` condition, active or not;
-- `update` that switches on an ACL with code, or changes the operation of an active one.
+- `update` of an active ACL with code that switches it on, changes its operation, or turns admin overrides off (admin
+  then runs the code too).
 
-Clearing code, switching an ACL off, or changing a field that does not touch its code needs only write. This check is
+Clearing code, switching an ACL off, or changing a field that does not touch its code needs only write. So do role
+changes, although adding or removing a role changes who runs an ACL's existing code (removing the last role brings
+`snc_internal` back), and a `DYNAMIC` condition, which runs the script of an existing dynamic filter option (such as
+"is (dynamic) Me"): that is code already on the instance, not code the caller supplies. This check is
 `AclManager`'s own: the request gate classifies `sys_security_acl` by table and cannot tell a script from a description,
 so a Table API or XML write of the table needs only write there.
 

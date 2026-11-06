@@ -34,10 +34,16 @@ const bool = (value: string | undefined): boolean => value === 'true' || value =
 const carriesCode = (script: string | undefined, condition: string | undefined): boolean =>
     !!script?.trim() || SCRIPT.test(condition ?? '');
 
-/** A script or condition that is not a string is refused before anything is read or written. */
-function requireText(options: { script?: unknown; condition?: unknown }): void {
+/**
+ * Values of the wrong type are refused before anything is read or written: the gate below reads them by type
+ * (`active: 'true'` must not switch on an ACL with code while looking like no switch at all).
+ */
+function requireTypes(options: { script?: unknown; condition?: unknown; active?: unknown; adminOverrides?: unknown }): void {
     for (const field of ['script', 'condition'] as const) {
         if (options[field] !== undefined && typeof options[field] !== 'string') throw new AclError('invalid_input', field);
+    }
+    for (const field of ['active', 'adminOverrides'] as const) {
+        if (options[field] !== undefined && typeof options[field] !== 'boolean') throw new AclError('invalid_input', field);
     }
 }
 
@@ -100,7 +106,7 @@ export class AclManager {
     }
 
     public async create(options: AclCreateOptions): Promise<AclWriteResult> {
-        requireText(options);
+        requireTypes(options);
         // Inactive or not, the code is on the instance once the ACL is: activating it later must not be the only gate.
         if (carriesCode(options.script, options.condition)) this.requireExecute('create');
         const reader = this.reader();
@@ -157,16 +163,19 @@ export class AclManager {
     }
 
     public async update(sysId: string, options: AclUpdateOptions): Promise<AclWriteResult> {
-        requireText(options);
+        requireTypes(options);
         const previous = await this.get(sysId);
         // Code that will run because of this change: a script or javascript: condition set (active or not, as on create),
-        // an ACL with code switched on, or an active one whose code is pointed at another operation. Clearing code,
-        // switching off, or changing anything else runs nothing new.
+        // or existing code on an active ACL run where it was not: switched on, pointed at another operation, or run for
+        // admin once admin overrides are off. Clearing code, switching off, or changing anything else runs nothing new.
         const active = options.active ?? previous.active;
         const code = carriesCode(options.script ?? previous.script, options.condition ?? previous.condition);
         const switchedOn = options.active === true && !previous.active;
         const repointed = options.operation !== undefined && options.operation !== previous.operation;
-        if (carriesCode(options.script, options.condition) || (active && code && (switchedOn || repointed))) this.requireExecute('update');
+        const adminNowChecked = options.adminOverrides === false && previous.adminOverrides;
+        if (carriesCode(options.script, options.condition) || (active && code && (switchedOn || repointed || adminNowChecked))) {
+            this.requireExecute('update');
+        }
         const reader = this.reader();
         const fields = await this.fieldValues(reader, options);
         if (options.operation !== undefined) fields.operation = await this.lookup(reader, 'sys_security_operation', options.operation, 'operation_not_found');
