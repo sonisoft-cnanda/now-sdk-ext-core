@@ -92,8 +92,15 @@ describe('opt-in form transport', () => {
         // A hidden input the form renders, carrying the table name, as classic forms do.
         request.get.mockResolvedValue({status:200,data:html().replace('</form>','<input type="hidden" name="sysparm_record_target" value="sys_script_include"></form>')});
         const snapshot = await transport.loadForm('sys_script_include','-1',load);
-        const result = await transport.submit(snapshot,'sysverb_insert_and_stay',{ fields:{name:'secret-name'}, tokenSource:'page',landing:'guarded',sensitive:true });
+        const result = await transport.submit(snapshot,'sysverb_insert_and_stay',{ fields:{name:'secret-name'}, postAllRenderedInputs:true, tokenSource:'page',landing:'guarded',sensitive:true });
+        expect(request.post.mock.calls[0][0].fields.sysparm_record_target).toBe('sys_script_include');
         expect(result.errors).toEqual(['Table sys_script_include is true to its word, [redacted] [redacted]']);
+    });
+    it('redacts a short record value only as a whole word', async () => {
+        request.post.mockResolvedValue({status:200,headers:{},data:'<div class="outputmsg outputmsg_error"><div class="outputmsg_text">The administrator role admin is required, not admin.x or admin.</div></div>'});
+        const snapshot = await transport.loadForm('sys_script_include','-1',load);
+        const result = await transport.submit(snapshot,'sysverb_insert_and_stay',{ fields:{name:'admin'}, postAllRenderedInputs:true, tokenSource:'page',landing:'guarded',sensitive:true });
+        expect(result.errors).toEqual(['The administrator role [redacted] is required, not admin.x or [redacted].']);
     });
     it('keeps public load and submit overrides in the update call path', async () => {
         const {FormRecordWriter}=await import('../../../../src/comm/http/FormRecordWriter');

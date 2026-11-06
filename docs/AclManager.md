@@ -96,7 +96,9 @@ Seen on Australia (dev206299, 2026-11-05):
   while it is inactive, so `delete` deactivates one first, as a separate captured update. A deactivation refused before
   anything was written throws the writer's own error. On any failure after a write (the deactivation's own
   verification, the delete, a refusal, an unreadable state) it reactivates the ACL unless it is known active or gone, and
-  throws `AclPartialError` with the state read back (a refusal is re-thrown with `aclSysId` and `aclState` added).
+  throws `AclPartialError` with the state read back (a refusal is re-thrown with `aclSysId` and `aclState` added). When
+  the state cannot be read at all it cannot tell whether the deactivation was written, so it reactivates and reports a
+  partial delete to be safe.
 - **A scoped application may not put a field ACL on another application's field.** The platform refuses ("A field level
   Access Control cannot protect an outside field") and the write fails with `write_not_applied`, carrying that message.
   A table ACL on another application's table is allowed.

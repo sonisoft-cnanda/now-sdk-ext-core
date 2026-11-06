@@ -258,9 +258,15 @@ class FormTransport {
             // Normalized like the text; a value that is empty or a few characters once normalized would redact between
             // every character or every common word, and is no secret anyway.
             const values = [...new Set([...withheld].map(value => value.replace(/\s+/g, " ").trim()))].filter(value => value.length >= 4);
+            // A short value (a role or table name a display value carries) is redacted only as a whole word, so that
+            // "admin" does not turn "administrator" into "[redacted]istrator"; a longer one wherever it appears.
+            const escape = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
             for (const value of values.sort((a, b) => b.length - a.length)) {
-                text = text.split(value).join("[redacted]");
-                text = text.split(encodeURIComponent(value)).join("[redacted]");
+                for (const form of new Set([value, encodeURIComponent(value)])) {
+                    text = form.length < 12
+                        ? text.replace(new RegExp(`(?<![\\w.])${escape(form)}(?![\\w]|\\.\\w)`, "g"), "[redacted]")
+                        : text.split(form).join("[redacted]");
+                }
             }
             text = redactMessage(text).replace(/https?:\/\/\S+/g, "[url]").replace(/[A-Za-z0-9_+/=.-]{24,}/g, "[redacted]");
             return /(?:Class\.create|\.prototype|function\s*\(|[{};]|<script)/i.test(text)

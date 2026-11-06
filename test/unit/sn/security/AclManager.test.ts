@@ -298,8 +298,9 @@ describe('AclManager changes', () => {
             if (calls === 2) throw new Error('read failed');
             return original.call(this, id);
         });
-        await manager().delete(acl, { ...target, confirm: acl }).catch(e => e);
+        const error = await manager().delete(acl, { ...target, confirm: acl }).catch(e => e);
         expect(writes).toEqual(['update sys_security_acl {"active":false}', 'update sys_security_acl {"active":true}']);
+        expect(error).toMatchObject({ code: 'partially_applied', operation: 'delete', state: 'active' });
     });
 
     it('reports a delete that applied but failed its verification as deleted', async () => {
