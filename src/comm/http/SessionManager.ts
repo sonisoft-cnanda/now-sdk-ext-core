@@ -6,7 +6,8 @@ import { Logger } from "../../util/Logger";
 const ELEVATED_KEY = '#elevated:';
 
 /**
- * Singleton registry of authenticated ServiceNowRequest instances keyed by instance alias.
+ * Singleton registry of authenticated ServiceNowRequest instances keyed by instance alias (or host), plus the
+ * instance's elevated roles when it has any: an elevated session is a separate server session.
  * Ensures all components sharing the same alias reuse the same HTTP session.
  */
 export class SessionManager {
@@ -32,13 +33,13 @@ export class SessionManager {
 
     /**
      * Get or create a ServiceNowRequest for this instance.
-     * Keyed by alias (falls back to host).
+     * Keyed by alias (falls back to host) and elevated roles.
      */
     getRequest(instance: ServiceNowInstance): ServiceNowRequest {
         const key = this.getKey(instance);
         let request = this._sessions.get(key);
 
-        // The key is alias-or-host, which says nothing about *which* ServiceNowInstance
+        // The key is alias-or-host (and elevation), which says nothing about *which* ServiceNowInstance
         // object asked. A consumer that rebuilds its connection — now-sdk-ext-mcp evicts
         // on a 30-minute TTL — passes a new instance under the same alias and would
         // otherwise be handed the previous one's request, still holding the previous
@@ -122,7 +123,7 @@ export class SessionManager {
     }
 
     /**
-     * Remove cached session for a given alias.
+     * Remove the cached sessions of an alias (or host): the plain one and every elevated one.
      */
     clearSession(alias: string): void {
         this._logger.debug(`Clearing session for alias: ${alias}`);
@@ -147,7 +148,8 @@ export class SessionManager {
     }
 
     /**
-     * Check if a session exists for a given alias.
+     * Check if a session exists under a key: the alias (or host) for a plain session; an elevated
+     * session's key is `alias#elevated:<roles, sorted, comma-separated>`.
      */
     hasSession(alias: string): boolean {
         return this._sessions.has(alias);
@@ -157,6 +159,10 @@ export class SessionManager {
         const key = instance.getAlias() ?? instance.getHost();
         if (!key) {
             throw new Error("ServiceNowInstance must have an alias or host to identify the session");
+        }
+        // The marker would let a plain instance's key equal an elevated one's.
+        if (key.includes(ELEVATED_KEY)) {
+            throw new Error(`ServiceNowInstance alias or host may not contain "${ELEVATED_KEY}"`);
         }
         // An elevated session is a different server session: a long-lived consumer (now-sdk-ext-mcp) keeps a plain
         // and an elevated instance for one alias side by side, and neither may replace the other's session.
