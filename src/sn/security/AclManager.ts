@@ -9,7 +9,9 @@ import { AclError, AclPartialError, AclState } from './AclError';
 import type { AclCreateOptions, AclDeleteOptions, AclListOptions, AclRecord, AclRole, AclUpdateOptions, AclWriteResult, AclWriteTarget } from './AclModels';
 import { RoleElevation } from './RoleElevation';
 import { accessControlWriters } from '../metadata/internal/AccessControlWriters';
-import { isPolicyRefusal } from '../../policy/PolicyRefusal';
+import { isPolicyRefusal, policyRefusal } from '../../policy/PolicyRefusal';
+import { checkRequirement } from '../../policy/Policy';
+import { Logger } from '../../util/Logger';
 
 const ID = /^[a-f0-9]{32}$/i;
 const IDENT = /^[a-z0-9_]{1,80}$/i;
@@ -18,6 +20,7 @@ const ROLE = /^[a-z][a-z0-9_.]{0,79}$/i;
 const RESOURCE = /^[^^\p{Cc}]{1,200}$/u;
 /** A query value the instance would evaluate as script. */
 const SCRIPT = /javascript:/i;
+
 const ACL = 'sys_security_acl';
 const ACL_ROLE = 'sys_security_acl_role';
 const REQUIRED_ROLE = 'security_admin';
@@ -26,6 +29,23 @@ const AUTOMATIC_ROLE = 'snc_internal';
 const BASE_FIELDS = 'name,type,type.name,operation,operation.name,active,admin_overrides,advanced,description,condition,script,sys_scope,sys_scope.scope,sys_updated_on';
 
 const bool = (value: string | undefined): boolean => value === 'true' || value === '1';
+
+/** Code the instance runs at every check of the ACL: its script (advanced or not, KB0685247), or a javascript: condition. */
+const carriesCode = (script: string | undefined, condition: string | undefined): boolean =>
+    !!script?.trim() || SCRIPT.test(condition ?? '');
+
+/**
+ * Values of the wrong type are refused before anything is read or written: the gate below reads them by type
+ * (`active: 'true'` must not switch on an ACL with code while looking like no switch at all).
+ */
+function requireTypes(options: { script?: unknown; condition?: unknown; active?: unknown; adminOverrides?: unknown }): void {
+    for (const field of ['script', 'condition'] as const) {
+        if (options[field] !== undefined && typeof options[field] !== 'string') throw new AclError('invalid_input', field);
+    }
+    for (const field of ['active', 'adminOverrides'] as const) {
+        if (options[field] !== undefined && typeof options[field] !== 'boolean') throw new AclError('invalid_input', field);
+    }
+}
 
 /**
  * Access controls (sys_security_acl) and their roles, written through their forms in a named
@@ -43,6 +63,8 @@ const bool = (value: string | undefined): boolean => value === 'true' || value =
  */
 export class AclManager {
     private _decisionType: Promise<boolean> | undefined;
+
+    private readonly _logger = new Logger('AclManager');
 
     public constructor(private readonly _instance: ServiceNowInstance) {}
 
@@ -84,6 +106,9 @@ export class AclManager {
     }
 
     public async create(options: AclCreateOptions): Promise<AclWriteResult> {
+        requireTypes(options);
+        // Inactive or not, the code is on the instance once the ACL is: activating it later must not be the only gate.
+        if (carriesCode(options.script, options.condition)) this.requireExecute('create');
         const reader = this.reader();
         const type = options.type ?? 'record';
         const typeId = await this.lookup(reader, 'sys_security_type', type, 'type_not_found');
@@ -138,7 +163,19 @@ export class AclManager {
     }
 
     public async update(sysId: string, options: AclUpdateOptions): Promise<AclWriteResult> {
+        requireTypes(options);
         const previous = await this.get(sysId);
+        // Code that will run because of this change: a script or javascript: condition set (active or not, as on create),
+        // or existing code on an active ACL run where it was not: switched on, pointed at another operation, or run for
+        // admin once admin overrides are off. Clearing code, switching off, or changing anything else runs nothing new.
+        const active = options.active ?? previous.active;
+        const code = carriesCode(options.script ?? previous.script, options.condition ?? previous.condition);
+        const switchedOn = options.active === true && !previous.active;
+        const repointed = options.operation !== undefined && options.operation !== previous.operation;
+        const adminNowChecked = options.adminOverrides === false && previous.adminOverrides;
+        if (carriesCode(options.script, options.condition) || (active && code && (switchedOn || repointed || adminNowChecked))) {
+            this.requireExecute('update');
+        }
         const reader = this.reader();
         const fields = await this.fieldValues(reader, options);
         if (options.operation !== undefined) fields.operation = await this.lookup(reader, 'sys_security_operation', options.operation, 'operation_not_found');
@@ -241,6 +278,19 @@ export class AclManager {
     private async requireSameScope(acl: AclRecord, target: AclWriteTarget): Promise<void> {
         if (!target?.scope) throw new AclError('invalid_input', 'scope');
         if ((await resolveScope(this.reader(), target.scope)).sysId !== acl.scope) throw new AclError('scope_mismatch');
+    }
+
+    /**
+     * Code on an ACL runs on the instance, so writing it needs execute as well as write, as a background script or a
+     * scheduled job does. Checked here, before any write, because the request gate classifies the ACL form by
+     * table and cannot tell a script from a description: a Table API or XML write of sys_security_acl needs only write.
+     */
+    private requireExecute(action: 'create' | 'update'): void {
+        const decision = checkRequirement({ verbs: ['write', 'execute'], target: 'instance' });
+        if (decision.allowed) return;
+        this._logger.warn('Refused an ACL with code', { action, verbs: decision.verbs, decidingLayer: decision.decidingLayer });
+        throw policyRefusal({ ...decision, remediation: `${decision.remediation ?? ''} An ACL's script or `.trimStart() +
+            'javascript: condition runs on the instance at every check of the ACL, so it needs execute as well as write.' });
     }
 
     private async requireElevation(): Promise<void> {

@@ -5,6 +5,9 @@ import { RoleElevation } from '../../../../src/sn/security/RoleElevation';
 import { MetadataFormWriter } from '../../../../src/sn/metadata/MetadataFormWriter';
 import { SessionManager } from '../../../../src/comm/http/SessionManager';
 import { ServiceNowInstance } from '../../../../src/sn/ServiceNowInstance';
+import { denyLayer, grantLayer, installPolicy, resetPolicyForTests } from '../../../../src/policy/Policy';
+import { isPolicyRefusal } from '../../../../src/policy/PolicyRefusal';
+import { MetadataReader } from '../../../../src/sn/metadata/internal/MetadataReader';
 
 const SCOPE = 'a'.repeat(32), SET = 'c'.repeat(32), OTHER_SCOPE = 'e'.repeat(32);
 const ROLES: Record<string, string> = { admin: '1'.repeat(32), itil: '2'.repeat(32), snc_internal: '3'.repeat(32), security_admin: '4'.repeat(32) };
@@ -368,5 +371,88 @@ describe('AclManager changes', () => {
         const removed = await manager().removeRole(acl, 'itil', target);
         expect(removed.acl!.roles.map(r => r.roleSysId).sort()).toEqual([NOBODY, ROLES.admin].sort());
         expect(removed.warnings).toEqual([]);
+    });
+});
+
+describe('AclManager: code on an ACL needs execute', () => {
+    const refused = async (promise: Promise<unknown>) => {
+        const error: any = await promise.catch(e => e);
+        expect(isPolicyRefusal(error)).toBe(true);
+        expect(error.decision.verbs).toEqual(expect.arrayContaining(['write', 'execute']));
+        expect(error.message).toContain('runs on the instance at every check of the ACL');
+    };
+    let acl: string;
+    beforeEach(async () => {
+        acl = (await manager().create({ ...target, operation: 'read', table: 'incident', roles: ['itil'] })).acl!.sysId;
+        writes = [];
+        installPolicy([denyLayer('test-deny', ['execute']), grantLayer('default', ['write', 'execute'])]);
+    });
+    afterEach(() => resetPolicyForTests());
+
+    it('refuses a create with code before reading anything', async () => {
+        const rows = jest.spyOn(MetadataReader.prototype, 'rows');
+        const requests = (SessionManager.getInstance().getRequest as jest.Mock).mock.calls.length;
+        await refused(manager().create({ ...target, operation: 'read', table: 'incident', roles: ['itil'], script: 'answer = true;' }));
+        expect(rows).not.toHaveBeenCalled();
+        expect((SessionManager.getInstance().getRequest as jest.Mock).mock.calls.length).toBe(requests);
+        await expect(manager().create({ ...target, operation: 'read', table: 'incident', active: 'false' as any })).rejects.toMatchObject({ code: 'invalid_input', detail: 'active' });
+    });
+
+    it('refuses a create with a script or a javascript: condition, before any write', async () => {
+        await refused(manager().create({ ...target, operation: 'read', table: 'incident', roles: ['itil'], script: 'answer = true;' }));
+        await refused(manager().create({ ...target, operation: 'read', table: 'incident', roles: ['itil'], condition: 'sys_id=javascript:gs.getUserID()' }));
+        await refused(manager().create({ ...target, operation: 'read', table: 'incident', roles: ['itil'], script: 'answer = true;', active: false }));
+        expect(writes).toEqual([]);
+    });
+
+    it('creates without code, or with a blank script, on write alone', async () => {
+        await expect(manager().create({ ...target, operation: 'read', table: 'incident', roles: ['itil'], condition: 'active=true' })).resolves.toBeDefined();
+        await expect(manager().create({ ...target, operation: 'read', table: 'incident', roles: ['itil'], script: '  \n' })).resolves.toBeDefined();
+    });
+
+    it('refuses setting a script or javascript: condition on an update, before any write', async () => {
+        await refused(manager().update(acl, { ...target, script: 'gs.info(1);' }));
+        await refused(manager().update(acl, { ...target, condition: 'caller_id=javascript:gs.getUserID()' }));
+        // On an inactive ACL too: switching it on later must not be the only gate.
+        acls.set(acl, { ...acls.get(acl)!, active: 'false' });
+        await refused(manager().update(acl, { ...target, script: 'gs.info(1);' }));
+        expect(writes).toEqual([]);
+    });
+
+    it('refuses switching on, or re-pointing, an ACL that already has code', async () => {
+        acls.set(acl, { ...acls.get(acl)!, active: 'false', script: 'answer = true;' });
+        await refused(manager().update(acl, { ...target, active: true }));
+        acls.set(acl, { ...acls.get(acl)!, active: 'true' });
+        await refused(manager().update(acl, { ...target, operation: 'write' }));
+        expect(writes).toEqual([]);
+    });
+
+    it('refuses a switch on given as text, and admin overrides turned off on an ACL with code', async () => {
+        acls.set(acl, { ...acls.get(acl)!, active: 'false', script: 'answer = true;' });
+        await expect(manager().update(acl, { ...target, active: 'true' as any })).rejects.toMatchObject({ code: 'invalid_input', detail: 'active' });
+        acls.set(acl, { ...acls.get(acl)!, active: 'true', admin_overrides: 'true' });
+        await refused(manager().update(acl, { ...target, adminOverrides: false }));
+        acls.set(acl, { ...acls.get(acl)!, active: 'false', script: '', condition: 'caller_id=javascript:gs.getUserID()' });
+        await refused(manager().update(acl, { ...target, active: true }));
+        expect(writes).toEqual([]);
+    });
+
+    it('lets write alone switch on an ACL without code, or re-point an inactive one with code', async () => {
+        acls.set(acl, { ...acls.get(acl)!, active: 'false' });
+        await expect(manager().update(acl, { ...target, active: true })).resolves.toBeDefined();
+        acls.set(acl, { ...acls.get(acl)!, active: 'false', script: 'answer = true;' });
+        await expect(manager().update(acl, { ...target, operation: 'write' })).resolves.toBeDefined();
+    });
+
+    it('lets write alone clear code, switch it off, or change what does not touch it', async () => {
+        acls.set(acl, { ...acls.get(acl)!, script: 'answer = true;' });
+        await expect(manager().update(acl, { ...target, description: 'Agents read incidents' })).resolves.toBeDefined();
+        await expect(manager().update(acl, { ...target, active: false })).resolves.toBeDefined();
+        await expect(manager().update(acl, { ...target, script: '' })).resolves.toBeDefined();
+    });
+
+    it('refuses a script or condition that is not text', async () => {
+        await expect(manager().update(acl, { ...target, script: null as any })).rejects.toMatchObject({ code: 'invalid_input', detail: 'script' });
+        await expect(manager().create({ ...target, operation: 'read', table: 'incident', condition: 5 as any })).rejects.toMatchObject({ code: 'invalid_input', detail: 'condition' });
     });
 });

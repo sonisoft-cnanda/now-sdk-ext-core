@@ -66,6 +66,24 @@ empty; both read as `''`.
 Every write takes a target: the ACL's application (`scope`) and an in-progress `updateSet` of that application. An
 installed Store application also needs `storeCustomization`, as with the metadata writer.
 
+The request gate makes every write need the `write` verb of the installed policy. Code on an ACL needs `execute` as well,
+because the platform runs it at every check of the ACL: its script, whether or not `advanced` is set (KB0685247), or a
+`javascript:` value in its condition. `AclManager` checks that before any write (on `create`, before any read too):
+
+- `create` or `update` that sets a non-blank script or a `javascript:` condition, active or not;
+- `update` that leaves an ACL with code active and switches it on, changes its operation, or turns admin overrides off
+  (admin then runs the code too).
+
+Clearing code, switching an ACL off, or changing a field that does not touch its code needs only write. Some of those
+changes still decide when existing code runs, and need only write too: role changes (removing the last role brings
+`snc_internal` back), a plain condition widened or cleared, and a decision type switched to deny.
+
+A `DYNAMIC` condition (such as "is (dynamic) Me") runs the script of a dynamic filter option, a separate record this check
+does not see; writing that record, like a business rule or a script include, needs only write at the request gate. This
+check is defence in depth for code written through `AclManager`, not a boundary against a caller who can write. This check is
+`AclManager`'s own: the request gate classifies `sys_security_acl` by table and cannot tell a script from a description,
+so a Table API or XML write of the table needs only write there.
+
 ```typescript
 const target = { scope: { scope: 'x_acme_app' }, updateSet: setSysId };
 
