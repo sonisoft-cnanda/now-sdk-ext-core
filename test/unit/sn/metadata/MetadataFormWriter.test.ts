@@ -24,8 +24,8 @@ function form(table = TABLE, id = '-1') {
 <input name="sysparm_transaction_scope" value="${state.formScope}"><input name="${table}.sys_scope" value="${state.formScope}">
 <input name="sysparm_ck" value="page-sentinel"><input name="sysparm_ck" id="duplicate" value="page-sentinel">
 <input name="sys_original.name" value="original"><input name="${table}.name" value="old"><input name="${table}.element" value=""><input name="${table}.language" value="">
-<textarea name="${table}.script">old</textarea><input name="${table}.active" value="false">
-<textarea name="${table}.inputs.var__m_${A}.script"></textarea>
+<textarea name="${table}.script">${state.formScript ?? 'old'}</textarea><input name="${table}.active" value="${state.formActive ?? 'false'}">
+${state.atf ? `<textarea name="${table}.inputs.var__m_atf_input_variable_aa.script"></textarea><textarea name="${table}.outputs.var__m_atf_output_variable_bb.script"></textarea>` : `<textarea name="${table}.inputs.var__m_${A}.script"></textarea>`}
 <input name="${table}.cat_item" value=""><input name="${table}.catalog_item" value=""><input name="${table}.variable_set" value=""><input name="${table}.type" value="">
 <select name="${table}.cat_variable"><option value="">-- None --</option></select><select name="${table}.catalog_variable"><option value="">-- None --</option></select>
 ${state.missingAction ? '' : `<button data-action-name="sysverb_insert_and_stay" gsft_id="${A}"></button><button data-action-name="sysverb_update" gsft_id="${A}"></button><button data-action-name="sysverb_delete" gsft_id="${A}"></button>`}</form>`;
@@ -625,11 +625,10 @@ describe('MetadataFormWriter: code needs execute', () => {
         expect(error.message).toContain('code that runs on the instance');
     };
 
-    it('looks up code columns across the table lineage and the variables\' models', async () => {
-        state.grandparent = true;
-        await writer.update(TABLE, R, { scope: { sysId: S }, fields: { name: 'x' } }).catch(() => undefined);
-        expect(state.dictionaryQuery).toContain(`nameIN${TABLE},${'sys_metadata'}`);
-        resetPolicyForTests();
+    it('looks up code columns across the whole table lineage', async () => {
+        state.ancestry = 'x_mid_table'; state.grandparent = true;
+        await expect(writer.update(TABLE, R, { scope: { sysId: S }, fields: { name: 'x' } })).resolves.toBeDefined();
+        expect(state.dictionaryQuery).toContain(`nameIN${TABLE},x_mid_table,sys_metadata^`);
     });
 
     it('refuses setting a script column, or a javascript: value anywhere, before posting', async () => {
@@ -647,6 +646,31 @@ describe('MetadataFormWriter: code needs execute', () => {
     it('refuses a plain script in a code-typed variable', async () => {
         state.variableCode = [{ name: `var__m_${A}`, element: 'script' }];
         await refused(writer.update(TABLE, R, { scope: { sysId: S }, variables: { script: 'gs.info(1);' } }));
+        expect(req.post).not.toHaveBeenCalled();
+    });
+
+    it('reads the state and the code from the record, not the view', async () => {
+        // The view shows the record active with no code; the record is inactive with code.
+        state.formActive = 'true'; state.formScript = ''; state.storedActive = 'false'; state.storedScript = 'gs.info(1);';
+        await refused(writer.update(TABLE, R, { scope: { sysId: S }, fields: { active: true } }));
+        // The record is already active: switching it on again runs nothing new, whatever the view shows.
+        state.formActive = 'false'; state.storedActive = 'true';
+        await expect(writer.update(TABLE, R, { scope: { sysId: S }, fields: { active: true } })).resolves.toBeDefined();
+    });
+
+    it('checks an ATF-style variable model on the column the write targets', async () => {
+        state.atf = true;
+        state.variableCode = [{ name: 'var__m_atf_input_variable_aa', element: 'script' }];
+        await refused(writer.update(TABLE, R, { scope: { sysId: S }, variableField: 'inputs', variables: { script: 'gs.info(1);' } }));
+        expect(state.dictionaryQuery).toContain('var__m_atf_input_variable_aa');
+        expect(state.dictionaryQuery).not.toContain('var__m_atf_output_variable_bb');
+        expect(req.post).not.toHaveBeenCalled();
+    });
+
+    it('counts a code column the view does not show as code on a live insert', async () => {
+        state.codeColumns = ['script', 'condition'];
+        state.formActive = 'true';
+        await refused(writer.insert(TABLE, { scope: { sysId: S }, fields: { name: 'x_t' } }));
         expect(req.post).not.toHaveBeenCalled();
     });
 

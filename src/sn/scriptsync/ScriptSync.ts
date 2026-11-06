@@ -115,11 +115,6 @@ export class ScriptSync {
         }
     }
 
-    /**
-     * Push a local file to ServiceNow by updating the script field on the matching record.
-     * Reads the file from filePath, queries the table by name to find the sys_id,
-     * then updates the script field via TableAPIRequest.put().
-     */
     /** A pushed script runs on the instance: it needs execute as well as write, as any other code written to it does. */
     private requireExecute(): void {
         const decision = checkRequirement({ verbs: ['write', 'execute'], target: 'instance' });
@@ -128,6 +123,11 @@ export class ScriptSync {
         throw policyRefusal({ ...decision, remediation: `${decision.remediation} A pushed script runs on the instance, so it needs execute as well as write.` });
     }
 
+    /**
+     * Push a local file to ServiceNow by updating the script field on the matching record.
+     * Reads the file from filePath, queries the table by name to find the sys_id,
+     * then updates the script field via TableAPIRequest.put().
+     */
     public async pushScript(options: SyncScriptOptions): Promise<SyncResult> {
         const { scriptName, scriptType, filePath } = options;
         const timestamp = new Date().toISOString();

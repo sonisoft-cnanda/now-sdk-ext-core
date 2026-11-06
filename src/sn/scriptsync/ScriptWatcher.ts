@@ -1,9 +1,9 @@
-import { isPolicyRefusal } from "../../policy/PolicyRefusal";
 import * as fs from 'fs';
 import * as path from 'path';
 import { Logger } from "../../util/Logger";
 import { ScriptSync } from './ScriptSync';
 import { SyncResult } from './ScriptSyncModels';
+import { isPolicyRefusal } from "../../policy/PolicyRefusal";
 
 export interface WatchOptions {
     directory: string;

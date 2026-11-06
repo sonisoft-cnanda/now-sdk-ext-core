@@ -34,6 +34,8 @@ const WRITE_DENY = new Set(['sys_update_set', 'sys_update_xml', 'sys_scope', 'sy
 const ELEVATED_TABLES: Record<string, string> = { sys_security_acl: 'security_admin', sys_security_acl_role: 'security_admin' };
 /** Dictionary types whose values run: scripts (server and client), server conditions, and Jelly (html_script, xml). */
 const CODE_TYPES = new Set(['script', 'script_plain', 'script_server', 'script_client', 'condition_string', 'html_script', 'xml']);
+/** A variable model table: var__m_<sys_id>, or a named one such as ATF's var__m_atf_input_variable_<id>. */
+const MODEL = /^var__m_[a-z0-9_]{1,80}$/;
 /** Columns named sys_* that are a table's own data, not system fields: an ACL role row is nothing but its two references. */
 const SYSTEM_NAMED_FIELDS: Record<string, string[]> = { sys_security_acl_role: ['sys_security_acl', 'sys_user_role'] };
 const DELETE_DENY = new Set(['sys_documentation', 'sys_package', 'sys_app_module']);
@@ -138,33 +140,44 @@ export class MetadataFormWriter {
         recordId: string, form: FormSnapshot, options: MetadataWriteOptions): Promise<void> {
         const asText = (value: unknown): string => typeof value === 'string' ? value : typeof value === 'number' || typeof value === 'boolean' ?
             String(value) : Array.isArray(value) ? value.join(',') : '';
-        // Fail closed: anything but an explicit off counts as on (true, 'true', 1, '1', ...).
+        // Fail closed both ways: a value being written is on unless explicitly off; a stored state is off unless explicitly on.
         const on = (value: unknown): boolean => !['false', '0', ''].includes(asText(value).trim().toLowerCase());
-        const terms = Object.fromEntries((options.initialQuery ?? '').split('^').filter(Boolean)
-            .map(term => [term.slice(0, term.indexOf('=')), term.slice(term.indexOf('=') + 1)]));
-        const fields: Record<string, unknown> = { ...terms, ...(options.fields ?? {}) };
+        const storedOn = (value: unknown): boolean => ['true', '1'].includes(asText(value).trim().toLowerCase());
+        const filled = (value: unknown): boolean => asText(value).trim() !== '';
+        // Every initial-query term is checked on its own, whatever the platform makes of a repeated key.
+        const termList = (options.initialQuery ?? '').split('^').filter(Boolean)
+            .map(term => [term.slice(0, term.indexOf('=')), term.slice(term.indexOf('=') + 1)] as [string, string]);
+        const fields: Record<string, unknown> = { ...Object.fromEntries(termList), ...(options.fields ?? {}) };
+        const assignments: Array<[string, unknown]> = [...termList, ...Object.entries(options.fields ?? {})];
+        // The variable's model on the column the write targets (variableField), or on every column that has the element.
+        const controls = Object.values(form.variables ?? {});
         const variables = Object.entries(options.variables ?? {}).map(([element, value]) => ({ element, value,
-            model: Object.values(form.variables ?? {}).find(control => control.element === element)?.model }));
-        let code = [...Object.values(fields), ...variables.map(variable => variable.value)].some(value => /javascript:/i.test(asText(value)));
-        const models = [...new Set(variables.map(variable => variable.model).filter((model): model is string => /^var__m_[0-9a-f]{32}$/.test(model ?? '')))];
+            models: controls.filter(control => control.element === element && (!options.variableField || control.field === options.variableField))
+                .map(control => control.model) }));
+        let code = [...assignments.map(([, value]) => value), ...variables.map(variable => variable.value)].some(value => /javascript:/i.test(asText(value)));
+        // A filled variable whose model cannot be named cannot be checked: count it as code.
+        if (!code) code = variables.some(variable => filled(variable.value) && (!variable.models.length || variable.models.some(model => !MODEL.test(model ?? ''))));
+        const models = [...new Set(variables.flatMap(variable => variable.models).filter((model): model is string => MODEL.test(model ?? '')))];
         // One lookup: the code columns of the table and of the variables' models, and whether the table has an active column.
         const rows = await reader.rows('sys_dictionary', `nameIN${[...lineage, ...models].join(',')}^internal_typeIN${[...CODE_TYPES].join(',')}^ORelement=active`,
             'sys_id,name,element,internal_type');
         const columns = new Set(rows.filter(row => lineage.includes(row.name) && CODE_TYPES.has(row.internal_type) && NAME.test(row.element)).map(row => row.element));
         const variableCode = new Set(rows.filter(row => models.includes(row.name) && CODE_TYPES.has(row.internal_type)).map(row => `${row.name}|${row.element}`));
         const hasActive = rows.some(row => lineage.includes(row.name) && row.element === 'active');
-        if (!code) code = Object.entries(fields).some(([field, value]) => columns.has(field) && asText(value).trim() !== '');
-        if (!code) code = variables.some(variable => variableCode.has(`${variable.model}|${variable.element}`) && asText(variable.value).trim() !== '');
+        if (!code) code = assignments.some(([field, value]) => columns.has(field) && filled(value));
+        if (!code) code = variables.some(variable => filled(variable.value) && variable.models.some(model => variableCode.has(`${model}|${variable.element}`)));
         if (!code && columns.size) {
             if (operation === 'insert') {
                 const control = form.fields[`${table}.active`];
                 const live = !hasActive || (fields.active !== undefined ? on(fields.active) : control ? on(control.value) : true);
-                if (live) code = [...columns].some(column => asText(fields[column] ?? form.fields[`${table}.${column}`]?.value).trim() !== '');
+                // A code column the view does not show still gets its default: its value is unknown, so it counts as code.
+                if (live) code = [...columns].some(column => fields[column] !== undefined ? filled(fields[column]) :
+                    form.fields[`${table}.${column}`] ? filled(form.fields[`${table}.${column}`].value) : true);
             } else if (hasActive && fields.active !== undefined && on(fields.active)) {
                 // The view may not show the code or the state: read both from the record.
                 const stored = await reader.exact(table, recordId, ['active', ...columns].join(','));
                 if (!stored) throw new MetadataScopeError('evidence_unavailable');
-                if (!on(stored.active)) code = [...columns].some(column => asText(fields[column] ?? stored[column]).trim() !== '');
+                if (!storedOn(stored.active)) code = [...columns].some(column => filled(fields[column] ?? stored[column]));
             }
         }
         if (!code) return;
