@@ -68,11 +68,10 @@ installed Store application also needs `storeCustomization`, as with the metadat
 
 The request gate makes every write need the `write` verb of the installed policy. Code on an ACL needs `execute` as well,
 because the platform runs it at every check of the ACL: its script, whether or not `advanced` is set (KB0685247), or a
-`javascript:` value in its condition. `AclManager` checks that before any read or write:
+`javascript:` value in its condition. `AclManager` checks that before any write (on `create`, before any read too):
 
-- `create` with a non-blank script or a `javascript:` condition, active or not;
-- `update` that leaves the ACL active with code, when it sets the script or condition, switches the ACL on, or changes
-  its operation.
+- `create` or `update` that sets a non-blank script or a `javascript:` condition, active or not;
+- `update` that switches on an ACL with code, or changes the operation of an active one.
 
 Clearing code, switching an ACL off, or changing a field that does not touch its code needs only write. This check is
 `AclManager`'s own: the request gate classifies `sys_security_acl` by table and cannot tell a script from a description,

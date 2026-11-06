@@ -21,6 +21,15 @@ const RESOURCE = /^[^^\p{Cc}]{1,200}$/u;
 /** A query value the instance would evaluate as script. */
 const SCRIPT = /javascript:/i;
 
+const ACL = 'sys_security_acl';
+const ACL_ROLE = 'sys_security_acl_role';
+const REQUIRED_ROLE = 'security_admin';
+/** The role the platform puts on an ACL that has none (Explicit Roles). Any internal user has it. */
+const AUTOMATIC_ROLE = 'snc_internal';
+const BASE_FIELDS = 'name,type,type.name,operation,operation.name,active,admin_overrides,advanced,description,condition,script,sys_scope,sys_scope.scope,sys_updated_on';
+
+const bool = (value: string | undefined): boolean => value === 'true' || value === '1';
+
 /** Code the instance runs at every check of the ACL: its script (advanced or not, KB0685247), or a javascript: condition. */
 const carriesCode = (script: string | undefined, condition: string | undefined): boolean =>
     !!script?.trim() || SCRIPT.test(condition ?? '');
@@ -31,14 +40,6 @@ function requireText(options: { script?: unknown; condition?: unknown }): void {
         if (options[field] !== undefined && typeof options[field] !== 'string') throw new AclError('invalid_input', field);
     }
 }
-const ACL = 'sys_security_acl';
-const ACL_ROLE = 'sys_security_acl_role';
-const REQUIRED_ROLE = 'security_admin';
-/** The role the platform puts on an ACL that has none (Explicit Roles). Any internal user has it. */
-const AUTOMATIC_ROLE = 'snc_internal';
-const BASE_FIELDS = 'name,type,type.name,operation,operation.name,active,admin_overrides,advanced,description,condition,script,sys_scope,sys_scope.scope,sys_updated_on';
-
-const bool = (value: string | undefined): boolean => value === 'true' || value === '1';
 
 /**
  * Access controls (sys_security_acl) and their roles, written through their forms in a named
@@ -158,14 +159,14 @@ export class AclManager {
     public async update(sysId: string, options: AclUpdateOptions): Promise<AclWriteResult> {
         requireText(options);
         const previous = await this.get(sysId);
-        // Code that will run because of this change: a script or javascript: condition set on an ACL that is (or becomes)
-        // active, an ACL with code switched on, or one whose code is pointed at another operation. Clearing or switching
-        // off runs nothing new.
+        // Code that will run because of this change: a script or javascript: condition set (active or not, as on create),
+        // an ACL with code switched on, or an active one whose code is pointed at another operation. Clearing code,
+        // switching off, or changing anything else runs nothing new.
         const active = options.active ?? previous.active;
         const code = carriesCode(options.script ?? previous.script, options.condition ?? previous.condition);
-        const touchesCode = carriesCode(options.script, options.condition) || (options.active === true && !previous.active) ||
-            (options.operation !== undefined && options.operation !== previous.operation);
-        if (active && code && touchesCode) this.requireExecute('update');
+        const switchedOn = options.active === true && !previous.active;
+        const repointed = options.operation !== undefined && options.operation !== previous.operation;
+        if (carriesCode(options.script, options.condition) || (active && code && (switchedOn || repointed))) this.requireExecute('update');
         const reader = this.reader();
         const fields = await this.fieldValues(reader, options);
         if (options.operation !== undefined) fields.operation = await this.lookup(reader, 'sys_security_operation', options.operation, 'operation_not_found');
@@ -272,15 +273,14 @@ export class AclManager {
 
     /**
      * Code on an ACL runs on the instance, so writing it needs execute as well as write, as a background script or a
-     * scheduled job does. Checked here, before any read or write, because the request gate classifies the ACL form by
+     * scheduled job does. Checked here, before any write, because the request gate classifies the ACL form by
      * table and cannot tell a script from a description: a Table API or XML write of sys_security_acl needs only write.
      */
     private requireExecute(action: 'create' | 'update'): void {
         const decision = checkRequirement({ verbs: ['write', 'execute'], target: 'instance' });
         if (decision.allowed) return;
         this._logger.warn('Refused an ACL with code', { action, verbs: decision.verbs, decidingLayer: decision.decidingLayer });
-        const base = decision.remediation ?? `This operation requires ${decision.verbs.join(' and ')} permission, which has not been granted.`;
-        throw policyRefusal({ ...decision, remediation: `${base} An ACL's script or ` +
+        throw policyRefusal({ ...decision, remediation: `${decision.remediation ?? ''} An ACL's script or `.trimStart() +
             'javascript: condition runs on the instance at every check of the ACL, so it needs execute as well as write.' });
     }
 

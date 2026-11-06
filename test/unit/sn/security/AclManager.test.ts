@@ -403,6 +403,9 @@ describe('AclManager: code on an ACL needs execute', () => {
     it('refuses setting a script or javascript: condition on an update, before any write', async () => {
         await refused(manager().update(acl, { ...target, script: 'gs.info(1);' }));
         await refused(manager().update(acl, { ...target, condition: 'caller_id=javascript:gs.getUserID()' }));
+        // On an inactive ACL too: switching it on later must not be the only gate.
+        acls.set(acl, { ...acls.get(acl)!, active: 'false' });
+        await refused(manager().update(acl, { ...target, script: 'gs.info(1);' }));
         expect(writes).toEqual([]);
     });
 
