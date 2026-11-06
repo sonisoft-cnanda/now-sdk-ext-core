@@ -57,6 +57,21 @@ suite('AclManager with role elevation - Integration Tests (dev206299 only)', () 
         expect(status.elevated).toContain('security_admin');
     }, MINUTE);
 
+    it('lists ACLs with roles the session may not read, elevated or not', async () => {
+        // incident.reopened_time write has the role nobody, which the Table API hides even from security_admin.
+        const unnamed: Array<Set<string>> = [];
+        for (const instance of [plain, elevated]) {
+            const listed = await new AclManager(instance).list({ table: 'incident', operation: 'write' });
+            const roles = listed.flatMap(acl => acl.roles).filter(role => role.role === '');
+            expect(listed.length).toBeGreaterThan(10);
+            expect(roles.length).toBeGreaterThan(0);
+            for (const role of roles) expect(role.roleSysId).toMatch(/^[0-9a-f]{32}$/);
+            unnamed.push(new Set(roles.map(role => role.roleSysId)));
+        }
+        // Elevation names more roles (security_admin), never fewer.
+        expect([...unnamed[1]].every(id => unnamed[0].has(id))).toBe(true);
+    }, 2 * MINUTE);
+
     it('refuses to write without elevation, before any write', async () => {
         await expect(new AclManager(plain).create({ ...target(), type: 'ui_page', name: NAME, operation: 'read', roles: ['itil'] }))
             .rejects.toMatchObject({ code: 'elevation_required' });

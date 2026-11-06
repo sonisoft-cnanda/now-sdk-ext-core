@@ -33,7 +33,8 @@ const bool = (value: string | undefined): boolean => value === 'true' || value =
  *
  * Changing an ACL needs the elevated security_admin role on the writing session: construct the
  * ServiceNowInstance with `elevatedRoles: ['security_admin']`. Reading ACLs needs no elevation,
- * though a role row naming security_admin shows no role name until the session is elevated.
+ * though a role the session may not read has no name (security_admin until elevated; nobody and
+ * maint always): its roleSysId identifies it.
  *
  * Creating an ACL with roles inserts it inactive, adds the roles, removes the snc_internal role
  * the platform adds to an ACL that has none, then activates it: an ACL never stands active with
@@ -324,7 +325,9 @@ export class AclManager {
         const rows: Array<AclRole & { acl: string }> = [];
         // Bounded IN lists: an encoded query of thousands of sys_ids is refused by the instance.
         for (let at = 0; at < acls.length; at += 100) {
-            const batch = await reader.rows(ACL_ROLE, `sys_security_aclIN${acls.slice(at, at + 100).join(',')}`, 'sys_id,sys_security_acl,sys_user_role,sys_user_role.name');
+            // A role the session may not read (security_admin until elevated; nobody and maint always) has no name here.
+            const batch = await reader.rows(ACL_ROLE, `sys_security_aclIN${acls.slice(at, at + 100).join(',')}`,
+                'sys_id,sys_security_acl,sys_user_role,sys_user_role.name', ['sys_user_role.name']);
             rows.push(...batch.map(row => ({ sysId: row.sys_id, roleSysId: row.sys_user_role, role: row['sys_user_role.name'], acl: row.sys_security_acl })));
         }
         return rows;

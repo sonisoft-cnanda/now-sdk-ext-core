@@ -6,7 +6,14 @@ export type MetadataRow = Record<string, string>;
 /** Read-only, bounded pagination on the same authenticated request as the forms. */
 export class MetadataReader {
     public constructor(private _request: ServiceNowRequest) {}
-    public async rows(table: string, query: string, fields: string): Promise<MetadataRow[]> {
+    /**
+     * Every row of the query, or evidence_unavailable. Each of `fields` must be present as a string, except those named
+     * in `optional`: dot-walked values the session may not read, which the instance sometimes omits (seen for the hidden
+     * roles nobody and maint) instead of returning ''. They read as ''.
+     */
+    public async rows(table: string, query: string, fields: string, optional: readonly string[] = []): Promise<MetadataRow[]> {
+        // Only a dot-walked field the query asks for may be optional: a direct field stays required.
+        if (optional.some(field => !field.includes('.') || !fields.split(',').includes(field))) throw new MetadataScopeError('evidence_unavailable');
         const result: MetadataRow[] = [];
         const ids = new Set<string>();
         let expectedCount: number | undefined;
@@ -25,7 +32,8 @@ export class MetadataReader {
             expectedCount = count;
             for (const value of rows as unknown[]) {
                 if (!value || typeof value !== 'object') throw new MetadataScopeError('evidence_unavailable');
-                const row = value as Record<string, unknown>;
+                const row: Record<string, unknown> = { ...value };
+                for (const field of optional) if (row[field] === undefined) row[field] = '';
                 if (typeof row.sys_id !== 'string' || !row.sys_id || ids.has(row.sys_id) ||
                     fields.split(',').some(field => typeof row[field] !== 'string')) throw new MetadataScopeError('evidence_unavailable');
                 ids.add(row.sys_id); result.push(row as MetadataRow);

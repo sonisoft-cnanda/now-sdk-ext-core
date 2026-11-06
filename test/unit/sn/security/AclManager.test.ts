@@ -18,6 +18,7 @@ let elevated: string[];
 let next: number;
 let failOn: string | undefined;
 let extraRole: boolean;
+const NOBODY = 'b05940500a0a0aa70090a4893f6ff35d';
 const id = () => (next++).toString(16).padStart(32, '0');
 
 function rows(table: string, query: string): Array<Record<string, string>> {
@@ -64,7 +65,9 @@ beforeEach(() => {
         const table = r.path.split('/').at(-1);
         const found = rows(table, r.query.sysparm_query);
         const fields = String(r.query.sysparm_fields).split(',');
-        const result = found.map(row => Object.fromEntries(fields.map(field => [field, row[field] ?? ''])));
+        // The instance sometimes omits a dot-walked value the session may not read (the nobody role), instead of ''.
+        const result = found.map(row => Object.fromEntries(fields.filter(field => !(field === 'sys_user_role.name' && row.sys_user_role === NOBODY))
+            .map(field => [field, row[field] ?? ''])));
         return { status: 200, headers: { 'x-total-count': String(result.length) }, bodyObject: { result } };
     }) };
     jest.spyOn(SessionManager.getInstance(), 'getRequest').mockReturnValue(request as any);
@@ -344,5 +347,18 @@ describe('AclManager changes', () => {
         elevated = [];
         const read = await manager().get(acl);
         expect(read.roles.find(r => r.roleSysId === ROLES.security_admin)?.role).toBe('');
+    });
+
+    it('lists ACLs whose role rows omit the name of a role nobody may read', async () => {
+        aclRoles.push({ sys_id: id(), sys_security_acl: acl, sys_user_role: NOBODY });
+        const listed = await manager().list({ table: 'incident' });
+        expect(listed[0].roles).toEqual(expect.arrayContaining([expect.objectContaining({ roleSysId: NOBODY, role: '' })]));
+        expect(listed[0].roles.map(r => r.role)).toContain('itil');
+        // Changes to the same ACL still work, and leave the unnamed role in place.
+        const result = await manager().addRole(acl, 'admin', target);
+        expect(result.acl!.roles.map(r => r.roleSysId)).toEqual(expect.arrayContaining([NOBODY, ROLES.itil, ROLES.admin]));
+        const removed = await manager().removeRole(acl, 'itil', target);
+        expect(removed.acl!.roles.map(r => r.roleSysId).sort()).toEqual([NOBODY, ROLES.admin].sort());
+        expect(removed.warnings).toEqual([]);
     });
 });
