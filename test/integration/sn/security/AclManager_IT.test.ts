@@ -72,6 +72,13 @@ suite('AclManager with role elevation - Integration Tests (dev206299 only)', () 
         expect([...unnamed[1]].every(id => unnamed[0].has(id))).toBe(true);
     }, 2 * MINUTE);
 
+    it('lists an application with over a thousand ACLs, whose role rows need a second page per batch', async () => {
+        // GRC (sn_grc) on dev206299: 1019 ACLs; 100 of them can have over 200 role rows.
+        const listed = await new AclManager(plain).list({ scope: { scope: 'sn_grc' } });
+        expect(listed.length).toBeGreaterThan(1000);
+        expect(listed.reduce((n, acl) => n + acl.roles.length, 0)).toBeGreaterThan(listed.length);
+    }, 5 * MINUTE);
+
     it('refuses to write without elevation, before any write', async () => {
         await expect(new AclManager(plain).create({ ...target(), type: 'ui_page', name: NAME, operation: 'read', roles: ['itil'] }))
             .rejects.toMatchObject({ code: 'elevation_required' });

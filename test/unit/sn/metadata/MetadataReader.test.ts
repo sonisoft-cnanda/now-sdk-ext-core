@@ -9,6 +9,8 @@ describe('complete metadata reads',()=>{
         expect(rows).toHaveLength(201);
         expect(get.mock.calls[1][0].query.sysparm_offset).toBe('200');
         expect(get.mock.calls.every(([r])=>r.sensitive===true&&r.path.startsWith('/api/now/table/'))).toBe(true);
+        // A long query's second page is refused unless the Link header is suppressed; paging needs only X-Total-Count.
+        expect(get.mock.calls.every(([r])=>r.query.sysparm_suppress_pagination_header==='true')).toBe(true);
     });
     it.each(['short','missing-count','changed-count','duplicate','incomplete-fields'])('refuses %s evidence',async kind=>{
         let first:any=response([row(1)],'2');
