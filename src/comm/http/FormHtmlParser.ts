@@ -173,23 +173,32 @@ export function parseFormMessages(html: string): { errors: string[]; info: strin
     // Message containers do not nest, so the most recent one decides the severity.
     let current: "error" | "info" | null = null;
     let text: string | null = null;
+    // The text element is a span on older releases and a div on Australia; it closes at its own end tag.
+    let textTag: string | null = null;
+    let depth = 0;
     const parser = new Parser({
         onopentag(tag, attrs) {
             const cls = attrs.class ?? "";
-            if (tag === "div" && /\boutputmsg\b/.test(cls)) {
-                current = /outputmsg_error|notification-error/.test(cls) ? "error" : "info";
+            if (text !== null) {
+                if (tag === textTag) depth++;
+                return;
             }
-            if (current && tag === "span" && /\boutputmsg_text\b/.test(cls)) text = "";
+            if (tag === "div" && /\boutputmsg\b/.test(cls)) {
+                current = /outputmsg_error|notification-error|notification-danger/.test(cls) ? "error" : "info";
+            }
+            if (current && (tag === "span" || tag === "div") && /\boutputmsg_text\b/.test(cls)) {
+                text = ""; textTag = tag; depth = 0;
+            }
         },
         ontext(t) {
             if (text !== null) text += t;
         },
         onclosetag(tag) {
-            if (tag === "span" && text !== null) {
-                const message = text.replace(/\s+/g, " ").trim();
-                if (message) (current === "error" ? errors : info).push(message);
-                text = null;
-            }
+            if (text === null || tag !== textTag) return;
+            if (depth > 0) { depth--; return; }
+            const message = text.replace(/\s+/g, " ").trim();
+            if (message) (current === "error" ? errors : info).push(message);
+            text = null; textTag = null;
         },
     }, { decodeEntities: true, lowerCaseAttributeNames: true });
     parser.write(html);

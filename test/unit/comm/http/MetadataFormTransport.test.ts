@@ -81,6 +81,27 @@ describe('opt-in form transport', () => {
             tokenSource:'page',landing:'guarded',sensitive:true });
         expect(JSON.stringify(result)).not.toMatch(/secret-script-line|page-token|session-token/);
     });
+    it('keeps messages readable when a posted value is blank or a few characters', async () => {
+        request.post.mockResolvedValue({status:200,headers:{},data:'<div class="outputmsg outputmsg_error notification-danger"><div class="outputmsg_text">A field level Access Control cannot protect an outside field.</div></div>'});
+        const snapshot = await transport.loadForm('sys_script_include','-1',load);
+        const result = await transport.submit(snapshot,'sysverb_insert_and_stay',{ fields:{name:' \n '}, tokenSource:'page',landing:'guarded',sensitive:true });
+        expect(result.errors).toEqual(['A field level Access Control cannot protect an outside field.']);
+    });
+    it('does not redact the form plumbing or booleans from a message, only record content and tokens', async () => {
+        request.post.mockResolvedValue({status:200,headers:{},data:'<div class="outputmsg outputmsg_error"><div class="outputmsg_text">Table sys_script_include is true to its word, secret-name page-token</div></div>'});
+        // A hidden input the form renders, carrying the table name, as classic forms do.
+        request.get.mockResolvedValue({status:200,data:html().replace('</form>','<input type="hidden" name="sysparm_record_target" value="sys_script_include"></form>')});
+        const snapshot = await transport.loadForm('sys_script_include','-1',load);
+        const result = await transport.submit(snapshot,'sysverb_insert_and_stay',{ fields:{name:'secret-name'}, postAllRenderedInputs:true, tokenSource:'page',landing:'guarded',sensitive:true });
+        expect(request.post.mock.calls[0][0].fields.sysparm_record_target).toBe('sys_script_include');
+        expect(result.errors).toEqual(['Table sys_script_include is true to its word, [redacted] [redacted]']);
+    });
+    it('redacts a short record value only as a whole word', async () => {
+        request.post.mockResolvedValue({status:200,headers:{},data:'<div class="outputmsg outputmsg_error"><div class="outputmsg_text">The administrator role admin is required, not admin.x or admin.</div></div>'});
+        const snapshot = await transport.loadForm('sys_script_include','-1',load);
+        const result = await transport.submit(snapshot,'sysverb_insert_and_stay',{ fields:{name:'admin'}, postAllRenderedInputs:true, tokenSource:'page',landing:'guarded',sensitive:true });
+        expect(result.errors).toEqual(['The administrator role [redacted] is required, not admin.x or [redacted].']);
+    });
     it('keeps public load and submit overrides in the update call path', async () => {
         const {FormRecordWriter}=await import('../../../../src/comm/http/FormRecordWriter');
         const writer=new FormRecordWriter(new ServiceNowInstance({alias:'overrides'}));

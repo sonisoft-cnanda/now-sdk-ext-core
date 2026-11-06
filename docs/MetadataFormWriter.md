@@ -32,6 +32,12 @@ a Store file marks it as customized, and upgrades of that application then skip 
 Files the vendor locked (`sys_policy` read or protected) are refused with `protected_record`.
 The table must extend `sys_metadata` and must pass the table deny list.
 Caller fields must exist on the form. Caller `sys_*` fields are refused.
+
+Access controls (`sys_security_acl`, `sys_security_acl_role`) are on the deny list: an ACL written field by field would
+skip the platform rules [AclManager](./AclManager.md) handles (the `snc_internal` role on a role-less ACL, activation
+only once the roles are in place). AclManager writes them through this writer with an internal opt-in, which also
+allows the role row's two `sys_*` references and checks that the writing session has `security_admin` elevated
+(`elevation_required` otherwise, before any form is loaded).
 An initial query accepts equality terms for ordinary fields. It cannot override system fields.
 
 Pass `initialQuery`, `variables`, `variableField` and `view` as with `FormRecordWriter`.

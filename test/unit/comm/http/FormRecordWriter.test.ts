@@ -100,6 +100,12 @@ describe("FormHtmlParser", () => {
 
     it("splits messages by severity", () => {
         expect(parseFormMessages(ERROR_PAGE)).toEqual({ errors: ["Invalid insert"], info: ["Some info"] });
+        // Australia renders the text as a div, and marks errors notification-danger.
+        const australia = `<div class="outputmsg_div" aria-label="Output messages"><div class="outputmsg outputmsg_error notification notification-danger">
+<span class="notification-icon icon-cross-circle"><span class="sr-only">Error Message</span></span><div class="outputmsg_text">A field level
+Access Control cannot protect an <div><b>outside</b></div> field.</div></div><div class="outputmsg outputmsg_info notification notification-info">
+<span class="notification-icon"><span class="sr-only">Info Message</span></span><div class="outputmsg_text">Access Control inserted</div></div></div>`;
+        expect(parseFormMessages(australia)).toEqual({ errors: ["A field level Access Control cannot protect an outside field."], info: ["Access Control inserted"] });
     });
 
     it("reads the submit outcome from the dialog response page", () => {

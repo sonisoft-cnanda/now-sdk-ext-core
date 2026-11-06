@@ -243,14 +243,30 @@ class FormTransport {
         headers: Record<string, string>, html: string, fields: Record<string, string>): Promise<FormTransportResult> {
         const session = await this.request().getUserSession() as { instanceUrl?: URL | string; userToken?: string;
             cookie?: { getCookiesSync(url: string): Array<{ value: string }> } };
-        const withheld = new Set([...Object.values(fields), session.userToken ?? "",
+        // Record content (the record's fields, their original and display values, variables), the page token, the signed
+        // record, the session token and cookies are withheld from messages. The form's other inputs are plumbing (table
+        // name, action, flags); redacting them, or booleans, would garble the platform's reason.
+        const recordContent = (key: string): boolean => key.includes(`${snapshot.table}.`) || /^sys_(?:original|display)\./.test(key) ||
+            key === "sysparm_ck" || key === "sysparm_encoded_record";
+        const withheld = new Set([...Object.entries(fields)
+            .filter(([key, value]) => recordContent(key) && !/^(?:true|false)$/i.test(value)).map(([, value]) => value),
+            session.userToken ?? "",
             ...(session.cookie?.getCookiesSync(String(session.instanceUrl)) ?? []).map(cookie => cookie.value)]);
         for (const value of [...withheld]) for (const line of value.split(/[\r\n]+/)) if (line) withheld.add(line);
         const clean = (text: string): string => {
             text = text.replace(/\s+/g, " ").trim();
-            for (const value of [...withheld].filter(Boolean).sort((a, b) => b.length - a.length)) {
-                text = text.split(value.replace(/\s+/g, " ").trim()).join("[redacted]");
-                text = text.split(encodeURIComponent(value)).join("[redacted]");
+            // Normalized like the text; a value that is empty or a few characters once normalized would redact between
+            // every character or every common word, and is no secret anyway.
+            const values = [...new Set([...withheld].map(value => value.replace(/\s+/g, " ").trim()))].filter(value => value.length >= 4);
+            // A short value (a role or table name a display value carries) is redacted only as a whole word, so that
+            // "admin" does not turn "administrator" into "[redacted]istrator"; a longer one wherever it appears.
+            const escape = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+            for (const value of values.sort((a, b) => b.length - a.length)) {
+                for (const form of new Set([value, encodeURIComponent(value)])) {
+                    text = form.length < 12
+                        ? text.replace(new RegExp(`(?<![\\w.])${escape(form)}(?![\\w]|\\.\\w)`, "g"), "[redacted]")
+                        : text.split(form).join("[redacted]");
+                }
             }
             text = redactMessage(text).replace(/https?:\/\/\S+/g, "[url]").replace(/[A-Za-z0-9_+/=.-]{24,}/g, "[redacted]");
             return /(?:Class\.create|\.prototype|function\s*\(|[{};]|<script)/i.test(text)

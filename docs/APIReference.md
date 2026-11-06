@@ -30,8 +30,17 @@ class ServiceNowInstance {
 interface ServiceNowSettingsInstance {
     alias: string;
     credential: unknown;
+    /** Elevated privilege roles (e.g. security_admin) every session elevates to at login. */
+    elevatedRoles?: string[];
 }
 ```
+
+**Role elevation.** Elevation (the Elevate Role dialog) lasts only for the server session that asked for it, and each
+`ServiceNowRequest` may log in its own session, so `elevatedRoles` is applied at every login, renewals included. A login
+whose elevation does not hold fails with `RoleElevationError` (`invalid_role`, `not_elevatable`, `api_unavailable`,
+`not_applied`, `request_failed`). Elevation is not a policy write: it changes no instance data, so `--read-only` sessions
+may elevate; what the session then changes is classified as usual. `new RoleElevation(instance).status()` returns the
+roles the user may elevate to and those elevated on the shared session. See [AclManager](./AclManager.md#role-elevation).
 
 **Usage:**
 ```typescript
@@ -282,6 +291,25 @@ class ChoiceWriter {
     getChoices(table: string, element: string, options?: ChoiceListOptions): Promise<ChoiceList>
     setChoice(table: string, element: string, options: ChoiceWriteOptions): Promise<ChoiceWriteResult>
     removeChoice(table: string, element: string, options: ChoiceRemoveOptions): Promise<ChoiceWriteResult>
+}
+```
+
+### AclManager
+
+List, create, change and delete access controls and their roles through their forms, each write verified by reading
+back the record and its capture. Writes need `elevatedRoles: ['security_admin']`. See [AclManager Guide](./AclManager.md).
+
+```typescript
+class AclManager {
+    constructor(instance: ServiceNowInstance)
+
+    list(options: AclListOptions): Promise<AclRecord[]>
+    get(sysId: string): Promise<AclRecord>
+    create(options: AclCreateOptions): Promise<AclWriteResult>
+    update(sysId: string, options: AclUpdateOptions): Promise<AclWriteResult>
+    delete(sysId: string, options: AclDeleteOptions): Promise<AclWriteResult>
+    addRole(sysId: string, role: string, target: AclWriteTarget): Promise<AclWriteResult>
+    removeRole(sysId: string, role: string, target: AclWriteTarget): Promise<AclWriteResult>
 }
 ```
 
@@ -858,6 +886,7 @@ enum ProgressStatus {
 - [Column Writer](./ColumnWriter.md)
 - [Choice Writer](./ChoiceWriter.md)
 - [Metadata Form Writer](./MetadataFormWriter.md)
+- [Access controls and role elevation](./AclManager.md)
 - [Code Search](./CodeSearch.md)
 - [Schema Discovery](./SchemaDiscovery.md)
 - [Attachment Manager](./AttachmentManager.md)

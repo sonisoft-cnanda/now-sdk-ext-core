@@ -75,7 +75,8 @@ function exportedNames(): string[] {
             'ColumnWriter', 'ColumnWriteOptions', 'ColumnWriteResult', 'ColumnRemoveOptions', 'ColumnRemoveResult', 'ColumnRemovalLeftovers', 'ChoiceWriter', 'Choice', 'ChoiceColumn', 'ChoiceSetRef', 'ChoiceList',
             'ChoiceListOptions', 'ChoiceWriteOptions', 'ChoiceRemoveOptions', 'ChoiceWriteResult']) expect(names).toContain(name);
         for (const name of ['updateName', 'updateNameFields', 'parseSlushbucketPage', 'parseSectionChoices', 'joinLayoutValues',
-            'resolveScope', 'customizationEvidence', 'columnName', 'ancestry', 'SCHEMA_TABLES', 'requirePlatformDelete', 'capturedChoices']) expect(names).not.toContain(name);
+            'resolveScope', 'customizationEvidence', 'columnName', 'ancestry', 'SCHEMA_TABLES', 'requirePlatformDelete', 'capturedChoices',
+            'accessControlWriters']) expect(names).not.toContain(name);
     });
 
     it('exports update set export and its typed contracts', () => {
@@ -155,6 +156,14 @@ function exportedNames(): string[] {
         for (const name of ['StoreAppRepairError', 'StoreAppRepairErrorDetail', 'StoreAppRepairErrorCode', 'StoreAppRepairOptions',
             'StoreAppRepairTarget', 'StoreAppRepairEndpoint', 'StoreAppRepairStart', 'StoreAppRepairCounts', 'StoreAppRepairSkippedFile',
             'StoreAppRepairHistory', 'StoreAppRepairResult', 'STORE_APP_REPAIR_SKIPPED_LIMIT']) expect(names).toContain(name);
+    });
+
+    it('exports role elevation and access control management', () => {
+        const names = exportedNames();
+        for (const name of ['ELEVATE_ROLE_PATH', 'RoleElevationError', 'RoleElevationErrorCode', 'ElevationStatus', 'ElevatableRole',
+            'elevateSession', 'readElevation', 'normalizeRoles', 'parseElevation', 'RoleElevation', 'AclManager', 'AclError', 'AclErrorCode',
+            'AclRecord', 'AclRole', 'AclListOptions', 'AclWriteTarget', 'AclCreateOptions', 'AclUpdateOptions', 'AclDeleteOptions',
+            'AclWriteResult']) expect(names).toContain(name);
     });
 
     it('exports the flow design-time definition contract', () => {

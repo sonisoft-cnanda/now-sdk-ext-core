@@ -14,11 +14,23 @@ import { comparePreferences, preferenceValue } from './internal/MetadataPreferen
 import { updateName, updateNameFields } from './internal/MetadataUpdateNames';
 import { customizationEvidence, resolveScope } from './internal/MetadataScope';
 import { requirePlatformDelete } from './internal/MetadataFormActions';
+import { readElevation } from '../../auth/SessionElevation';
+import { accessControlWriters } from './internal/AccessControlWriters';
+import type { UserSession } from '@servicenow/sdk-cli-core/dist/auth/index.js';
 
 const ID = /^[a-f0-9]{32}$/i;
 const NAME = /^[a-z0-9_]+$/i;
 const WRITE_DENY = new Set(['sys_update_set', 'sys_update_xml', 'sys_scope', 'sys_app', 'sys_store_app',
-    'sys_db_object', 'sys_dictionary', 'sys_security_acl', 'sys_user_role']);
+    'sys_db_object', 'sys_dictionary', 'sys_security_acl', 'sys_security_acl_role', 'sys_user_role']);
+/**
+ * Tables only an elevated role may change, with that role. Unelevated, the ACL form refuses an insert ("Invalid insert")
+ * and turns an update into a 302 that changes nothing, so the role is checked on the writing session before any POST.
+ * They stay in WRITE_DENY for the generic writer: an ACL written field by field skips AclManager's safeguards (the
+ * platform's snc_internal role on a role-less ACL, staging before activation). Only AclManager opts in.
+ */
+const ELEVATED_TABLES: Record<string, string> = { sys_security_acl: 'security_admin', sys_security_acl_role: 'security_admin' };
+/** Columns named sys_* that are a table's own data, not system fields: an ACL role row is nothing but its two references. */
+const SYSTEM_NAMED_FIELDS: Record<string, string[]> = { sys_security_acl_role: ['sys_security_acl', 'sys_user_role'] };
 const DELETE_DENY = new Set(['sys_documentation', 'sys_package', 'sys_app_module']);
 /**
  * Choice fields that point at a catalog variable. The server renders them with only "-- None --" and the page's script
@@ -105,17 +117,21 @@ export class MetadataFormWriter {
         if (!belongs) refuse();
     }
 
-    private async table(reader: MetadataReader, table: string, deleting: boolean): Promise<void> {
+    /** Checks the table may be written here; returns it and the tables it extends, nearest first. */
+    private async table(reader: MetadataReader, table: string, deleting: boolean): Promise<string[]> {
         const visited = new Set<string>();
+        const names: string[] = [];
         let rows = await reader.rows('sys_db_object', `name=${table}`, 'sys_id,name,super_class');
         if (rows.length !== 1 || rows[0].name !== table) throw new MetadataScopeError('table_not_supported');
         while (rows.length === 1) {
             const row = rows[0];
-            if (visited.has(row.sys_id) || WRITE_DENY.has(row.name) || (deleting && DELETE_DENY.has(row.name))) {
+            const denied = WRITE_DENY.has(row.name) && !(accessControlWriters.has(this) && ELEVATED_TABLES[row.name]);
+            if (visited.has(row.sys_id) || denied || (deleting && DELETE_DENY.has(row.name))) {
                 throw new MetadataScopeError('table_not_supported');
             }
             visited.add(row.sys_id);
-            if (row.name === 'sys_metadata') return;
+            names.push(row.name);
+            if (row.name === 'sys_metadata') return names;
             if (!ID.test(row.super_class)) break;
             const parent = await reader.exact('sys_db_object', row.super_class, 'name,super_class');
             rows = parent ? [parent] : [];
@@ -141,7 +157,12 @@ export class MetadataFormWriter {
             const { store, ...scope } = await resolveScope(reader, options.scope);
             if (store && options.storeCustomization?.acknowledgeUpgradeSkip !== true) throw new MetadataScopeError('store_scope');
             if (store && !options.updateSet) throw new MetadataScopeError('update_set_required');
-            await this.table(reader, table, operation === 'delete');
+            const lineage = await this.table(reader, table, operation === 'delete');
+            const role = lineage.map(name => ELEVATED_TABLES[name]).find(Boolean);
+            if (role) {
+                const elevated = await readElevation(await request.getUserSession() as UserSession).then(state => state.elevated, () => []);
+                if (!elevated.includes(role)) throw new MetadataScopeError('elevation_required', { table });
+            }
             const nameFields = updateNameFields(table);
             let existing: MetadataRow | undefined;
             if (operation !== 'insert') {
@@ -180,7 +201,8 @@ export class MetadataFormWriter {
                 form.renderedInputs?.sysparm_transaction_scope !== scope.sysId) throw new MetadataScopeError('scope_not_applied');
             const writeOptions = options as MetadataWriteOptions;
             for (const field of Object.keys(writeOptions.fields ?? {})) {
-                if (!NAME.test(field) || /^sys_/i.test(field) || !form.fields[`${table}.${field}`]) throw new MetadataScopeError('field_not_supported', { field, table });
+                const system = /^sys_/i.test(field) && !SYSTEM_NAMED_FIELDS[table]?.includes(field);
+                if (!NAME.test(field) || system || !form.fields[`${table}.${field}`]) throw new MetadataScopeError('field_not_supported', { field, table });
             }
             const variableReference = await this.variableReference(reader, table, recordId, writeOptions, operation);
             if (variableReference) {
@@ -192,7 +214,7 @@ export class MetadataFormWriter {
             }
             const action = operation === 'insert' ? 'sysverb_insert_and_stay' : operation === 'update' ? 'sysverb_update' : 'sysverb_delete';
             if (operation !== 'insert' && !form.actions[action]) throw new MetadataScopeError('not_permitted');
-            if (operation === 'delete') await requirePlatformDelete(reader, form.actions);
+            if (operation === 'delete') await requirePlatformDelete(reader, form.actions, table);
             try { transport.validate(form, options); } catch (error) {
                 if (!(error instanceof InvalidParameterException)) throw error;
                 // Name the value the form refused: validate the fields one at a time.

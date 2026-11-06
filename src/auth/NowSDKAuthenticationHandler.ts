@@ -7,6 +7,7 @@ import { getUserSession } from '@servicenow/sdk-cli-core/dist/auth/index.js';
 import type { UserSession } from '@servicenow/sdk-cli-core/dist/auth/index.js';
 import { sessionCredentials, SessionCredentials } from './CredentialProvider';
 import { SessionAuthError } from './SessionAuthError';
+import { elevateSession, RoleElevationError } from './SessionElevation';
 
 export class NowSDKAuthenticationHandler implements IAuthenticationHandler {
     private _requestHandler: IRequestHandler;
@@ -63,6 +64,12 @@ export class NowSDKAuthenticationHandler implements IAuthenticationHandler {
                 throw new SessionAuthError('NEX_AUTH_TEMPORARY', 'The SDK did not create a session. Check connectivity and retry.');
             }
             const session = value as UserSession;
+            // Elevation lives in the server session, so a renewed session must elevate again.
+            const roles = this._instance.elevatedRoles ?? [];
+            if (roles.length) {
+                await elevateSession(session, roles);
+                this._logger.info(`Session elevated to ${roles.join(', ')}`);
+            }
             this._requestHandler.setSession(session, this._instance);
             this._session = session;
             this._credentials = credentials;
@@ -71,7 +78,7 @@ export class NowSDKAuthenticationHandler implements IAuthenticationHandler {
             return session;
         } catch (error: unknown) {
             this._isLoggedIn = false;
-            if (error instanceof SessionAuthError) throw error;
+            if (error instanceof SessionAuthError || error instanceof RoleElevationError) throw error;
             throw new SessionAuthError('NEX_AUTH_TEMPORARY', 'Session renewal failed. Check credential storage and instance connectivity, then retry.');
         }
     }
