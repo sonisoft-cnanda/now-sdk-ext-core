@@ -21,7 +21,7 @@ export interface AclRecord {
     operation: string;
     active: boolean;
     adminOverrides: boolean;
-    /** The script runs only when advanced is true. */
+    /** Shows the script on the form. The platform runs the script whether or not it is set (KB0685247). */
     advanced: boolean;
     /** allow or deny; '' on a release without decision types. */
     decisionType: string;
@@ -70,7 +70,7 @@ export interface AclCreateOptions extends AclWriteTarget {
     /** Role names. Any one of them passes the ACL. */
     roles?: string[];
     condition?: string;
-    /** Script that sets `answer`; sets advanced, which the script needs to run. */
+    /** Script that sets `answer`; also sets advanced, so the form shows it. */
     script?: string;
     /** Default true, as on the form. */
     adminOverrides?: boolean;

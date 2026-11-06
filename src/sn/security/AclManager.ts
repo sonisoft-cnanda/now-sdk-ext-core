@@ -360,7 +360,8 @@ export class AclManager {
             warnings.push(`${AUTOMATIC_ROLE} is one of this ACL's roles: any one role passes, so every internal user does.`);
         }
         const onlyAutomatic = acl.roles.length > 0 && acl.roles.every(role => role.role === AUTOMATIC_ROLE);
-        if (acl.active && (onlyAutomatic || !acl.roles.length) && !acl.condition && !(acl.advanced && acl.script.trim())) {
+        // A script restricts the ACL whether or not advanced is set: advanced only shows it (KB0685247).
+        if (acl.active && (onlyAutomatic || !acl.roles.length) && !acl.condition && !acl.script.trim()) {
             warnings.push(`This ACL has no role but ${AUTOMATIC_ROLE}, and no condition or script: every internal user passes it.`);
         }
         return warnings;
