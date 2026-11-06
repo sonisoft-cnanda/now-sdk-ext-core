@@ -33,7 +33,8 @@ const bool = (value: string | undefined): boolean => value === 'true' || value =
  *
  * Changing an ACL needs the elevated security_admin role on the writing session: construct the
  * ServiceNowInstance with `elevatedRoles: ['security_admin']`. Reading ACLs needs no elevation,
- * though a role row naming security_admin shows no role name until the session is elevated.
+ * though a role the session may not read has no name (security_admin until elevated; nobody and
+ * maint always): its roleSysId identifies it.
  *
  * Creating an ACL with roles inserts it inactive, adds the roles, removes the snc_internal role
  * the platform adds to an ACL that has none, then activates it: an ACL never stands active with

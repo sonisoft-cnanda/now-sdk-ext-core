@@ -23,7 +23,10 @@ describe('complete metadata reads',()=>{
         const get=jest.fn<any>().mockResolvedValue(response([{sys_id:row(1).sys_id,name:'fixture'},{sys_id:row(2).sys_id,name:'fixture','role.name':'itil'}]));
         const rows=await new MetadataReader({get} as any).rows('sys_security_acl_role','x=y','sys_id,name,role.name',['role.name']);
         expect(rows.map(r=>r['role.name'])).toEqual(['','itil']);
-        await expect(new MetadataReader({get} as any).rows('sys_security_acl_role','x=y','sys_id,name,role.name',['other'])).rejects.toMatchObject({code:'evidence_unavailable'});
+        for(const optional of [['other.name'],['name']])
+            await expect(new MetadataReader({get} as any).rows('sys_security_acl_role','x=y','sys_id,name,role.name',optional)).rejects.toMatchObject({code:'evidence_unavailable'});
+        const nulled=jest.fn<any>().mockResolvedValue(response([{sys_id:row(1).sys_id,name:'fixture','role.name':null}]));
+        await expect(new MetadataReader({get:nulled} as any).rows('sys_security_acl_role','x=y','sys_id,name,role.name',['role.name'])).rejects.toMatchObject({code:'evidence_unavailable'});
     });
     it('refuses an exact read whose returned ID does not match',async()=>{
         const get=jest.fn<any>().mockResolvedValue(response([row(2)]));

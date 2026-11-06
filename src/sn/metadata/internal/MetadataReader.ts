@@ -12,6 +12,8 @@ export class MetadataReader {
      * roles nobody and maint) instead of returning ''. They read as ''.
      */
     public async rows(table: string, query: string, fields: string, optional: readonly string[] = []): Promise<MetadataRow[]> {
+        // Only a dot-walked field the query asks for may be optional: a direct field stays required.
+        if (optional.some(field => !field.includes('.') || !fields.split(',').includes(field))) throw new MetadataScopeError('evidence_unavailable');
         const result: MetadataRow[] = [];
         const ids = new Set<string>();
         let expectedCount: number | undefined;

@@ -354,5 +354,11 @@ describe('AclManager changes', () => {
         const listed = await manager().list({ table: 'incident' });
         expect(listed[0].roles).toEqual(expect.arrayContaining([expect.objectContaining({ roleSysId: NOBODY, role: '' })]));
         expect(listed[0].roles.map(r => r.role)).toContain('itil');
+        // Changes to the same ACL still work, and leave the unnamed role in place.
+        const result = await manager().addRole(acl, 'admin', target);
+        expect(result.acl!.roles.map(r => r.roleSysId)).toEqual(expect.arrayContaining([NOBODY, ROLES.itil, ROLES.admin]));
+        const removed = await manager().removeRole(acl, 'itil', target);
+        expect(removed.acl!.roles.map(r => r.roleSysId).sort()).toEqual([NOBODY, ROLES.admin].sort());
+        expect(removed.warnings).toEqual([]);
     });
 });
