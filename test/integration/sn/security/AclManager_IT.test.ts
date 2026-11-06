@@ -1,6 +1,6 @@
 // This suite runs as real ESM (jest is invoked with --experimental-vm-modules),
 // where the `jest` object is not injected as a global.
-import { afterAll, beforeAll, describe, expect, it } from '@jest/globals';
+import { afterAll, beforeAll, describe, expect, it, jest } from '@jest/globals';
 import { ServiceNowInstance } from '../../../../src/sn/ServiceNowInstance';
 import { SN_INSTANCE_ALIAS } from '../../../test_utils/test_config';
 import { initCredentialStore } from '../../../../src/credentials/ensureShim';
@@ -8,6 +8,7 @@ import { AclManager } from '../../../../src/sn/security/AclManager';
 import { RoleElevation } from '../../../../src/sn/security/RoleElevation';
 import { UpdateSetManager } from '../../../../src/sn/updateset/UpdateSetManager';
 import { BackgroundScriptExecutor } from '../../../../src/sn/BackgroundScriptExecutor';
+import { ServiceNowRequest } from '../../../../src/comm/http/ServiceNowRequest';
 
 /**
  * Live access controls with security_admin elevation. Writes ACLs, so it runs only on dev206299, in the
@@ -71,6 +72,21 @@ suite('AclManager with role elevation - Integration Tests (dev206299 only)', () 
         // Elevation names more roles (security_admin), never fewer.
         expect([...unnamed[1]].every(id => unnamed[0].has(id))).toBe(true);
     }, 2 * MINUTE);
+
+    it('lists an application with over a thousand ACLs, whose role rows need a second page per batch', async () => {
+        // GRC (sn_grc) on dev206299: 1019 ACLs; 100 of them can have over 200 role rows.
+        const get = jest.spyOn(ServiceNowRequest.prototype, 'get');
+        try {
+            const listed = await new AclManager(plain).list({ scope: { scope: 'sn_grc' } });
+            expect(listed.length).toBeGreaterThan(1000);
+            expect(listed.reduce((n, acl) => n + acl.roles.length, 0)).toBeGreaterThan(listed.length);
+            // The case the fix is for: a role-row batch read past its first page.
+            expect(get.mock.calls.some(([request]: any[]) => request.path.endsWith('/sys_security_acl_role') &&
+                request.query?.sysparm_offset === '200' && String(request.query?.sysparm_query).includes('sys_security_aclIN'))).toBe(true);
+        } finally {
+            get.mockRestore();
+        }
+    }, 5 * MINUTE);
 
     it('refuses to write without elevation, before any write', async () => {
         await expect(new AclManager(plain).create({ ...target(), type: 'ui_page', name: NAME, operation: 'read', roles: ['itil'] }))

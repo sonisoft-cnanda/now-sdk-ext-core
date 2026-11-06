@@ -22,7 +22,10 @@ export class MetadataReader {
                 headers: { Accept: 'application/json' }, body: null, requires: READ_ONLY, sensitive: true,
                 query: { sysparm_query: `${query}^ORDERBYsys_id`, sysparm_fields: fields,
                     sysparm_display_value: 'false', sysparm_exclude_reference_link: 'true', sysparm_no_count: 'false',
-                    sysparm_limit: '200', sysparm_offset: String(page * 200) } });
+                    sysparm_limit: '200', sysparm_offset: String(page * 200),
+                    // Paging is by offset and X-Total-Count. Without this, a long query (an IN list of sys_ids)
+                    // whose result needs a second page is refused: 400 "Pagination not supported".
+                    sysparm_suppress_pagination_header: 'true' } });
             const rows = response.bodyObject?.result;
             if (response.status !== 200 || !Array.isArray(rows) || rows.length > 200) throw new MetadataScopeError('evidence_unavailable');
             const countHeader = (response.headers as Record<string, string>)?.['x-total-count'];
