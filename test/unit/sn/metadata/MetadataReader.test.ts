@@ -12,6 +12,10 @@ describe('complete metadata reads',()=>{
         // A long query's second page is refused unless the Link header is suppressed; paging needs only X-Total-Count.
         expect(get.mock.calls.every(([r])=>r.query.sysparm_suppress_pagination_header==='true')).toBe(true);
     });
+    it('refuses a later page the instance refused, rather than returning the first',async()=>{
+        const get=jest.fn<any>().mockResolvedValueOnce(response(Array.from({length:200},(_,i)=>row(i)),'227')).mockResolvedValueOnce({status:400,headers:{},bodyObject:{error:{message:'Pagination not supported'}}});
+        await expect(new MetadataReader({get} as any).rows('sys_security_acl_role','x=y','sys_id,name')).rejects.toMatchObject({code:'evidence_unavailable'});
+    });
     it.each(['short','missing-count','changed-count','duplicate','incomplete-fields'])('refuses %s evidence',async kind=>{
         let first:any=response([row(1)],'2');
         if(kind==='missing-count')first.headers={};
