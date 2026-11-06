@@ -11,6 +11,7 @@ import { RoleElevation } from './RoleElevation';
 import { accessControlWriters } from '../metadata/internal/AccessControlWriters';
 import { isPolicyRefusal, policyRefusal } from '../../policy/PolicyRefusal';
 import { checkRequirement } from '../../policy/Policy';
+import { Logger } from '../../util/Logger';
 
 const ID = /^[a-f0-9]{32}$/i;
 const IDENT = /^[a-z0-9_]{1,80}$/i;
@@ -19,6 +20,17 @@ const ROLE = /^[a-z][a-z0-9_.]{0,79}$/i;
 const RESOURCE = /^[^^\p{Cc}]{1,200}$/u;
 /** A query value the instance would evaluate as script. */
 const SCRIPT = /javascript:/i;
+
+/** Code the instance runs at every check of the ACL: its script (advanced or not, KB0685247), or a javascript: condition. */
+const carriesCode = (script: string | undefined, condition: string | undefined): boolean =>
+    !!script?.trim() || SCRIPT.test(condition ?? '');
+
+/** A script or condition that is not a string is refused before anything is read or written. */
+function requireText(options: { script?: unknown; condition?: unknown }): void {
+    for (const field of ['script', 'condition'] as const) {
+        if (options[field] !== undefined && typeof options[field] !== 'string') throw new AclError('invalid_input', field);
+    }
+}
 const ACL = 'sys_security_acl';
 const ACL_ROLE = 'sys_security_acl_role';
 const REQUIRED_ROLE = 'security_admin';
@@ -44,6 +56,8 @@ const bool = (value: string | undefined): boolean => value === 'true' || value =
  */
 export class AclManager {
     private _decisionType: Promise<boolean> | undefined;
+
+    private readonly _logger = new Logger('AclManager');
 
     public constructor(private readonly _instance: ServiceNowInstance) {}
 
@@ -85,6 +99,9 @@ export class AclManager {
     }
 
     public async create(options: AclCreateOptions): Promise<AclWriteResult> {
+        requireText(options);
+        // Inactive or not, the code is on the instance once the ACL is: activating it later must not be the only gate.
+        if (carriesCode(options.script, options.condition)) this.requireExecute('create');
         const reader = this.reader();
         const type = options.type ?? 'record';
         const typeId = await this.lookup(reader, 'sys_security_type', type, 'type_not_found');
@@ -139,7 +156,16 @@ export class AclManager {
     }
 
     public async update(sysId: string, options: AclUpdateOptions): Promise<AclWriteResult> {
+        requireText(options);
         const previous = await this.get(sysId);
+        // Code that will run because of this change: a script or javascript: condition set on an ACL that is (or becomes)
+        // active, an ACL with code switched on, or one whose code is pointed at another operation. Clearing or switching
+        // off runs nothing new.
+        const active = options.active ?? previous.active;
+        const code = carriesCode(options.script ?? previous.script, options.condition ?? previous.condition);
+        const touchesCode = carriesCode(options.script, options.condition) || (options.active === true && !previous.active) ||
+            (options.operation !== undefined && options.operation !== previous.operation);
+        if (active && code && touchesCode) this.requireExecute('update');
         const reader = this.reader();
         const fields = await this.fieldValues(reader, options);
         if (options.operation !== undefined) fields.operation = await this.lookup(reader, 'sys_security_operation', options.operation, 'operation_not_found');
@@ -244,6 +270,20 @@ export class AclManager {
         if ((await resolveScope(this.reader(), target.scope)).sysId !== acl.scope) throw new AclError('scope_mismatch');
     }
 
+    /**
+     * Code on an ACL runs on the instance, so writing it needs execute as well as write, as a background script or a
+     * scheduled job does. Checked here, before any read or write, because the request gate classifies the ACL form by
+     * table and cannot tell a script from a description: a Table API or XML write of sys_security_acl needs only write.
+     */
+    private requireExecute(action: 'create' | 'update'): void {
+        const decision = checkRequirement({ verbs: ['write', 'execute'], target: 'instance' });
+        if (decision.allowed) return;
+        this._logger.warn('Refused an ACL with code', { action, verbs: decision.verbs, decidingLayer: decision.decidingLayer });
+        const base = decision.remediation ?? `This operation requires ${decision.verbs.join(' and ')} permission, which has not been granted.`;
+        throw policyRefusal({ ...decision, remediation: `${base} An ACL's script or ` +
+            'javascript: condition runs on the instance at every check of the ACL, so it needs execute as well as write.' });
+    }
+
     private async requireElevation(): Promise<void> {
         let elevated: string[] = [];
         try { elevated = (await new RoleElevation(this._instance).status()).elevated; } catch { /* unreadable: not elevated */ }
@@ -262,15 +302,7 @@ export class AclManager {
         const fields: Record<string, FormValueInput> = {};
         if (options.description !== undefined) fields.description = options.description;
         if (options.condition !== undefined) fields.condition = options.condition;
-        if (options.script !== undefined) {
-            // An ACL's script runs on the instance at every check of it: setting one is running code, so it needs execute
-            // as well as write, as a background script or a scheduled job does. Clearing it runs nothing.
-            if (options.script.trim()) {
-                const decision = checkRequirement({ verbs: ['write', 'execute'], target: 'instance' });
-                if (!decision.allowed) throw policyRefusal(decision);
-            }
-            Object.assign(fields, { advanced: true, script: options.script });
-        }
+        if (options.script !== undefined) Object.assign(fields, { advanced: true, script: options.script });
         if (options.decisionType !== undefined) {
             if (!['allow', 'deny'].includes(options.decisionType)) throw new AclError('invalid_input', 'decisionType');
             await this.fields(reader);
