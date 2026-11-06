@@ -66,6 +66,10 @@ empty; both read as `''`.
 Every write takes a target: the ACL's application (`scope`) and an in-progress `updateSet` of that application. An
 installed Store application also needs `storeCustomization`, as with the metadata writer.
 
+Every write needs the `write` verb of the installed policy. Setting a non-blank `script` needs `execute` as well: the
+platform runs an ACL's script at every check of it (whether or not `advanced` is set, KB0685247), so it is code that
+runs on the instance, like a background script or a scheduled job. Clearing a script (`script: ''`) needs only write.
+
 ```typescript
 const target = { scope: { scope: 'x_acme_app' }, updateSet: setSysId };
 

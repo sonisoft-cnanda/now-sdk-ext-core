@@ -5,6 +5,8 @@ import { RoleElevation } from '../../../../src/sn/security/RoleElevation';
 import { MetadataFormWriter } from '../../../../src/sn/metadata/MetadataFormWriter';
 import { SessionManager } from '../../../../src/comm/http/SessionManager';
 import { ServiceNowInstance } from '../../../../src/sn/ServiceNowInstance';
+import { denyLayer, grantLayer, installPolicy, resetPolicyForTests } from '../../../../src/policy/Policy';
+import { isPolicyRefusal } from '../../../../src/policy/PolicyRefusal';
 
 const SCOPE = 'a'.repeat(32), SET = 'c'.repeat(32), OTHER_SCOPE = 'e'.repeat(32);
 const ROLES: Record<string, string> = { admin: '1'.repeat(32), itil: '2'.repeat(32), snc_internal: '3'.repeat(32), security_admin: '4'.repeat(32) };
@@ -175,6 +177,20 @@ describe('AclManager.create', () => {
         const result = await manager().create({ ...target, operation: 'read', table: 'incident', field: 'caller_id' });
         expect(result.acl!.roles.map(r => r.role)).toEqual(['snc_internal']);
         expect(result.warnings.join(' ')).toContain('every internal user passes it');
+    });
+
+    it('needs execute as well as write to set a script, and only write to set none or clear one', async () => {
+        installPolicy([denyLayer('test-deny', ['execute']), grantLayer('default', ['write', 'execute'])]);
+        try {
+            const refused = await manager().create({ ...target, operation: 'read', table: 'incident', roles: ['itil'], script: 'answer = true;' }).catch(e => e);
+            expect(isPolicyRefusal(refused)).toBe(true);
+            expect(writes).toEqual([]);
+            const created = await manager().create({ ...target, operation: 'read', table: 'incident', roles: ['itil'] });
+            expect(isPolicyRefusal(await manager().update(created.acl!.sysId, { ...target, script: 'gs.info(1);' }).catch(e => e))).toBe(true);
+            await expect(manager().update(created.acl!.sysId, { ...target, script: '' })).resolves.toBeDefined();
+        } finally {
+            resetPolicyForTests();
+        }
     });
 
     it('does not activate when the roles on the ACL are not exactly those asked for', async () => {

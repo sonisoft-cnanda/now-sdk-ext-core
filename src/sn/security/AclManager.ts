@@ -9,7 +9,8 @@ import { AclError, AclPartialError, AclState } from './AclError';
 import type { AclCreateOptions, AclDeleteOptions, AclListOptions, AclRecord, AclRole, AclUpdateOptions, AclWriteResult, AclWriteTarget } from './AclModels';
 import { RoleElevation } from './RoleElevation';
 import { accessControlWriters } from '../metadata/internal/AccessControlWriters';
-import { isPolicyRefusal } from '../../policy/PolicyRefusal';
+import { isPolicyRefusal, policyRefusal } from '../../policy/PolicyRefusal';
+import { checkRequirement } from '../../policy/Policy';
 
 const ID = /^[a-f0-9]{32}$/i;
 const IDENT = /^[a-z0-9_]{1,80}$/i;
@@ -261,7 +262,15 @@ export class AclManager {
         const fields: Record<string, FormValueInput> = {};
         if (options.description !== undefined) fields.description = options.description;
         if (options.condition !== undefined) fields.condition = options.condition;
-        if (options.script !== undefined) Object.assign(fields, { advanced: true, script: options.script });
+        if (options.script !== undefined) {
+            // An ACL's script runs on the instance at every check of it: setting one is running code, so it needs execute
+            // as well as write, as a background script or a scheduled job does. Clearing it runs nothing.
+            if (options.script.trim()) {
+                const decision = checkRequirement({ verbs: ['write', 'execute'], target: 'instance' });
+                if (!decision.allowed) throw policyRefusal(decision);
+            }
+            Object.assign(fields, { advanced: true, script: options.script });
+        }
         if (options.decisionType !== undefined) {
             if (!['allow', 'deny'].includes(options.decisionType)) throw new AclError('invalid_input', 'decisionType');
             await this.fields(reader);
