@@ -4,7 +4,8 @@ import { MetadataScopeError } from '../../../../src/sn/metadata/MetadataScopeErr
 import { MetadataVerificationError } from '../../../../src/sn/metadata/MetadataVerificationError';
 import { SessionManager } from '../../../../src/comm/http/SessionManager';
 import { ServiceNowInstance } from '../../../../src/sn/ServiceNowInstance';
-import { policyRefusal } from '../../../../src/policy/PolicyRefusal';
+import { isPolicyRefusal, policyRefusal } from '../../../../src/policy/PolicyRefusal';
+import { denyLayer, grantLayer, installPolicy, resetPolicyForTests } from '../../../../src/policy/Policy';
 import { accessControlWriters } from '../../../../src/sn/metadata/internal/AccessControlWriters';
 
 const S = 'a'.repeat(32), R = 'b'.repeat(32), SET = 'c'.repeat(32), OTHER = 'd'.repeat(32), U = 'e'.repeat(32), A = 'f'.repeat(32);
@@ -50,6 +51,8 @@ beforeEach(() => {
             return response([{ sys_id: '5'.repeat(32), name: state.ancestry, super_class: state.cycle ? '5'.repeat(32) : state.grandparent ? '6'.repeat(32) : '' }]);
         }
         if (t === 'sys_user') return response([{ sys_id: U }]);
+        // The table's code columns (script types and server conditions), as the dictionary lists them.
+        if (t === 'sys_dictionary' && q.includes('internal_typeIN')) return response((state.codeColumns ?? ['script']).map((element: string, i: number) => ({ sys_id: String(i).repeat(32), element })));
         if (t === 'sys_user_preference') return response(state.incompletePreferences && captured ? [...prefs,prefs[0]] : prefs.map(x => ({...x})));
         if (t === 'sys_update_set') {
             const id = q.slice(7).split('^')[0];
@@ -601,5 +604,47 @@ describe('catalog variable references: the owner cannot be faked', () => {
         state.savedItem = OTHER_ITEM;
         await expect(writer.insert('catalog_script_client', { scope: { sysId: S }, fields: { cat_item: ITEM, cat_variable: `IO:${VAR}` } }))
             .rejects.toMatchObject({ code: 'write_not_applied', writeAttempted: true });
+    });
+});
+
+describe('MetadataFormWriter: code needs execute', () => {
+    beforeEach(() => installPolicy([denyLayer('test-deny', ['execute']), grantLayer('default', ['write', 'execute'])]));
+    afterEach(() => resetPolicyForTests());
+    const refused = async (promise: Promise<unknown>) => {
+        const error: any = await promise.catch(e => e);
+        expect(isPolicyRefusal(error)).toBe(true);
+        expect(error.decision.verbs).toEqual(expect.arrayContaining(['write', 'execute']));
+        expect(error.message).toContain('code that runs on the instance');
+    };
+
+    it('refuses setting a script column, or a javascript: value anywhere, before posting', async () => {
+        await refused(writer.insert(TABLE, { scope: { sysId: S }, fields: { name: 'x_t', script: 'gs.info(1);', active: false } }));
+        await refused(writer.update(TABLE, R, { scope: { sysId: S }, fields: { name: 'javascript:gs.info(1)' } }));
+        await refused(writer.update(TABLE, R, { scope: { sysId: S }, variables: { script: 'javascript:gs.info(1)' } }));
+        expect(req.post).not.toHaveBeenCalled();
+    });
+
+    it('refuses switching on a record whose code column holds code', async () => {
+        // The form holds script "old" and active "false".
+        await refused(writer.update(TABLE, R, { scope: { sysId: S }, fields: { active: true } }));
+        expect(req.post).not.toHaveBeenCalled();
+    });
+
+    it('lets write alone change what is not code, clear code, or insert inactive', async () => {
+        await expect(writer.update(TABLE, R, { scope: { sysId: S }, fields: { name: 'renamed' } })).resolves.toBeDefined();
+        await expect(writer.update(TABLE, R, { scope: { sysId: S }, fields: { script: '' } })).resolves.toBeDefined();
+        await expect(writer.insert(TABLE, { scope: { sysId: S }, fields: { name: 'x_t', active: false } })).resolves.toBeDefined();
+        // A table without code columns: switching on needs only write.
+        state.codeColumns = [];
+        await expect(writer.update(TABLE, R, { scope: { sysId: S }, fields: { active: true } })).resolves.toBeDefined();
+    });
+
+    it('allows code when execute is granted, and never checks a delete', async () => {
+        resetPolicyForTests();
+        await expect(writer.insert(TABLE, { scope: { sysId: S }, fields: { name: 'x_t', script: 'gs.info(1);', active: true } })).resolves.toBeDefined();
+        installPolicy([denyLayer('test-deny', ['execute']), grantLayer('default', ['write', 'execute'])]);
+        const dictionary = req.get.mock.calls.length;
+        await writer.delete(TABLE, R, { scope: { sysId: S }, confirm: { table: TABLE, sysId: R } }).catch(() => undefined);
+        expect(req.get.mock.calls.slice(dictionary).some(([r]: any[]) => String(r.query?.sysparm_query).includes('internal_typeIN'))).toBe(false);
     });
 });

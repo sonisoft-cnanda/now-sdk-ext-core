@@ -96,3 +96,18 @@ Run the committed integration lifecycle before claiming support for another fami
 This API does not publish an application or promote a change. Form layouts use
 [FormLayoutWriter](./FormLayoutWriter.md); creating, completing and restoring sets use
 [WorkingSetManager](./WorkingSetManager.md).
+
+## Code needs execute
+
+Writing code needs the `execute` verb of the installed policy as well as `write`, as a background script, a scheduled job
+or an ACL's script does. Before anything is posted, a write counts as carrying code when:
+
+- it sets a non-blank value in one of the table's code columns: dictionary types `script`, `script_plain`,
+  `script_server` and `condition_string`, across the table's lineage;
+- it sets a `javascript:` value in any field or variable;
+- it switches on a record whose code columns hold code: an insert that leaves the record active (a new business rule,
+  say), or `active` set true on an inactive one.
+
+Clearing code, changing fields that are not code, inserting inactive, and deleting need only write. The request gate
+classifies the form by table and cannot tell a script from a description, so a Table API or XML write of the same record
+needs only write there; `ScriptSync.pushScript` requires write and execute for the same reason.

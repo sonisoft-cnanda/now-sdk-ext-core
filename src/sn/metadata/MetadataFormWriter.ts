@@ -3,7 +3,9 @@ import { InvalidParameterException } from '../../exception/InvalidParameterExcep
 import { FormSubmitError } from '../../exception/FormSubmitError';
 import { createFormTransport } from '../../comm/http/FormRecordWriter';
 import { SessionManager } from '../../comm/http/SessionManager';
-import { isPolicyRefusal } from '../../policy/PolicyRefusal';
+import { isPolicyRefusal, policyRefusal } from '../../policy/PolicyRefusal';
+import { checkRequirement } from '../../policy/Policy';
+import { Logger } from '../../util/Logger';
 import { stripSecretsFromError } from '../../util/redact';
 import type { ServiceNowInstance } from '../ServiceNowInstance';
 import type { MetadataWriteOptions, MetadataDeleteOptions, MetadataWriteResult, CaptureReport } from './MetadataModels';
@@ -28,6 +30,8 @@ const WRITE_DENY = new Set(['sys_update_set', 'sys_update_xml', 'sys_scope', 'sy
  * They stay in WRITE_DENY for the generic writer: an ACL written field by field skips AclManager's safeguards (the
  * platform's snc_internal role on a role-less ACL, staging before activation). Only AclManager opts in.
  */
+/** Dictionary types whose values the instance runs: scripts, and the server-side condition of a rule or action. */
+const CODE_TYPES = new Set(['script', 'script_plain', 'script_server', 'condition_string']);
 const ELEVATED_TABLES: Record<string, string> = { sys_security_acl: 'security_admin', sys_security_acl_role: 'security_admin' };
 /** Columns named sys_* that are a table's own data, not system fields: an ACL role row is nothing but its two references. */
 const SYSTEM_NAMED_FIELDS: Record<string, string[]> = { sys_security_acl_role: ['sys_security_acl', 'sys_user_role'] };
@@ -52,6 +56,7 @@ function ownerFields(rule: VariableReferenceRule): string[] {
 
 /** Scoped metadata CRUD. All form work uses the internal FormRecordWriter seam. */
 export class MetadataFormWriter {
+    private readonly _logger = new Logger('MetadataFormWriter');
     public constructor(private _instance: ServiceNowInstance) {}
     public insert(table: string, options: MetadataWriteOptions): Promise<MetadataWriteResult> {
         return this.write('insert', table, '-1', options);
@@ -118,6 +123,38 @@ export class MetadataFormWriter {
     }
 
     /** Checks the table may be written here; returns it and the tables it extends, nearest first. */
+    /**
+     * Code is executable: writing it needs execute as well as write, as a background script, a scheduled job or an ACL's
+     * script does. A write carries code when it sets a non-blank value in one of the table's code columns (script types
+     * and server conditions, from the dictionary across the table's lineage) or a javascript: value anywhere; and when it
+     * switches on a record whose code columns hold code (an insert that leaves it active, or active set true on an
+     * inactive one). Checked before anything is posted. The request gate cannot see this: it classifies the form by
+     * table, and a Table API or XML write of the same record needs only write there.
+     */
+    private async requireExecuteForCode(reader: MetadataReader, lineage: string[], table: string, operation: 'insert' | 'update',
+        controls: Record<string, { value: string }>, options: MetadataWriteOptions): Promise<void> {
+        const fields = options.fields ?? {};
+        const asText = (value: unknown): string => typeof value === 'string' ? value : Array.isArray(value) ? value.join(',') : '';
+        let code = [...Object.values(fields), ...Object.values(options.variables ?? {})].some(value => /javascript:/i.test(asText(value)));
+        const rows = await reader.rows('sys_dictionary', `nameIN${lineage.join(',')}^internal_typeIN${[...CODE_TYPES].join(',')}`, 'sys_id,element');
+        const columns = new Set(rows.map(row => row.element).filter(element => NAME.test(element)));
+        if (!code) code = Object.entries(fields).some(([field, value]) => columns.has(field) && asText(value).trim() !== '');
+        if (!code && columns.size) {
+            const active = (value: unknown): boolean => value === true || value === 'true' || value === '1';
+            const wasActive = active(controls[`${table}.active`]?.value);
+            const switchedOn = operation === 'insert' ? (fields.active === undefined ? wasActive : active(fields.active)) :
+                fields.active !== undefined && active(fields.active) && !wasActive;
+            if (switchedOn) code = [...columns].some(column => asText(fields[column] ?? controls[`${table}.${column}`]?.value).trim() !== '');
+        }
+        if (!code) return;
+        const decision = checkRequirement({ verbs: ['write', 'execute'], target: 'instance' });
+        if (decision.allowed) return;
+        this._logger.warn('Refused metadata that carries code', { table, operation, verbs: decision.verbs, decidingLayer: decision.decidingLayer });
+        const why = 'The write sets or switches on code that runs on the instance (a script, a server condition or a javascript: ' +
+            'value), so it needs execute as well as write.';
+        throw policyRefusal({ ...decision, remediation: decision.remediation ? `${decision.remediation} ${why}` : why });
+    }
+
     private async table(reader: MetadataReader, table: string, deleting: boolean): Promise<string[]> {
         const visited = new Set<string>();
         const names: string[] = [];
@@ -223,6 +260,7 @@ export class MetadataFormWriter {
                 });
                 throw new MetadataScopeError('field_not_supported', rejected ? { field: rejected, table } : undefined);
             }
+            if (operation !== 'delete') await this.requireExecuteForCode(reader, lineage, table, operation, form.fields, writeOptions);
             // Form GETs are part of the measured interval: never replace the original baseline.
             const loaded = await preferences();
             if (!comparePreferences(before, loaded).valid) throw new MetadataVerificationError('session_changed', table, recordId, undefined, [], false);

@@ -1,6 +1,8 @@
 import * as fs from 'fs';
 import { ServiceNowInstance } from "../ServiceNowInstance";
 import { Logger } from "../../util/Logger";
+import { checkRequirement } from "../../policy/Policy";
+import { policyRefusal } from "../../policy/PolicyRefusal";
 import { ServiceNowRequest } from "../../comm/http/ServiceNowRequest";
 import { TableAPIRequest } from "../../comm/http/TableAPIRequest";
 import { IHttpResponse } from "../../comm/http/IHttpResponse";
@@ -135,6 +137,10 @@ export class ScriptSync {
                 timestamp
             };
         }
+
+        // A pushed script runs on the instance: it needs execute as well as write, as any other code written to it does.
+        const decision = checkRequirement({ verbs: ['write', 'execute'], target: 'instance' });
+        if (!decision.allowed) throw policyRefusal(decision);
 
         try {
             this._logger.info(`Pushing '${scriptName}' to ${config.table}`);

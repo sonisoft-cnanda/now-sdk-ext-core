@@ -13,6 +13,8 @@ import { IHttpResponse } from '../../../../src/comm/http/IHttpResponse';
 import { AuthenticationHandlerFactory } from '../../../../src/auth/AuthenticationHandlerFactory';
 import { RequestHandlerFactory } from '../../../../src/comm/http/RequestHandlerFactory';
 import { SessionManager } from '../../../../src/comm/http/SessionManager';
+import { denyLayer, grantLayer, installPolicy, resetPolicyForTests } from '../../../../src/policy/Policy';
+import { isPolicyRefusal } from '../../../../src/policy/PolicyRefusal';
 
 // Define mock fs functions
 const mockWriteFileSync = jest.fn();
@@ -238,6 +240,19 @@ describe('ScriptSync - Unit Tests', () => {
                 'var MyScriptInclude = Class.create();',
                 'utf-8'
             );
+        });
+
+        it('refuses a push when execute is denied, before reading the file or the instance', async () => {
+            installPolicy([denyLayer('test-deny', ['execute']), grantLayer('default', ['write', 'execute'])]);
+            try {
+                const error = await scriptSync.pushScript({ scriptName: 'MyScriptInclude', scriptType: 'sys_script_include',
+                    filePath: '/tmp/MyScriptInclude.sys_script_include.js' }).catch(e => e);
+                expect(isPolicyRefusal(error)).toBe(true);
+                expect(mockReadFileSync).not.toHaveBeenCalled();
+                expect(mockRequestHandler.put).not.toHaveBeenCalled();
+            } finally {
+                resetPolicyForTests();
+            }
         });
 
         it('should return failure when script is not found', async () => {
