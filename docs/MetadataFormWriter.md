@@ -38,7 +38,7 @@ skip the platform rules [AclManager](./AclManager.md) handles (the `snc_internal
 only once the roles are in place). AclManager writes them through this writer with an internal opt-in, which also
 allows the role row's two `sys_*` references and checks that the writing session has `security_admin` elevated
 (`elevation_required` otherwise, before any form is loaded).
-An initial query accepts equality terms for ordinary fields. It cannot override system fields.
+An initial query accepts equality terms for ordinary fields. It cannot override system fields. Keys must be lowercase column names, each at most once (no `^OR`, `^NQ` or repeated columns).
 
 Pass `initialQuery`, `variables`, `variableField` and `view` as with `FormRecordWriter`.
 
@@ -105,7 +105,8 @@ or an ACL's script does. Before anything is posted, a write counts as carrying c
 - it sets a non-blank value in one of the table's code columns, directly or through `initialQuery`. Code columns are those
   with dictionary types `script`, `script_plain`, `script_server`, `script_client`, `condition_string`, `html_script`
   and `xml` (Jelly), across the table's lineage;
-- it sets a non-blank value in a code-typed variable, looked up by the variable's model (`var__m_<sys_id>`);
+- it sets a non-blank value in a code-typed variable, looked up by the variable's model (`var__m_<sys_id>`, or a named
+  model such as ATF's); a filled variable whose model cannot be named counts as code;
 - it sets a `javascript:` value in any field, initial-query term or variable;
 - it switches on a record whose code columns hold code. On an insert, the record is live unless it stays inactive (a
   table with no `active` column is always live). On an update, setting `active` on (any value but `false`, `0` or blank)

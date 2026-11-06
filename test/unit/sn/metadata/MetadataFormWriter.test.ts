@@ -640,7 +640,7 @@ describe('MetadataFormWriter: code needs execute', () => {
 
     it('refuses code set through the initial query, and query forms the gate could not read', async () => {
         await refused(writer.insert(TABLE, { scope: { sysId: S }, initialQuery: 'name=x_t^script=gs.info(1)', fields: { active: false } }));
-        for (const initialQuery of ['ORscript=gs.info(1)', 'SCRIPT=gs.info(1)', 'active=true^active=false', 'script=^script=gs.info(1)']) {
+        for (const initialQuery of ['name=x^ORscript=gs.info(1)', 'SCRIPT=gs.info(1)', 'active=true^active=false', 'script=^script=gs.info(1)']) {
             await expect(writer.insert(TABLE, { scope: { sysId: S }, initialQuery, fields: { active: false } }))
                 .rejects.toMatchObject({ code: 'field_not_supported' });
         }
@@ -652,7 +652,7 @@ describe('MetadataFormWriter: code needs execute', () => {
         await refused(writer.update(TABLE, R, { scope: { sysId: S }, variables: { script: 'plain text' } }));
         state.oddModel = false; state.atf = true;
         await expect(writer.update(TABLE, R, { scope: { sysId: S }, variableField: 'nonexistent', variables: { script: 'plain text' } }))
-            .rejects.toBeInstanceOf(Error);
+            .rejects.toMatchObject({ code: 'field_not_supported' });
         expect(req.post).not.toHaveBeenCalled();
     });
 
