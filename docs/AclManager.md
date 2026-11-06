@@ -55,8 +55,10 @@ await acls.list({ scope: { scope: 'x_acme_app' }, operation: 'write' });
 await acls.get(sysId);
 ```
 
-`list` needs at least one of `table`, `name` or `scope`. Reading needs no elevation. A role row naming
-`security_admin` shows an empty role name until the session is elevated, because that role is hidden until then.
+`list` needs at least one of `table`, `name` or `scope`. Reading needs no elevation. A role the session may not
+read has an empty name (its `roleSysId` is still there): `security_admin` until the session is elevated, and `nobody`
+and `maint` always, elevated or not. The Table API sometimes leaves such a name out of a row instead of sending it
+empty; both read as `''`.
 
 ## Writing
 

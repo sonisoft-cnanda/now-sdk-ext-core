@@ -6,7 +6,7 @@ export interface AclRole {
     sysId: string;
     /** sys_user_role sys_id. */
     roleSysId: string;
-    /** Role name; '' when the session may not read it (security_admin is hidden until elevated). */
+    /** Role name; '' when the session may not read it: security_admin until elevated, nobody and maint always. */
     role: string;
 }
 
