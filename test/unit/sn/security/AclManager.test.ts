@@ -177,6 +177,14 @@ describe('AclManager.create', () => {
         expect(result.warnings.join(' ')).toContain('every internal user passes it');
     });
 
+    it('counts a script as a restriction even when advanced is off, since the platform runs it', async () => {
+        const sysId = (await manager().create({ ...target, operation: 'read', table: 'incident', field: 'caller_id' })).acl!.sysId;
+        acls.set(sysId, { ...acls.get(sysId)!, advanced: 'false', script: 'answer = gs.getUser().isMemberOf("x");' });
+        const result = await manager().update(sysId, { ...target, description: 'Members read the caller' });
+        expect(result.acl!.advanced).toBe(false);
+        expect(result.warnings.join(' ')).not.toContain('every internal user passes it');
+    });
+
     it('does not activate when the roles on the ACL are not exactly those asked for', async () => {
         extraRole = true;
         const error = await manager().create({ ...target, operation: 'read', table: 'incident', roles: ['itil'] }).catch(e => e);
