@@ -144,7 +144,7 @@ export class MetadataFormWriter {
         const on = (value: unknown): boolean => !['false', '0', ''].includes(asText(value).trim().toLowerCase());
         const storedOn = (value: unknown): boolean => ['true', '1'].includes(asText(value).trim().toLowerCase());
         const filled = (value: unknown): boolean => asText(value).trim() !== '';
-        // Every initial-query term is checked on its own, whatever the platform makes of a repeated key.
+        // write() refuses repeated or non-lowercase initial-query keys, so each term is one column's value.
         const termList = (options.initialQuery ?? '').split('^').filter(Boolean)
             .map(term => [term.slice(0, term.indexOf('=')), term.slice(term.indexOf('=') + 1)] as [string, string]);
         const fields: Record<string, unknown> = { ...Object.fromEntries(termList), ...(options.fields ?? {}) };
@@ -216,7 +216,11 @@ export class MetadataFormWriter {
         if (!options?.scope) throw new MetadataScopeError('scope_required');
         if (options.updateSet !== undefined && !ID.test(options.updateSet)) throw new MetadataScopeError('invalid_input');
         const initialQuery = (options as MetadataWriteOptions).initialQuery;
-        if (initialQuery && initialQuery.split('^').some(term => !/^(?!sys_)[a-z0-9_]+=[^^]*$/i.test(term) || /javascript:/i.test(term))) {
+        // Lowercase column names only (no ^OR / ^NQ joins, no case variants) and each column once, so the terms the gate
+        // checks are exactly the values the platform sets.
+        const queryKeys = (initialQuery ?? '').split('^').filter(Boolean).map(term => term.slice(0, term.indexOf('=')));
+        if (initialQuery && (initialQuery.split('^').some(term => !/^(?!sys_)[a-z0-9_]+=[^^]*$/.test(term) || /javascript:/i.test(term)) ||
+            new Set(queryKeys).size !== queryKeys.length)) {
             throw new MetadataScopeError('field_not_supported');
         }
         let submitted = false;

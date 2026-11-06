@@ -25,7 +25,7 @@ function form(table = TABLE, id = '-1') {
 <input name="sysparm_ck" value="page-sentinel"><input name="sysparm_ck" id="duplicate" value="page-sentinel">
 <input name="sys_original.name" value="original"><input name="${table}.name" value="old"><input name="${table}.element" value=""><input name="${table}.language" value="">
 <textarea name="${table}.script">${state.formScript ?? 'old'}</textarea><input name="${table}.active" value="${state.formActive ?? 'false'}">
-${state.atf ? `<textarea name="${table}.inputs.var__m_atf_input_variable_aa.script"></textarea><textarea name="${table}.outputs.var__m_atf_output_variable_bb.script"></textarea>` : `<textarea name="${table}.inputs.var__m_${A}.script"></textarea>`}
+${state.oddModel ? `<textarea name="${table}.inputs.var__m_Odd.script"></textarea>` : state.atf ? `<textarea name="${table}.inputs.var__m_atf_input_variable_aa.script"></textarea><textarea name="${table}.outputs.var__m_atf_output_variable_bb.script"></textarea>` : `<textarea name="${table}.inputs.var__m_${A}.script"></textarea>`}
 <input name="${table}.cat_item" value=""><input name="${table}.catalog_item" value=""><input name="${table}.variable_set" value=""><input name="${table}.type" value="">
 <select name="${table}.cat_variable"><option value="">-- None --</option></select><select name="${table}.catalog_variable"><option value="">-- None --</option></select>
 ${state.missingAction ? '' : `<button data-action-name="sysverb_insert_and_stay" gsft_id="${A}"></button><button data-action-name="sysverb_update" gsft_id="${A}"></button><button data-action-name="sysverb_delete" gsft_id="${A}"></button>`}</form>`;
@@ -638,9 +638,27 @@ describe('MetadataFormWriter: code needs execute', () => {
         expect(req.post).not.toHaveBeenCalled();
     });
 
-    it('refuses code set through the initial query', async () => {
-        await refused(writer.insert(TABLE, { scope: { sysId: S }, initialQuery: 'script=gs.info(1)', fields: { active: false } }));
+    it('refuses code set through the initial query, and query forms the gate could not read', async () => {
+        await refused(writer.insert(TABLE, { scope: { sysId: S }, initialQuery: 'name=x_t^script=gs.info(1)', fields: { active: false } }));
+        for (const initialQuery of ['ORscript=gs.info(1)', 'SCRIPT=gs.info(1)', 'active=true^active=false', 'script=^script=gs.info(1)']) {
+            await expect(writer.insert(TABLE, { scope: { sysId: S }, initialQuery, fields: { active: false } }))
+                .rejects.toMatchObject({ code: 'field_not_supported' });
+        }
         expect(req.post).not.toHaveBeenCalled();
+    });
+
+    it('counts a filled variable whose model cannot be named as code, and refuses an unknown variable column earlier', async () => {
+        state.oddModel = true;
+        await refused(writer.update(TABLE, R, { scope: { sysId: S }, variables: { script: 'plain text' } }));
+        state.oddModel = false; state.atf = true;
+        await expect(writer.update(TABLE, R, { scope: { sysId: S }, variableField: 'nonexistent', variables: { script: 'plain text' } }))
+            .rejects.toBeInstanceOf(Error);
+        expect(req.post).not.toHaveBeenCalled();
+    });
+
+    it('treats a stored active that is blank as off', async () => {
+        state.storedActive = ''; state.storedScript = 'gs.info(1);';
+        await refused(writer.update(TABLE, R, { scope: { sysId: S }, fields: { active: true } }));
     });
 
     it('refuses a plain script in a code-typed variable', async () => {
