@@ -42,6 +42,12 @@ application. `useUpdateSet` saves all three and reads them back.
 | `moveCapture({ capture, sourceSet, targetSet, reason })` | moves one `sys_update_xml` row between In progress sets of its own application, appends the reason to `comments`, reads the move back | `capture_not_in_source`, `update_set_closed`, `default_update_set`, `scope_mismatch`, `duplicate_capture`, `newer_capture_exists`, `move_not_applied` |
 | `completeUpdateSet(sysId, { expectedCaptures })` | sets Complete after checking the set, reads the state back, then counts the captures again | `update_set_closed`, `default_update_set`, `capture_count_mismatch` (also after completion, with `detail.state: 'complete'`, when a capture arrived during it), `mixed_scope_capture`, `duplicate_capture`, `update_set_in_use` (another user's preference points at the set), `complete_not_applied` |
 
+`moveCapture` and `completeUpdateSet` write one record of the set's (or capture's) application. They send
+`sysparm_transaction_scope` with that application, because the platform's design-time scope fence otherwise refuses a
+Table API write to another application's record (403 "ACL Exception Update Failed due to security constraints") unless
+it is the session's current application. The user's current application is left as it is. A write the platform still
+refuses is reported as `move_not_applied` / `complete_not_applied` with its HTTP `status`, after the read-back.
+
 `WorkingSetError.detail` holds only sys_ids, states and counts. It never holds names,
 descriptions or payloads.
 
