@@ -149,6 +149,9 @@ describe('SessionManager', () => {
             expect(plainRequest).not.toBe(elevatedRequest);
             expect(elevatedRequest.getInstance()).toBe(elevated);
             expect(mockAuthHandler.doLogin).toHaveBeenCalledTimes(2);
+            // Both stay cached: neither login replaced the other's session.
+            expect(mgr.getRequest(plain)).toBe(plainRequest);
+            expect(mgr.getRequest(elevated)).toBe(elevatedRequest);
         });
 
         it('drops an elevated login still in flight when the alias is cleared', async () => {
@@ -161,10 +164,11 @@ describe('SessionManager', () => {
             const mgr = SessionManager.getInstance();
             const inFlight = mgr.getAuthenticatedRequest(elevated);
             mgr.clearSession('dev01');
+            // Before the login settles, only clearSession can have removed the pending entry.
+            expect((mgr as any)._authPromises.has('dev01#elevated:security_admin')).toBe(false);
             releaseLogin!();
             await inFlight;
 
-            expect((mgr as any)._authPromises.has('dev01#elevated:security_admin')).toBe(false);
             expect(mgr.getRequest(elevated)).not.toBe(await inFlight);
         });
 
