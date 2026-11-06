@@ -25,9 +25,10 @@ const instance = new ServiceNowInstance({ alias, credential, credentialProvider,
 ```
 
 Every session for that instance then elevates as it logs in, renewals included, and the login checks the roles are
-active. Use one `ServiceNowInstance` per alias in a process: `SessionManager` keys its shared session by alias, so
-alternating two instances of the same alias logs in again at each switch. If the roles are not active, the login fails
-with `RoleElevationError`:
+active. `SessionManager` keys its shared session by alias and elevated roles (`dev#elevated:security_admin`), so a
+long-lived process can keep a plain and an elevated instance of one alias side by side. Two instances with the same alias
+and the same roles still replace each other's session. `clearSession(alias)` clears the alias's elevated sessions too.
+If the roles are not active, the login fails with `RoleElevationError`:
 
 | Code | Meaning |
 | --- | --- |

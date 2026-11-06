@@ -22,7 +22,7 @@ The `ActiveSessionRegistry` solves this by assigning a unique ID to each workflo
 
 | Component | Scope | Keyed By | Stores |
 |-----------|-------|----------|--------|
-| `SessionManager` | HTTP session deduplication | Instance alias | `ServiceNowRequest` (cookies, CSRF tokens) |
+| `SessionManager` | HTTP session deduplication | Instance alias (plus elevated roles, if any) | `ServiceNowRequest` (cookies, CSRF tokens) |
 | `ActiveSessionRegistry` | Workflow session lifecycle | UUID | Any resources (ScriptTracer, AMBClient, etc.) |
 
 They complement each other. `SessionManager` ensures one HTTP session per instance. `ActiveSessionRegistry` bundles higher-level stateful resources under an ID that can be passed across tool/command boundaries.

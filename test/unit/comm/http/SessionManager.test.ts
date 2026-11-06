@@ -1,6 +1,6 @@
 /**
  * Unit tests for SessionManager singleton
- * Caches ServiceNowRequest instances keyed by instance alias
+ * Caches ServiceNowRequest instances keyed by instance alias (and elevated roles)
  */
 
 import { describe, it, expect, beforeEach, jest } from '@jest/globals';
@@ -99,6 +99,90 @@ describe('SessionManager', () => {
 
             expect(req1).not.toBe(req2);
             expect(req2.getInstance()).toBe(instance2);
+        });
+
+        it('keeps an elevated instance\'s session apart from the plain one under the same alias', () => {
+            const plain = createMockInstance('dev01');
+            const elevated = new ServiceNowInstance({ alias: 'dev01', host: 'dev01.service-now.com', elevatedRoles: ['security_admin'] });
+            const mgr = SessionManager.getInstance();
+
+            const plainRequest = mgr.getRequest(plain);
+            const elevatedRequest = mgr.getRequest(elevated);
+
+            expect(elevatedRequest).not.toBe(plainRequest);
+            expect(elevatedRequest.getInstance()).toBe(elevated);
+            expect(plainRequest.getInstance()).toBe(plain);
+            // Neither replaces the other: each is handed its own request again.
+            expect(mgr.getRequest(plain)).toBe(plainRequest);
+            expect(mgr.getRequest(elevated)).toBe(elevatedRequest);
+            expect(mgr.hasSession('dev01')).toBe(true);
+            expect(mgr.hasSession('dev01#elevated:security_admin')).toBe(true);
+        });
+
+        it('shares one elevated key for the same roles in any order, and separates other role sets', () => {
+            const mgr = SessionManager.getInstance();
+            const ab = new ServiceNowInstance({ alias: 'dev01', host: 'dev01.service-now.com', elevatedRoles: ['b_role', 'a_role'] });
+            mgr.getRequest(ab);
+            expect(mgr.hasSession('dev01#elevated:a_role,b_role')).toBe(true);
+            const other = new ServiceNowInstance({ alias: 'dev01', host: 'dev01.service-now.com', elevatedRoles: ['a_role'] });
+            expect(mgr.getRequest(other)).not.toBe(mgr.getRequest(ab));
+            expect(mgr.hasSession('dev01#elevated:a_role')).toBe(true);
+        });
+
+        it('refuses an alias that contains the elevation marker', () => {
+            expect(() => SessionManager.getInstance().getRequest(createMockInstance('dev01#elevated:security_admin'))).toThrow(/may not contain/);
+        });
+
+        it('never lets a plain and an elevated login of one alias share a pending authentication', async () => {
+            mockAuthHandler.isLoggedIn = jest.fn().mockReturnValue(false);
+            let releaseLogin: () => void;
+            const loginGate = new Promise<void>((resolve) => { releaseLogin = resolve; });
+            mockAuthHandler.doLogin = jest.fn(() => loginGate) as any;
+            const plain = createMockInstance('dev01');
+            const elevated = new ServiceNowInstance({ alias: 'dev01', host: 'dev01.service-now.com', elevatedRoles: ['security_admin'] });
+
+            const mgr = SessionManager.getInstance();
+            const both = Promise.all([mgr.getAuthenticatedRequest(plain), mgr.getAuthenticatedRequest(elevated)]);
+            releaseLogin!();
+            const [plainRequest, elevatedRequest] = await both;
+
+            expect(plainRequest).not.toBe(elevatedRequest);
+            expect(elevatedRequest.getInstance()).toBe(elevated);
+            expect(mockAuthHandler.doLogin).toHaveBeenCalledTimes(2);
+            // Both stay cached: neither login replaced the other's session.
+            expect(mgr.getRequest(plain)).toBe(plainRequest);
+            expect(mgr.getRequest(elevated)).toBe(elevatedRequest);
+        });
+
+        it('drops an elevated login still in flight when the alias is cleared', async () => {
+            mockAuthHandler.isLoggedIn = jest.fn().mockReturnValue(false);
+            let releaseLogin: () => void;
+            const loginGate = new Promise<void>((resolve) => { releaseLogin = resolve; });
+            mockAuthHandler.doLogin = jest.fn(() => loginGate) as any;
+            const elevated = new ServiceNowInstance({ alias: 'dev01', host: 'dev01.service-now.com', elevatedRoles: ['security_admin'] });
+
+            const mgr = SessionManager.getInstance();
+            const inFlight = mgr.getAuthenticatedRequest(elevated);
+            mgr.clearSession('dev01');
+            // Before the login settles, only clearSession can have removed the pending entry.
+            expect((mgr as any)._authPromises.has('dev01#elevated:security_admin')).toBe(false);
+            releaseLogin!();
+            await inFlight;
+
+            expect(mgr.getRequest(elevated)).not.toBe(await inFlight);
+        });
+
+        it('clears an alias\'s elevated sessions with it, and only that alias\'s', () => {
+            const mgr = SessionManager.getInstance();
+            mgr.getRequest(createMockInstance('dev01'));
+            mgr.getRequest(new ServiceNowInstance({ alias: 'dev01', host: 'dev01.service-now.com', elevatedRoles: ['security_admin'] }));
+            mgr.getRequest(new ServiceNowInstance({ alias: 'dev011', host: 'dev011.service-now.com', elevatedRoles: ['security_admin'] }));
+
+            mgr.clearSession('dev01');
+
+            expect(mgr.hasSession('dev01')).toBe(false);
+            expect(mgr.hasSession('dev01#elevated:security_admin')).toBe(false);
+            expect(mgr.hasSession('dev011#elevated:security_admin')).toBe(true);
         });
 
         it('returns DIFFERENT requests for different aliases', () => {

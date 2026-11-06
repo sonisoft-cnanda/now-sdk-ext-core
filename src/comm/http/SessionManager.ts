@@ -2,8 +2,12 @@ import { ServiceNowInstance } from "../../sn/ServiceNowInstance";
 import { ServiceNowRequest } from "./ServiceNowRequest";
 import { Logger } from "../../util/Logger";
 
+/** Separates an elevated session's key from its alias: `dev#elevated:security_admin`. */
+const ELEVATED_KEY = '#elevated:';
+
 /**
- * Singleton registry of authenticated ServiceNowRequest instances keyed by instance alias.
+ * Singleton registry of authenticated ServiceNowRequest instances keyed by instance alias (or host), plus the
+ * instance's elevated roles when it has any: an elevated session is a separate server session.
  * Ensures all components sharing the same alias reuse the same HTTP session.
  */
 export class SessionManager {
@@ -29,13 +33,13 @@ export class SessionManager {
 
     /**
      * Get or create a ServiceNowRequest for this instance.
-     * Keyed by alias (falls back to host).
+     * Keyed by alias (falls back to host) and elevated roles.
      */
     getRequest(instance: ServiceNowInstance): ServiceNowRequest {
         const key = this.getKey(instance);
         let request = this._sessions.get(key);
 
-        // The key is alias-or-host, which says nothing about *which* ServiceNowInstance
+        // The key is alias-or-host (and elevation), which says nothing about *which* ServiceNowInstance
         // object asked. A consumer that rebuilds its connection — now-sdk-ext-mcp evicts
         // on a 30-minute TTL — passes a new instance under the same alias and would
         // otherwise be handed the previous one's request, still holding the previous
@@ -119,14 +123,19 @@ export class SessionManager {
     }
 
     /**
-     * Remove cached session for a given alias.
+     * Remove the cached sessions of an alias (or host): the plain one and every elevated one.
      */
     clearSession(alias: string): void {
         this._logger.debug(`Clearing session for alias: ${alias}`);
-        this._sessions.delete(alias);
-        // An auth started before the clear would otherwise resolve after it and hand
-        // the caller the request we just evicted.
-        this._authPromises.delete(alias);
+        // The alias's elevated sessions go with it: they log in with the same credentials.
+        const keys = [...new Set([...this._sessions.keys(), ...this._authPromises.keys()])]
+            .filter(key => key === alias || key.startsWith(`${alias}${ELEVATED_KEY}`));
+        for (const key of keys) {
+            this._sessions.delete(key);
+            // An auth started before the clear would otherwise resolve after it and hand
+            // the caller the request we just evicted.
+            this._authPromises.delete(key);
+        }
     }
 
     /**
@@ -139,7 +148,8 @@ export class SessionManager {
     }
 
     /**
-     * Check if a session exists for a given alias.
+     * Check if a session exists under a key: the alias (or host) for a plain session; an elevated
+     * session's key is `alias#elevated:<roles, sorted, comma-separated>`.
      */
     hasSession(alias: string): boolean {
         return this._sessions.has(alias);
@@ -150,6 +160,13 @@ export class SessionManager {
         if (!key) {
             throw new Error("ServiceNowInstance must have an alias or host to identify the session");
         }
-        return key;
+        // The marker would let a plain instance's key equal an elevated one's.
+        if (key.includes(ELEVATED_KEY)) {
+            throw new Error(`ServiceNowInstance alias or host may not contain "${ELEVATED_KEY}"`);
+        }
+        // An elevated session is a different server session: a long-lived consumer (now-sdk-ext-mcp) keeps a plain
+        // and an elevated instance for one alias side by side, and neither may replace the other's session.
+        const elevated = instance.elevatedRoles ?? [];
+        return elevated.length ? `${key}${ELEVATED_KEY}${[...elevated].sort().join(',')}` : key;
     }
 }
