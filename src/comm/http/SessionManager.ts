@@ -2,6 +2,9 @@ import { ServiceNowInstance } from "../../sn/ServiceNowInstance";
 import { ServiceNowRequest } from "./ServiceNowRequest";
 import { Logger } from "../../util/Logger";
 
+/** Separates an elevated session's key from its alias: `dev#elevated:security_admin`. */
+const ELEVATED_KEY = '#elevated:';
+
 /**
  * Singleton registry of authenticated ServiceNowRequest instances keyed by instance alias.
  * Ensures all components sharing the same alias reuse the same HTTP session.
@@ -123,10 +126,15 @@ export class SessionManager {
      */
     clearSession(alias: string): void {
         this._logger.debug(`Clearing session for alias: ${alias}`);
-        this._sessions.delete(alias);
-        // An auth started before the clear would otherwise resolve after it and hand
-        // the caller the request we just evicted.
-        this._authPromises.delete(alias);
+        // The alias's elevated sessions go with it: they log in with the same credentials.
+        const keys = [...new Set([...this._sessions.keys(), ...this._authPromises.keys()])]
+            .filter(key => key === alias || key.startsWith(`${alias}${ELEVATED_KEY}`));
+        for (const key of keys) {
+            this._sessions.delete(key);
+            // An auth started before the clear would otherwise resolve after it and hand
+            // the caller the request we just evicted.
+            this._authPromises.delete(key);
+        }
     }
 
     /**
@@ -150,6 +158,9 @@ export class SessionManager {
         if (!key) {
             throw new Error("ServiceNowInstance must have an alias or host to identify the session");
         }
-        return key;
+        // An elevated session is a different server session: a long-lived consumer (now-sdk-ext-mcp) keeps a plain
+        // and an elevated instance for one alias side by side, and neither may replace the other's session.
+        const elevated = instance.elevatedRoles ?? [];
+        return elevated.length ? `${key}${ELEVATED_KEY}${[...elevated].sort().join(',')}` : key;
     }
 }

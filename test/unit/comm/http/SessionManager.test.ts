@@ -101,6 +101,35 @@ describe('SessionManager', () => {
             expect(req2.getInstance()).toBe(instance2);
         });
 
+        it('keeps an elevated instance\'s session apart from the plain one under the same alias', () => {
+            const plain = createMockInstance('dev01');
+            const elevated = new ServiceNowInstance({ alias: 'dev01', host: 'dev01.service-now.com', elevatedRoles: ['security_admin'] });
+            const mgr = SessionManager.getInstance();
+
+            const plainRequest = mgr.getRequest(plain);
+            const elevatedRequest = mgr.getRequest(elevated);
+
+            expect(elevatedRequest).not.toBe(plainRequest);
+            // Neither replaces the other: each is handed its own request again.
+            expect(mgr.getRequest(plain)).toBe(plainRequest);
+            expect(mgr.getRequest(elevated)).toBe(elevatedRequest);
+            expect(mgr.hasSession('dev01')).toBe(true);
+            expect(mgr.hasSession('dev01#elevated:security_admin')).toBe(true);
+        });
+
+        it('clears an alias\'s elevated sessions with it, and only that alias\'s', () => {
+            const mgr = SessionManager.getInstance();
+            mgr.getRequest(createMockInstance('dev01'));
+            mgr.getRequest(new ServiceNowInstance({ alias: 'dev01', host: 'dev01.service-now.com', elevatedRoles: ['security_admin'] }));
+            mgr.getRequest(new ServiceNowInstance({ alias: 'dev011', host: 'dev011.service-now.com', elevatedRoles: ['security_admin'] }));
+
+            mgr.clearSession('dev01');
+
+            expect(mgr.hasSession('dev01')).toBe(false);
+            expect(mgr.hasSession('dev01#elevated:security_admin')).toBe(false);
+            expect(mgr.hasSession('dev011#elevated:security_admin')).toBe(true);
+        });
+
         it('returns DIFFERENT requests for different aliases', () => {
             const instance1 = createMockInstance('dev01');
             const instance2 = createMockInstance('prod01');
