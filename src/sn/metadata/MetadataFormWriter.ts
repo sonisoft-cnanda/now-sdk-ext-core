@@ -2,8 +2,11 @@ import { randomUUID } from 'node:crypto';
 import { InvalidParameterException } from '../../exception/InvalidParameterException';
 import { FormSubmitError } from '../../exception/FormSubmitError';
 import { createFormTransport } from '../../comm/http/FormRecordWriter';
+import type { FormSnapshot } from '../../comm/http/FormRecordModels';
 import { SessionManager } from '../../comm/http/SessionManager';
-import { isPolicyRefusal } from '../../policy/PolicyRefusal';
+import { isPolicyRefusal, policyRefusal } from '../../policy/PolicyRefusal';
+import { checkRequirement } from '../../policy/Policy';
+import { Logger } from '../../util/Logger';
 import { stripSecretsFromError } from '../../util/redact';
 import type { ServiceNowInstance } from '../ServiceNowInstance';
 import type { MetadataWriteOptions, MetadataDeleteOptions, MetadataWriteResult, CaptureReport } from './MetadataModels';
@@ -29,6 +32,10 @@ const WRITE_DENY = new Set(['sys_update_set', 'sys_update_xml', 'sys_scope', 'sy
  * platform's snc_internal role on a role-less ACL, staging before activation). Only AclManager opts in.
  */
 const ELEVATED_TABLES: Record<string, string> = { sys_security_acl: 'security_admin', sys_security_acl_role: 'security_admin' };
+/** Dictionary types whose values run: scripts (server and client), server conditions, and Jelly (html_script, xml). */
+const CODE_TYPES = new Set(['script', 'script_plain', 'script_server', 'script_client', 'condition_string', 'html_script', 'xml']);
+/** A variable model table: var__m_<sys_id>, or a named one such as ATF's var__m_atf_input_variable_<id>. */
+const MODEL = /^var__m_[a-z0-9_]{1,80}$/;
 /** Columns named sys_* that are a table's own data, not system fields: an ACL role row is nothing but its two references. */
 const SYSTEM_NAMED_FIELDS: Record<string, string[]> = { sys_security_acl_role: ['sys_security_acl', 'sys_user_role'] };
 const DELETE_DENY = new Set(['sys_documentation', 'sys_package', 'sys_app_module']);
@@ -52,6 +59,7 @@ function ownerFields(rule: VariableReferenceRule): string[] {
 
 /** Scoped metadata CRUD. All form work uses the internal FormRecordWriter seam. */
 export class MetadataFormWriter {
+    private readonly _logger = new Logger('MetadataFormWriter');
     public constructor(private _instance: ServiceNowInstance) {}
     public insert(table: string, options: MetadataWriteOptions): Promise<MetadataWriteResult> {
         return this.write('insert', table, '-1', options);
@@ -117,6 +125,70 @@ export class MetadataFormWriter {
         if (!belongs) refuse();
     }
 
+    /**
+     * Code is executable: writing it needs execute as well as write, as a background script, a scheduled job or an ACL's
+     * script does. A write carries code when, before anything is posted:
+     * - it sets a non-blank value in a code column of the table (CODE_TYPES, across its lineage), directly or through the
+     *   initial query, or in a code-typed variable (by the variable's model);
+     * - it sets a javascript: value in any field, initial-query term or variable;
+     * - it switches on a record whose code columns hold code: an insert left active (or on a table with no active
+     *   column), or an update that turns active on, read against the stored record rather than the form's view.
+     * The request gate cannot see any of this: it classifies the form by table, and a Table API, XML or workflow write of
+     * the same record needs only write there.
+     */
+    private async requireExecuteForCode(reader: MetadataReader, lineage: string[], table: string, operation: 'insert' | 'update',
+        recordId: string, form: FormSnapshot, options: MetadataWriteOptions): Promise<void> {
+        const asText = (value: unknown): string => typeof value === 'string' ? value : typeof value === 'number' || typeof value === 'boolean' ?
+            String(value) : Array.isArray(value) ? value.join(',') : '';
+        // Fail closed both ways: a value being written is on unless explicitly off; a stored state is off unless explicitly on.
+        const on = (value: unknown): boolean => !['false', '0', ''].includes(asText(value).trim().toLowerCase());
+        const storedOn = (value: unknown): boolean => ['true', '1'].includes(asText(value).trim().toLowerCase());
+        const filled = (value: unknown): boolean => asText(value).trim() !== '';
+        // write() refuses repeated or non-lowercase initial-query keys, so each term is one column's value.
+        const termList = (options.initialQuery ?? '').split('^').filter(Boolean)
+            .map(term => [term.slice(0, term.indexOf('=')), term.slice(term.indexOf('=') + 1)] as [string, string]);
+        const fields: Record<string, unknown> = { ...Object.fromEntries(termList), ...(options.fields ?? {}) };
+        const assignments: Array<[string, unknown]> = [...termList, ...Object.entries(options.fields ?? {})];
+        // The variable's model on the column the write targets (variableField), or on every column that has the element.
+        const controls = Object.values(form.variables ?? {});
+        const variables = Object.entries(options.variables ?? {}).map(([element, value]) => ({ element, value,
+            models: controls.filter(control => control.element === element && (!options.variableField || control.field === options.variableField))
+                .map(control => control.model) }));
+        let code = [...assignments.map(([, value]) => value), ...variables.map(variable => variable.value)].some(value => /javascript:/i.test(asText(value)));
+        // A filled variable whose model cannot be named cannot be checked: count it as code.
+        if (!code) code = variables.some(variable => filled(variable.value) && (!variable.models.length || variable.models.some(model => !MODEL.test(model ?? ''))));
+        const models = [...new Set(variables.flatMap(variable => variable.models).filter((model): model is string => MODEL.test(model ?? '')))];
+        // One lookup: the code columns of the table and of the variables' models, and whether the table has an active column.
+        const rows = await reader.rows('sys_dictionary', `nameIN${[...lineage, ...models].join(',')}^internal_typeIN${[...CODE_TYPES].join(',')}^ORelement=active`,
+            'sys_id,name,element,internal_type');
+        const columns = new Set(rows.filter(row => lineage.includes(row.name) && CODE_TYPES.has(row.internal_type) && NAME.test(row.element)).map(row => row.element));
+        const variableCode = new Set(rows.filter(row => models.includes(row.name) && CODE_TYPES.has(row.internal_type)).map(row => `${row.name}|${row.element}`));
+        const hasActive = rows.some(row => lineage.includes(row.name) && row.element === 'active');
+        if (!code) code = assignments.some(([field, value]) => columns.has(field) && filled(value));
+        if (!code) code = variables.some(variable => filled(variable.value) && variable.models.some(model => variableCode.has(`${model}|${variable.element}`)));
+        if (!code && columns.size) {
+            if (operation === 'insert') {
+                const control = form.fields[`${table}.active`];
+                const live = !hasActive || (fields.active !== undefined ? on(fields.active) : control ? on(control.value) : true);
+                // A code column the view does not show still gets its default: its value is unknown, so it counts as code.
+                if (live) code = [...columns].some(column => fields[column] !== undefined ? filled(fields[column]) :
+                    form.fields[`${table}.${column}`] ? filled(form.fields[`${table}.${column}`].value) : true);
+            } else if (hasActive && fields.active !== undefined && on(fields.active)) {
+                // The view may not show the code or the state: read both from the record.
+                const stored = await reader.exact(table, recordId, ['active', ...columns].join(','));
+                if (!stored) throw new MetadataScopeError('evidence_unavailable');
+                if (!storedOn(stored.active)) code = [...columns].some(column => filled(fields[column] ?? stored[column]));
+            }
+        }
+        if (!code) return;
+        const decision = checkRequirement({ verbs: ['write', 'execute'], target: 'instance' });
+        if (decision.allowed) return;
+        this._logger.warn('Refused metadata that carries code', { table, operation, verbs: decision.verbs, decidingLayer: decision.decidingLayer });
+        const why = 'The write sets or switches on code that runs on the instance (a script, a server condition, Jelly or a ' +
+            'javascript: value), so it needs execute as well as write.';
+        throw policyRefusal({ ...decision, remediation: `${decision.remediation} ${why}` });
+    }
+
     /** Checks the table may be written here; returns it and the tables it extends, nearest first. */
     private async table(reader: MetadataReader, table: string, deleting: boolean): Promise<string[]> {
         const visited = new Set<string>();
@@ -144,7 +216,11 @@ export class MetadataFormWriter {
         if (!options?.scope) throw new MetadataScopeError('scope_required');
         if (options.updateSet !== undefined && !ID.test(options.updateSet)) throw new MetadataScopeError('invalid_input');
         const initialQuery = (options as MetadataWriteOptions).initialQuery;
-        if (initialQuery && initialQuery.split('^').some(term => !/^(?!sys_)[a-z0-9_]+=[^^]*$/i.test(term) || /javascript:/i.test(term))) {
+        // Lowercase column names only (no ^OR / ^NQ joins, no case variants) and each column once, so the terms the gate
+        // checks are exactly the values the platform sets.
+        const queryKeys = (initialQuery ?? '').split('^').filter(Boolean).map(term => term.slice(0, term.indexOf('=')));
+        if (initialQuery && (initialQuery.split('^').some(term => !/^(?!sys_)[a-z0-9_]+=[^^]*$/.test(term) || /javascript:/i.test(term)) ||
+            new Set(queryKeys).size !== queryKeys.length)) {
             throw new MetadataScopeError('field_not_supported');
         }
         let submitted = false;
@@ -223,6 +299,7 @@ export class MetadataFormWriter {
                 });
                 throw new MetadataScopeError('field_not_supported', rejected ? { field: rejected, table } : undefined);
             }
+            if (operation !== 'delete') await this.requireExecuteForCode(reader, lineage, table, operation, recordId, form, writeOptions);
             // Form GETs are part of the measured interval: never replace the original baseline.
             const loaded = await preferences();
             if (!comparePreferences(before, loaded).valid) throw new MetadataVerificationError('session_changed', table, recordId, undefined, [], false);

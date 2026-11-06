@@ -4,7 +4,8 @@ import { MetadataScopeError } from '../../../../src/sn/metadata/MetadataScopeErr
 import { MetadataVerificationError } from '../../../../src/sn/metadata/MetadataVerificationError';
 import { SessionManager } from '../../../../src/comm/http/SessionManager';
 import { ServiceNowInstance } from '../../../../src/sn/ServiceNowInstance';
-import { policyRefusal } from '../../../../src/policy/PolicyRefusal';
+import { isPolicyRefusal, policyRefusal } from '../../../../src/policy/PolicyRefusal';
+import { denyLayer, grantLayer, installPolicy, resetPolicyForTests } from '../../../../src/policy/Policy';
 import { accessControlWriters } from '../../../../src/sn/metadata/internal/AccessControlWriters';
 
 const S = 'a'.repeat(32), R = 'b'.repeat(32), SET = 'c'.repeat(32), OTHER = 'd'.repeat(32), U = 'e'.repeat(32), A = 'f'.repeat(32);
@@ -23,8 +24,8 @@ function form(table = TABLE, id = '-1') {
 <input name="sysparm_transaction_scope" value="${state.formScope}"><input name="${table}.sys_scope" value="${state.formScope}">
 <input name="sysparm_ck" value="page-sentinel"><input name="sysparm_ck" id="duplicate" value="page-sentinel">
 <input name="sys_original.name" value="original"><input name="${table}.name" value="old"><input name="${table}.element" value=""><input name="${table}.language" value="">
-<textarea name="${table}.script">old</textarea><input name="${table}.active" value="false">
-<textarea name="${table}.inputs.var__m_${A}.script"></textarea>
+<textarea name="${table}.script">${state.formScript ?? 'old'}</textarea><input name="${table}.active" value="${state.formActive ?? 'false'}">
+${state.oddModel ? `<textarea name="${table}.inputs.var__m_Odd.script"></textarea>` : state.atf ? `<textarea name="${table}.inputs.var__m_atf_input_variable_aa.script"></textarea><textarea name="${table}.outputs.var__m_atf_output_variable_bb.script"></textarea>` : `<textarea name="${table}.inputs.var__m_${A}.script"></textarea>`}
 <input name="${table}.cat_item" value=""><input name="${table}.catalog_item" value=""><input name="${table}.variable_set" value=""><input name="${table}.type" value="">
 <select name="${table}.cat_variable"><option value="">-- None --</option></select><select name="${table}.catalog_variable"><option value="">-- None --</option></select>
 ${state.missingAction ? '' : `<button data-action-name="sysverb_insert_and_stay" gsft_id="${A}"></button><button data-action-name="sysverb_update" gsft_id="${A}"></button><button data-action-name="sysverb_delete" gsft_id="${A}"></button>`}</form>`;
@@ -50,6 +51,15 @@ beforeEach(() => {
             return response([{ sys_id: '5'.repeat(32), name: state.ancestry, super_class: state.cycle ? '5'.repeat(32) : state.grandparent ? '6'.repeat(32) : '' }]);
         }
         if (t === 'sys_user') return response([{ sys_id: U }]);
+        // The table's code columns (script types and server conditions), as the dictionary lists them.
+        if (t === 'sys_dictionary' && q.includes('internal_typeIN')) {
+            state.dictionaryQuery = q;
+            return response([
+                ...(state.codeColumns ?? ['script']).map((element: string, i: number) => ({ sys_id: String(i).repeat(32), name: TABLE, element, internal_type: 'script' })),
+                ...(state.noActive ? [] : [{ sys_id: '9'.repeat(32), name: TABLE, element: 'active', internal_type: 'boolean' }]),
+                ...(state.variableCode ?? []).map((row: any, i: number) => ({ sys_id: String(i + 5).repeat(32), internal_type: 'script', ...row })),
+            ]);
+        }
         if (t === 'sys_user_preference') return response(state.incompletePreferences && captured ? [...prefs,prefs[0]] : prefs.map(x => ({...x})));
         if (t === 'sys_update_set') {
             const id = q.slice(7).split('^')[0];
@@ -63,7 +73,8 @@ beforeEach(() => {
         if (t === 'item_option_new') return response(state.variable && q.startsWith(`sys_id=${state.variable.sys_id}`) ? [state.variable] : []);
         if (t === 'catalog_ui_policy') return response(state.policyRow && q.startsWith(`sys_id=${state.policyRow.sys_id}`) ? [state.policyRow] : []);
         if (t === 'sys_metadata_delete') return response(deleted && !state.noDeleteEvidence ? [{ sys_id: A, sys_metadata: R, sys_scope: S, sys_created_on: '2099-01-01 00:00:00' }] : []);
-        return response(stored ? [{...stored, sys_scope: state.recordScope, sys_policy: state.policy ?? '', name: 'x_t', element: 'f', language: 'en'}] : []);
+        return response(stored ? [{...stored, sys_scope: state.recordScope, sys_policy: state.policy ?? '', name: 'x_t', element: 'f', language: 'en',
+            active: state.storedActive ?? 'false', script: state.storedScript ?? 'stored-code'}] : []);
     }), post: jest.fn(async (r: any) => {
         if (state.refusal) throw state.refusal;
         if (state.postError) throw new Error('private-script-sentinel');
@@ -601,5 +612,118 @@ describe('catalog variable references: the owner cannot be faked', () => {
         state.savedItem = OTHER_ITEM;
         await expect(writer.insert('catalog_script_client', { scope: { sysId: S }, fields: { cat_item: ITEM, cat_variable: `IO:${VAR}` } }))
             .rejects.toMatchObject({ code: 'write_not_applied', writeAttempted: true });
+    });
+});
+
+describe('MetadataFormWriter: code needs execute', () => {
+    beforeEach(() => installPolicy([denyLayer('test-deny', ['execute']), grantLayer('default', ['write', 'execute'])]));
+    afterEach(() => resetPolicyForTests());
+    const refused = async (promise: Promise<unknown>) => {
+        const error: any = await promise.catch(e => e);
+        expect(isPolicyRefusal(error)).toBe(true);
+        expect(error.decision.verbs).toEqual(expect.arrayContaining(['write', 'execute']));
+        expect(error.message).toContain('code that runs on the instance');
+    };
+
+    it('looks up code columns across the whole table lineage', async () => {
+        state.ancestry = 'x_mid_table'; state.grandparent = true;
+        await expect(writer.update(TABLE, R, { scope: { sysId: S }, fields: { name: 'x' } })).resolves.toBeDefined();
+        expect(state.dictionaryQuery).toContain(`nameIN${TABLE},x_mid_table,sys_metadata^`);
+    });
+
+    it('refuses setting a script column, or a javascript: value anywhere, before posting', async () => {
+        await refused(writer.insert(TABLE, { scope: { sysId: S }, fields: { name: 'x_t', script: 'gs.info(1);', active: false } }));
+        await refused(writer.update(TABLE, R, { scope: { sysId: S }, fields: { name: 'javascript:gs.info(1)' } }));
+        await refused(writer.update(TABLE, R, { scope: { sysId: S }, variables: { script: 'javascript:gs.info(1)' } }));
+        expect(req.post).not.toHaveBeenCalled();
+    });
+
+    it('refuses code set through the initial query, and query forms the gate could not read', async () => {
+        await refused(writer.insert(TABLE, { scope: { sysId: S }, initialQuery: 'name=x_t^script=gs.info(1)', fields: { active: false } }));
+        for (const initialQuery of ['name=x^ORscript=gs.info(1)', 'SCRIPT=gs.info(1)', 'active=true^active=false', 'script=^script=gs.info(1)']) {
+            await expect(writer.insert(TABLE, { scope: { sysId: S }, initialQuery, fields: { active: false } }))
+                .rejects.toMatchObject({ code: 'field_not_supported' });
+        }
+        expect(req.post).not.toHaveBeenCalled();
+    });
+
+    it('counts a filled variable whose model cannot be named as code, and refuses an unknown variable column earlier', async () => {
+        state.oddModel = true;
+        await refused(writer.update(TABLE, R, { scope: { sysId: S }, variables: { script: 'plain text' } }));
+        state.oddModel = false; state.atf = true;
+        await expect(writer.update(TABLE, R, { scope: { sysId: S }, variableField: 'nonexistent', variables: { script: 'plain text' } }))
+            .rejects.toMatchObject({ code: 'field_not_supported' });
+        expect(req.post).not.toHaveBeenCalled();
+    });
+
+    it('treats a stored active that is blank as off', async () => {
+        state.storedActive = ''; state.storedScript = 'gs.info(1);';
+        await refused(writer.update(TABLE, R, { scope: { sysId: S }, fields: { active: true } }));
+    });
+
+    it('refuses a plain script in a code-typed variable', async () => {
+        state.variableCode = [{ name: `var__m_${A}`, element: 'script' }];
+        await refused(writer.update(TABLE, R, { scope: { sysId: S }, variables: { script: 'gs.info(1);' } }));
+        expect(req.post).not.toHaveBeenCalled();
+    });
+
+    it('reads the state and the code from the record, not the view', async () => {
+        // The view shows the record active with no code; the record is inactive with code.
+        state.formActive = 'true'; state.formScript = ''; state.storedActive = 'false'; state.storedScript = 'gs.info(1);';
+        await refused(writer.update(TABLE, R, { scope: { sysId: S }, fields: { active: true } }));
+        // The record is already active: switching it on again runs nothing new, whatever the view shows.
+        state.formActive = 'false'; state.storedActive = 'true';
+        await expect(writer.update(TABLE, R, { scope: { sysId: S }, fields: { active: true } })).resolves.toBeDefined();
+    });
+
+    it('checks an ATF-style variable model on the column the write targets', async () => {
+        state.atf = true;
+        state.variableCode = [{ name: 'var__m_atf_input_variable_aa', element: 'script' }];
+        await refused(writer.update(TABLE, R, { scope: { sysId: S }, variableField: 'inputs', variables: { script: 'gs.info(1);' } }));
+        expect(state.dictionaryQuery).toContain('var__m_atf_input_variable_aa');
+        expect(state.dictionaryQuery).not.toContain('var__m_atf_output_variable_bb');
+        expect(req.post).not.toHaveBeenCalled();
+    });
+
+    it('counts a code column the view does not show as code on a live insert', async () => {
+        state.codeColumns = ['script', 'condition'];
+        state.formActive = 'true';
+        await refused(writer.insert(TABLE, { scope: { sysId: S }, fields: { name: 'x_t' } }));
+        expect(req.post).not.toHaveBeenCalled();
+    });
+
+    it('refuses switching on stored code, whatever the view shows and however active is spelled', async () => {
+        for (const active of [true, 'true', 1, '1', 'TRUE'] as any[]) {
+            await refused(writer.update(TABLE, R, { scope: { sysId: S }, view: 'no_script_here', fields: { active } }));
+        }
+        expect(req.post).not.toHaveBeenCalled();
+    });
+
+    it('refuses an insert left active with code, and one on a table without an active column', async () => {
+        // The form's default script is "old"; active left unset on a table without the column means live.
+        state.noActive = true;
+        await refused(writer.insert(TABLE, { scope: { sysId: S }, fields: { name: 'x_t' } }));
+        state.noActive = false;
+        await refused(writer.insert(TABLE, { scope: { sysId: S }, fields: { name: 'x_t', active: 'yes' } }));
+        expect(req.post).not.toHaveBeenCalled();
+    });
+
+    it('lets write alone change what is not code, clear code, insert inactive, or switch on a record without code', async () => {
+        await expect(writer.update(TABLE, R, { scope: { sysId: S }, fields: { name: 'renamed' } })).resolves.toBeDefined();
+        await expect(writer.update(TABLE, R, { scope: { sysId: S }, fields: { script: '' } })).resolves.toBeDefined();
+        await expect(writer.insert(TABLE, { scope: { sysId: S }, fields: { name: 'x_t', active: false } })).resolves.toBeDefined();
+        state.storedScript = '   ';
+        await expect(writer.update(TABLE, R, { scope: { sysId: S }, fields: { active: true } })).resolves.toBeDefined();
+        state.codeColumns = [];
+        await expect(writer.update(TABLE, R, { scope: { sysId: S }, fields: { active: true } })).resolves.toBeDefined();
+    });
+
+    it('allows code when execute is granted, and never checks a delete', async () => {
+        installPolicy([grantLayer('test-grant', ['write', 'execute'])]);
+        await expect(writer.insert(TABLE, { scope: { sysId: S }, fields: { name: 'x_t', script: 'gs.info(1);', active: true } })).resolves.toBeDefined();
+        installPolicy([denyLayer('test-deny', ['execute']), grantLayer('default', ['write', 'execute'])]);
+        state.dictionaryQuery = undefined;
+        await expect(writer.delete(TABLE, R, { scope: { sysId: S }, confirm: { table: TABLE, sysId: R } })).resolves.toBeDefined();
+        expect(state.dictionaryQuery).toBeUndefined();
     });
 });
