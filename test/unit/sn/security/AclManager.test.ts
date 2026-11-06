@@ -391,9 +391,11 @@ describe('AclManager: code on an ACL needs execute', () => {
 
     it('refuses a create with code before reading anything', async () => {
         const rows = jest.spyOn(MetadataReader.prototype, 'rows');
+        const requests = (SessionManager.getInstance().getRequest as jest.Mock).mock.calls.length;
         await refused(manager().create({ ...target, operation: 'read', table: 'incident', roles: ['itil'], script: 'answer = true;' }));
         expect(rows).not.toHaveBeenCalled();
-        rows.mockRestore();
+        expect((SessionManager.getInstance().getRequest as jest.Mock).mock.calls.length).toBe(requests);
+        await expect(manager().create({ ...target, operation: 'read', table: 'incident', active: 'false' as any })).rejects.toMatchObject({ code: 'invalid_input', detail: 'active' });
     });
 
     it('refuses a create with a script or a javascript: condition, before any write', async () => {
