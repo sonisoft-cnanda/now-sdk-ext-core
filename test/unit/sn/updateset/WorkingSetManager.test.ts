@@ -247,9 +247,28 @@ describe('WorkingSetManager', () => {
             await expect(manager.completeUpdateSet(SET, { expectedCaptures: 1 }))
                 .rejects.toMatchObject({ code: 'capture_count_mismatch', detail: { state: 'complete', expected: 1, actual: 2 } });
         });
-        it('reports a completion that did not read back', async () => {
-            req.put.mockResolvedValueOnce({ status: 403 });
-            await expect(manager.completeUpdateSet(SET, { expectedCaptures: 1 })).rejects.toBeInstanceOf(WorkingSetError);
+        it('reports a completion the platform accepted but did not apply', async () => {
+            req.put.mockResolvedValueOnce({ status: 200 });
+            await expect(manager.completeUpdateSet(SET, { expectedCaptures: 1 })).rejects.toMatchObject({ code: 'complete_not_applied', detail: { status: 200 } });
+        });
+        it('runs the write in the record\'s application: global, and global for an empty one', async () => {
+            for (const application of ['global', '']) {
+                req.put.mockClear();
+                const set = db.sys_update_set.find(row => row.sys_id === SET)!;
+                Object.assign(set, { state: 'in progress', application });
+                db.sys_update_xml[0].application = application;
+                await manager.completeUpdateSet(SET, { expectedCaptures: 1 }).catch(() => undefined);
+                expect(req.put.mock.calls[0][0].query.sysparm_transaction_scope).toBe('global');
+                expect(req.put.mock.calls[0][0].sensitive).toBe(true);
+            }
+        });
+        it('keeps a policy refusal and an error without a status as they are', async () => {
+            const refusal = policyRefusal({ allowed: false, verbs: ['write'], decidingLayer: 'test' } as any);
+            req.put.mockRejectedValueOnce(refusal);
+            await expect(manager.completeUpdateSet(SET, { expectedCaptures: 1 })).rejects.toBe(refusal);
+            const lost = new Error('socket hang up');
+            req.put.mockRejectedValueOnce(lost);
+            await expect(manager.completeUpdateSet(SET, { expectedCaptures: 1 })).rejects.toBe(lost);
         });
     });
 });

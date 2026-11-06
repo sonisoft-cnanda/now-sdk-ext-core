@@ -211,14 +211,16 @@ export class WorkingSetManager {
     private async writeInScope(path: string, application: string, json: Record<string, string>): Promise<number | undefined> {
         try {
             const response = await this._request.put<unknown>({ path: `/api/now/table/${path}`, method: 'PUT',
-                headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, sensitive: true,
                 query: { sysparm_fields: 'sys_id', sysparm_transaction_scope: application || 'global' }, body: null, json });
             return response?.status;
         } catch (error) {
-            if (isPolicyRefusal(error)) throw error;
-            // The request layer reports the status in its message ("Status: 403"), never as a field.
+            // Only an HTTP refusal is left to the read-back. The request layer reports its status in the message
+            // ("Status: 403", "failed with status 403"), never as a field. Anything else keeps its identity: a policy
+            // refusal, a lost session, a transport failure.
             const status = /status:? (\d{3})/i.exec(error instanceof Error ? error.message : '')?.[1];
-            return status ? Number(status) : undefined;
+            if (isPolicyRefusal(error) || !status) throw error;
+            return Number(status);
         }
     }
 
