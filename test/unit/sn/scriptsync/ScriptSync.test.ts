@@ -250,6 +250,10 @@ describe('ScriptSync - Unit Tests', () => {
                 expect(isPolicyRefusal(error)).toBe(true);
                 expect(mockReadFileSync).not.toHaveBeenCalled();
                 expect(mockRequestHandler.put).not.toHaveBeenCalled();
+                expect(String(error.message)).toContain('A pushed script runs on the instance');
+                // Syncing a directory is refused once, not reported as an empty directory.
+                const all = await scriptSync.syncAllScripts({ directory: '/tmp/scripts' }).catch(e => e);
+                expect(isPolicyRefusal(all)).toBe(true);
             } finally {
                 resetPolicyForTests();
             }

@@ -102,12 +102,18 @@ This API does not publish an application or promote a change. Form layouts use
 Writing code needs the `execute` verb of the installed policy as well as `write`, as a background script, a scheduled job
 or an ACL's script does. Before anything is posted, a write counts as carrying code when:
 
-- it sets a non-blank value in one of the table's code columns: dictionary types `script`, `script_plain`,
-  `script_server` and `condition_string`, across the table's lineage;
-- it sets a `javascript:` value in any field or variable;
-- it switches on a record whose code columns hold code: an insert that leaves the record active (a new business rule,
-  say), or `active` set true on an inactive one.
+- it sets a non-blank value in one of the table's code columns, directly or through `initialQuery`. Code columns are those
+  with dictionary types `script`, `script_plain`, `script_server`, `script_client`, `condition_string`, `html_script`
+  and `xml` (Jelly), across the table's lineage;
+- it sets a non-blank value in a code-typed variable, looked up by the variable's model (`var__m_<sys_id>`);
+- it sets a `javascript:` value in any field, initial-query term or variable;
+- it switches on a record whose code columns hold code. On an insert, the record is live unless it stays inactive (a
+  table with no `active` column is always live). On an update, setting `active` on (any value but `false`, `0` or blank)
+  is checked against the stored record, not the form's view.
 
-Clearing code, changing fields that are not code, inserting inactive, and deleting need only write. The request gate
-classifies the form by table and cannot tell a script from a description, so a Table API or XML write of the same record
-needs only write there; `ScriptSync.pushScript` requires write and execute for the same reason.
+Clearing code, changing fields that are not code, inserting inactive, and deleting need only write.
+
+Not covered, and still plain writes: other switches that make existing code run, such as a business rule's
+`action_insert` / `action_update` flags or its `collection`; Table API, XML and workflow (`wf_activity`) writes of the
+same records, which the request gate classifies by table only. `ScriptSync.pushScript` and `syncAllScripts` require write
+and execute; an ACL's script is checked by `AclManager`.

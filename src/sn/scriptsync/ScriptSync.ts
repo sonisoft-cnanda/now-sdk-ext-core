@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import { ServiceNowInstance } from "../ServiceNowInstance";
 import { Logger } from "../../util/Logger";
 import { checkRequirement } from "../../policy/Policy";
-import { policyRefusal } from "../../policy/PolicyRefusal";
+import { isPolicyRefusal, policyRefusal } from "../../policy/PolicyRefusal";
 import { ServiceNowRequest } from "../../comm/http/ServiceNowRequest";
 import { TableAPIRequest } from "../../comm/http/TableAPIRequest";
 import { IHttpResponse } from "../../comm/http/IHttpResponse";
@@ -120,6 +120,14 @@ export class ScriptSync {
      * Reads the file from filePath, queries the table by name to find the sys_id,
      * then updates the script field via TableAPIRequest.put().
      */
+    /** A pushed script runs on the instance: it needs execute as well as write, as any other code written to it does. */
+    private requireExecute(): void {
+        const decision = checkRequirement({ verbs: ['write', 'execute'], target: 'instance' });
+        if (decision.allowed) return;
+        this._logger.warn('Refused a script push', { verbs: decision.verbs, decidingLayer: decision.decidingLayer });
+        throw policyRefusal({ ...decision, remediation: `${decision.remediation} A pushed script runs on the instance, so it needs execute as well as write.` });
+    }
+
     public async pushScript(options: SyncScriptOptions): Promise<SyncResult> {
         const { scriptName, scriptType, filePath } = options;
         const timestamp = new Date().toISOString();
@@ -138,9 +146,7 @@ export class ScriptSync {
             };
         }
 
-        // A pushed script runs on the instance: it needs execute as well as write, as any other code written to it does.
-        const decision = checkRequirement({ verbs: ['write', 'execute'], target: 'instance' });
-        if (!decision.allowed) throw policyRefusal(decision);
+        this.requireExecute();
 
         try {
             this._logger.info(`Pushing '${scriptName}' to ${config.table}`);
@@ -205,6 +211,8 @@ export class ScriptSync {
                 timestamp
             };
         } catch (error) {
+            // A refusal is a decision, not a failed push: it keeps its identity.
+            if (isPolicyRefusal(error)) throw error;
             const err: Error = error as Error;
             this._logger.error(`Error pushing script '${scriptName}': ${err.message}`);
             return {
@@ -229,6 +237,9 @@ export class ScriptSync {
         const scriptTypes: string[] = options.scriptTypes || Object.keys(SCRIPT_TYPES);
         const timestamp = new Date().toISOString();
         const scripts: SyncResult[] = [];
+
+        // Refused once, up front, rather than once per file.
+        this.requireExecute();
 
         try {
             const files: string[] = fs.readdirSync(directory);
@@ -264,6 +275,7 @@ export class ScriptSync {
                 timestamp
             };
         } catch (error) {
+            if (isPolicyRefusal(error)) throw error;
             const err: Error = error as Error;
             this._logger.error(`Error syncing all scripts: ${err.message}`);
             return {

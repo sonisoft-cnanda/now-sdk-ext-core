@@ -1,3 +1,4 @@
+import { isPolicyRefusal } from "../../policy/PolicyRefusal";
 import * as fs from 'fs';
 import * as path from 'path';
 import { Logger } from "../../util/Logger";
@@ -67,7 +68,9 @@ export class ScriptWatcher {
                     this._logger.error(`Auto-sync failed for ${filename}: ${result.error || result.message}`);
                 }
             }).catch((error: Error) => {
-                this._logger.error(`Auto-sync error for ${filename}: ${error.message}`);
+                // A refusal is the policy working, not a sync error.
+                if (isPolicyRefusal(error)) this._logger.warn(`Auto-sync of ${filename} refused by policy: ${error.message}`);
+                else this._logger.error(`Auto-sync error for ${filename}: ${error.message}`);
             });
         });
 
