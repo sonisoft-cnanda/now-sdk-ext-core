@@ -147,11 +147,9 @@ export class WorkingSetManager {
         if (same.some(other => other.update_set === targetSet)) throw new WorkingSetError('duplicate_capture', { updateSet: targetSet });
         if (same.some(other => other.sys_id !== capture && other.sys_recorded_at >= row.sys_recorded_at)) throw new WorkingSetError('newer_capture_exists', { capture });
         const comments = [row.comments, `Moved to ${target.name}: ${options.reason.trim()}`].filter(Boolean).join('\n');
-        const response = await this._request.put<unknown>({ path: `/api/now/table/sys_update_xml/${capture}`, method: 'PUT',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, query: { sysparm_fields: 'sys_id' },
-            body: null, json: { update_set: targetSet, comments } });
+        const status = await this.writeInScope(`sys_update_xml/${capture}`, row.application, { update_set: targetSet, comments });
         const after = await this._reader.exact('sys_update_xml', capture, 'update_set,application');
-        if (after?.update_set !== targetSet) throw new WorkingSetError('move_not_applied', { capture, status: response?.status });
+        if (after?.update_set !== targetSet) throw new WorkingSetError('move_not_applied', { capture, status });
         return { capture, name: row.name, application: row.application, from: source, to: target };
     }
 
@@ -176,11 +174,9 @@ export class WorkingSetManager {
         // Another user's current set, or the set remembered for the application, both still capture into it.
         const users = await this._reader.rows('sys_user_preference', `name=sys_update_set^ORnameSTARTSWITHupdateSetForScope^value=${sysId}`, 'sys_id,user,name,value');
         if (users.some(row => row.user !== user)) throw new WorkingSetError('update_set_in_use', { updateSet: sysId });
-        await this._request.put<unknown>({ path: `/api/now/table/sys_update_set/${sysId}`, method: 'PUT',
-            headers: { 'Content-Type': 'application/json', Accept: 'application/json' }, query: { sysparm_fields: 'sys_id' },
-            body: null, json: { state: 'complete' } });
+        const status = await this.writeInScope(`sys_update_set/${sysId}`, set.application, { state: 'complete' });
         const completed = await this.getUpdateSet(sysId);
-        if (completed.state !== 'complete') throw new WorkingSetError('complete_not_applied', { updateSet: sysId, state: completed.state });
+        if (completed.state !== 'complete') throw new WorkingSetError('complete_not_applied', { updateSet: sysId, state: completed.state, status });
         // A capture that arrived between the checks and the state change is in the completed set: say so.
         const final = await this._reader.rows('sys_update_xml', `update_set=${sysId}`, 'sys_id,update_set');
         if (final.length !== rows.length || final.some(row => !rows.some(checked => checked.sys_id === row.sys_id))) {
@@ -204,6 +200,26 @@ export class WorkingSetManager {
             : await this._reader.rows('sys_scope', `scope=${ref}^active=true`, 'sys_id,scope');
         if (scopes.length !== 1) throw new WorkingSetError(scopes.length ? 'invalid_input' : 'application_not_found', ID.test(ref) ? { application: ref } : undefined);
         return scopes[0].scope === 'global' ? 'global' : scopes[0].sys_id;
+    }
+
+    /**
+     * PUT one Table API record of an application. The platform's design-time scope fence refuses a write to another
+     * application's record unless that application is the session's current one (403 "ACL Exception Update Failed due to
+     * security constraints"); sysparm_transaction_scope runs this one request in the record's application instead, so the
+     * user's current application is left alone. Returns the status; a refusal is left to the caller's read-back.
+     */
+    private async writeInScope(path: string, application: string, json: Record<string, string>): Promise<number | undefined> {
+        try {
+            const response = await this._request.put<unknown>({ path: `/api/now/table/${path}`, method: 'PUT',
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                query: { sysparm_fields: 'sys_id', sysparm_transaction_scope: application || 'global' }, body: null, json });
+            return response?.status;
+        } catch (error) {
+            if (isPolicyRefusal(error)) throw error;
+            // The request layer reports the status in its message ("Status: 403"), never as a field.
+            const status = /status:? (\d{3})/i.exec(error instanceof Error ? error.message : '')?.[1];
+            return status ? Number(status) : undefined;
+        }
     }
 
     private async persist(application: string, updateSet: string): Promise<WorkingSet> {

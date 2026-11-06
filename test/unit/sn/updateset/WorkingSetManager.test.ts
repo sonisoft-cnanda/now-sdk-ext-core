@@ -65,6 +65,11 @@ beforeEach(() => {
         put: jest.fn(async (r: any) => {
             const [, , , , table, id] = r.path.split('/');
             const row = db[table].find(item => item.sys_id === id)!;
+            // The design-time scope fence: the session's current application is not the record's, so only a request
+            // run in the record's application (sysparm_transaction_scope) may write it.
+            if (r.query?.sysparm_transaction_scope !== (row.application || 'global')) {
+                throw new Error('Error during request. Status: 403 Body: {"error":{"message":"Operation Failed"}}');
+            }
             // The platform's "Handle updates moving between sets" rule aborts a cross-scope move.
             const target = table === 'sys_update_xml' && db.sys_update_set.find(set => set.sys_id === r.json.update_set);
             if (!target || target.application === row.application) Object.assign(row, r.json);
@@ -197,6 +202,11 @@ describe('WorkingSetManager', () => {
             req.put.mockResolvedValueOnce({ status: 200 });
             await expect(move()).rejects.toMatchObject({ code: 'move_not_applied' });
         });
+        it('reports a move the scope fence refused with its status, not as a request error', async () => {
+            req.put.mockRejectedValueOnce(new Error('Error during request. Status: 403 Body: {}'));
+            await expect(move()).rejects.toMatchObject({ code: 'move_not_applied', detail: { capture: XML, status: 403 } });
+            expect(db.sys_update_xml[0].update_set).toBe(DEFAULT);
+        });
         it('refuses a reason that could carry markup', async () => {
             await expect(manager.moveCapture({ capture: XML, sourceSet: DEFAULT, targetSet: NEW, reason: '<b>x</b>' })).rejects.toMatchObject({ code: 'invalid_input' });
         });
@@ -208,6 +218,10 @@ describe('WorkingSetManager', () => {
         });
         it('completes a clean set and reads the state back', async () => {
             await expect(manager.completeUpdateSet(SET, { expectedCaptures: 1 })).resolves.toMatchObject({ sysId: SET, state: 'complete' });
+        });
+        it('reports a completion the scope fence refused with its status', async () => {
+            req.put.mockRejectedValueOnce(new Error('Error during request. Status: 403 Body: {}'));
+            await expect(manager.completeUpdateSet(SET, { expectedCaptures: 1 })).rejects.toMatchObject({ code: 'complete_not_applied', detail: { status: 403 } });
         });
         it.each([
             ['capture_count_mismatch', () => undefined, 2],
